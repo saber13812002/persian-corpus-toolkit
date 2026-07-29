@@ -1,0 +1,126 @@
+<!DOCTYPE html>
+<html dir="rtl">
+<head>
+  <meta charset="utf-8">
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { width: 400px; font-family: 'Segoe UI', Tahoma, sans-serif; font-size: 13px; background: #1a1a2e; color: #e0e0e0; }
+    .header { background: linear-gradient(135deg, #16213e, #0f3460); padding: 14px; text-align: center; }
+    .header h1 { font-size: 16px; color: #e94560; margin-bottom: 2px; }
+    .header span { font-size: 11px; color: #a0a0b0; }
+    .content { padding: 12px; }
+    
+    /* Site selector */
+    .site-selector { display: flex; gap: 6px; margin-bottom: 12px; }
+    .site-btn {
+      flex: 1; padding: 8px; border: 2px solid #0f3460; border-radius: 8px;
+      background: #16213e; color: #a0a0b0; cursor: pointer; font-family: inherit;
+      font-size: 12px; text-align: center; transition: all 0.2s;
+    }
+    .site-btn.active { border-color: #e94560; color: #e94560; background: #1a0a1a; }
+    .site-btn .icon { font-size: 18px; display: block; margin-bottom: 2px; }
+    
+    /* Section */
+    .section { margin-bottom: 12px; }
+    .section-title { font-size: 11px; color: #64748b; margin-bottom: 6px; text-transform: uppercase; letter-spacing: 1px; }
+    
+    /* Buttons */
+    .btn-row { display: flex; gap: 6px; margin-bottom: 6px; }
+    button { 
+      flex: 1; padding: 9px 6px; border: none; border-radius: 6px; cursor: pointer; 
+      font-family: inherit; font-size: 11px; font-weight: 600; transition: all 0.15s;
+    }
+    button:hover { transform: translateY(-1px); opacity: 0.9; }
+    button:disabled { opacity: 0.4; cursor: not-allowed; transform: none; }
+    .btn-primary { background: #e94560; color: white; }
+    .btn-secondary { background: #0f3460; color: #e0e0e0; border: 1px solid #16213e; }
+    .btn-green { background: #2ecc71; color: white; }
+    .btn-orange { background: #e67e22; color: white; }
+    .btn-stop { background: #c0392b; color: white; }
+    .btn-teal { background: #1abc9c; color: white; }
+    
+    /* Stats */
+    .stats { background: #16213e; border-radius: 8px; padding: 10px; margin-bottom: 10px; }
+    .stat-row { display: flex; justify-content: space-between; padding: 3px 0; font-size: 11px; border-bottom: 1px solid #0f3460; }
+    .stat-row:last-child { border-bottom: none; }
+    .stat-val { color: #e94560; font-weight: 600; }
+    .stat-dim { font-size: 10px; color: #64748b; margin-top: 4px; }
+    
+    /* Log */
+    .log { background: #0d1117; border-radius: 6px; padding: 8px; max-height: 120px; overflow-y: auto; font-size: 10px; font-family: 'Consolas', monospace; }
+    .log .entry { margin: 2px 0; }
+    .log .ok { color: #2ecc71; }
+    .log .err { color: #e74c3c; }
+    .log .info { color: #3498db; }
+    
+    /* Status */
+    .status-bar { display: flex; align-items: center; gap: 8px; padding: 6px 12px; background: #0f3460; font-size: 11px; }
+    .dot { width: 10px; height: 10px; border-radius: 50%; flex-shrink: 0; }
+    .dot.idle { background: #7f8c8d; }
+    .dot.running { background: #2ecc71; animation: pulse 1s infinite; }
+    @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.3; } }
+  </style>
+</head>
+<body>
+  <div class="header">
+    <h1>📚 Persian Corpus Crawler</h1>
+    <span>thesaurus + khamenei.ir</span>
+  </div>
+
+  <div class="status-bar">
+    <div class="dot" id="statusDot"></div>
+    <span id="statusText">آماده</span>
+    <span style="margin-right:auto;font-size:10px;color:#64748b" id="siteTag"></span>
+  </div>
+
+  <div class="content">
+    <!-- Site Selector -->
+    <div class="site-selector">
+      <button class="site-btn active" id="siteThesaurus" onclick="selectSite('thesaurus')">
+        <span class="icon">📖</span>اصطلاح‌نامه
+      </button>
+      <button class="site-btn" id="siteKhamenei" onclick="selectSite('khamenei')">
+        <span class="icon">🎤</span>بیانات
+      </button>
+    </div>
+
+    <!-- Preparation -->
+    <div class="section">
+      <div class="section-title">آماده‌سازی</div>
+      <div class="btn-row">
+        <button class="btn-orange" id="btnSeed" onclick="seed()">🌱 Seed Queue</button>
+        <button class="btn-secondary" id="btnReset" onclick="reset()">🔄 Reset</button>
+      </div>
+    </div>
+
+    <!-- Crawl Actions -->
+    <div class="section">
+      <div class="section-title">کراول</div>
+      <div class="btn-row">
+        <button class="btn-green" id="btnSingle" onclick="startSingle()">📄 این صفحه</button>
+      </div>
+      <div class="btn-row">
+        <button class="btn-primary" id="btnFull" onclick="startFull()">🚀 کراول کامل</button>
+        <button class="btn-stop" id="btnStop" disabled onclick="stop()">⏹ توقف</button>
+      </div>
+      <div class="btn-row" id="btnDashboardRow">
+        <button class="btn-teal" onclick="openDashboard()">📊 داشبورد</button>
+      </div>
+    </div>
+
+    <!-- Stats -->
+    <div class="stats">
+      <div class="stat-row"><span>📖 اصطلاحات:</span><span class="stat-val" id="statThesaurus">-</span></div>
+      <div class="stat-row"><span>🎤 بیانات:</span><span class="stat-val" id="statKhamenei">-</span></div>
+      <div class="stat-row"><span>⏳ در صف:</span><span class="stat-val" id="statQueue">-</span></div>
+    </div>
+
+    <!-- Log -->
+    <div class="log" id="logBox">
+      <div class="entry info">🟢 آماده به کار</div>
+    </div>
+  </div>
+
+  <script src="popup.js"></script>
+</body>
+</html>

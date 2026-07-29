@@ -1,0 +1,420 @@
+<!DOCTYPE html>
+<html lang="fa" dir="rtl">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>📊 داشبورد مدیریت پیکره‌ساز</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  :root {
+    --bg: #0f172a; --card: #1e293b; --border: #334155;
+    --text: #e2e8f0; --dim: #94a3b8; --accent: #38bdf8;
+    --green: #4ade80; --red: #f87171; --orange: #fb923c;
+  }
+  body { background: var(--bg); color: var(--text); font: 14px/1.6 'Segoe UI', Tahoma, sans-serif; }
+  h1 { font-size: 20px; }
+  h2 { font-size: 16px; margin-bottom: 12px; color: var(--accent); }
+  .layout { display: flex; min-height: 100vh; }
+  .sidebar {
+    width: 220px; background: #0b1120; padding: 20px 0;
+    border-left: 1px solid var(--border); position: sticky; top: 0; height: 100vh;
+  }
+  .sidebar .logo { padding: 0 20px 20px; border-bottom: 1px solid var(--border); margin-bottom: 10px; }
+  .sidebar .logo h3 { color: var(--accent); font-size: 15px; }
+  .sidebar .logo span { color: var(--dim); font-size: 11px; }
+  .nav-item {
+    display: block; padding: 10px 20px; color: var(--dim); text-decoration: none;
+    font-size: 13px; cursor: pointer; border: none; background: none; width: 100%; text-align: right;
+    transition: all 0.2s;
+  }
+  .nav-item:hover, .nav-item.active { color: var(--text); background: #1e293b; }
+  .nav-item .icon { margin-left: 8px; }
+  .main { flex: 1; padding: 24px; overflow-y: auto; }
+  
+  /* Stats grid */
+  .stats-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 16px; margin-bottom: 24px; }
+  .stat-card {
+    background: var(--card); border-radius: 10px; padding: 16px; border: 1px solid var(--border);
+  }
+  .stat-card .label { color: var(--dim); font-size: 12px; margin-bottom: 6px; }
+  .stat-card .value { font-size: 28px; font-weight: 700; }
+  .stat-card .value.green { color: var(--green); }
+  .stat-card .value.blue { color: var(--accent); }
+  .stat-card .value.orange { color: var(--orange); }
+  .stat-card .value.red { color: var(--red); }
+  
+  /* Cards */
+  .card {
+    background: var(--card); border-radius: 10px; padding: 20px;
+    border: 1px solid var(--border); margin-bottom: 20px;
+  }
+  
+  /* Site tabs */
+  .site-tabs { display: flex; gap: 8px; margin-bottom: 16px; }
+  .site-tab {
+    padding: 8px 16px; border-radius: 8px; border: 1px solid var(--border);
+    background: transparent; color: var(--dim); cursor: pointer; font-family: inherit; font-size: 13px;
+  }
+  .site-tab.active { background: var(--accent); color: #0f172a; border-color: var(--accent); font-weight: 600; }
+  
+  /* Tables */
+  table { width: 100%; border-collapse: collapse; font-size: 12px; }
+  thead { background: #0b1120; }
+  th { padding: 10px 12px; text-align: right; color: var(--dim); font-weight: 600; border-bottom: 1px solid var(--border); }
+  td { padding: 8px 12px; border-bottom: 1px solid #1e293b; }
+  tr:hover td { background: #1e293b; }
+  
+  /* Progress bar */
+  .progress-bar { height: 8px; background: #0b1120; border-radius: 4px; overflow: hidden; margin: 4px 0; }
+  .progress-fill { height: 100%; border-radius: 4px; transition: width 0.5s; }
+  .progress-fill.green { background: var(--green); }
+  .progress-fill.blue { background: var(--accent); }
+  
+  /* Badge */
+  .badge {
+    padding: 2px 8px; border-radius: 12px; font-size: 11px; font-weight: 600;
+  }
+  .badge.ok { background: #064e3b; color: var(--green); }
+  .badge.warn { background: #78350f; color: var(--orange); }
+  .badge.err { background: #450a0a; color: var(--red); }
+  
+  .empty { text-align: center; padding: 40px; color: var(--dim); }
+  .refresh { font-size: 11px; color: var(--dim); margin-top: 8px; }
+  
+  /* Charts (simple CSS) */
+  .bar-chart { display: flex; align-items: end; gap: 8px; height: 120px; padding: 8px 0; }
+  .bar-wrapper { flex: 1; display: flex; flex-direction: column; align-items: center; gap: 4px; }
+  .bar { width: 100%; max-width: 60px; border-radius: 4px 4px 0 0; min-height: 4px; transition: height 0.5s; }
+  .bar-label { font-size: 10px; color: var(--dim); text-align: center; }
+  .bar-val { font-size: 10px; color: var(--text); }
+  
+  #loading { display: none; text-align: center; padding: 20px; color: var(--dim); }
+  
+  @media (max-width: 768px) {
+    .layout { flex-direction: column; }
+    .sidebar { width: 100%; height: auto; position: static; display: flex; flex-wrap: wrap; padding: 10px; }
+    .sidebar .logo { flex: 1; border: none; padding: 10px; margin: 0; }
+    .nav-item { width: auto; }
+  }
+</style>
+</head>
+<body>
+<div class="layout">
+  <div class="sidebar">
+    <div class="logo">
+      <h3>📚 پیکره‌ساز</h3>
+      <span>Persian Corpus Toolkit</span>
+    </div>
+    <button class="nav-item active" onclick="switchTab('overview')">🏠 نمای کلی</button>
+    <button class="nav-item" onclick="switchTab('thesaurus')">📖 اصطلاح‌نامه</button>
+    <button class="nav-item" onclick="switchTab('khamenei')">🎤 بیانات</button>
+    <button class="nav-item" onclick="switchTab('corpus')">📦 پیکره‌ها</button>
+    <button class="nav-item" onclick="switchTab('queue')">⏳ صف کراول</button>
+    <button class="nav-item" onclick="switchTab('db')">🗄️ دیتابیس</button>
+  </div>
+  
+  <div class="main" id="main">
+    <div id="loading">⏳ در حال بارگذاری...</div>
+    
+    <!-- OVERVIEW TAB -->
+    <div id="tab-overview" class="tab-content">
+      <h1>📊 نمای کلی</h1>
+      <div class="refresh" id="lastRefresh"></div>
+      
+      <div class="stats-grid" id="overviewStats"></div>
+      
+      <div class="card">
+        <h2>📈 حجم داده‌ها بر اساس سایت</h2>
+        <div class="bar-chart" id="siteChart"></div>
+      </div>
+      
+      <div class="card">
+        <h2>⏳ وضعیت صف کراول</h2>
+        <div class="stats-grid" id="queueStats"></div>
+      </div>
+      
+      <div class="card">
+        <h2>🔄 آخرین فعالیت‌ها</h2>
+        <div id="recentActivity" style="font-size:12px; color: var(--dim);">بارگذاری...</div>
+      </div>
+    </div>
+    
+    <!-- THESAURUS TAB -->
+    <div id="tab-thesaurus" class="tab-content" style="display:none">
+      <h1>📖 اصطلاح‌نامه علوم عقلی</h1>
+      <div class="stats-grid" id="thesaurusStats"></div>
+      
+      <div class="card">
+        <h2>🗂️ توزیع بر اساس شاخه علمی</h2>
+        <div class="bar-chart" id="scienceChart"></div>
+      </div>
+      
+      <div class="card">
+        <h2>📋 آخرین آیتم‌های کراول‌شده</h2>
+        <table><thead><tr><th>#</th><th>نوع</th><th>عنوان</th><th>شاخه</th><th>تاریخ</th></tr></thead>
+        <tbody id="thesaurusTable"></tbody></table>
+      </div>
+    </div>
+    
+    <!-- KHAMENEI TAB -->
+    <div id="tab-khamenei" class="tab-content" style="display:none">
+      <h1>🎤 بیانات khamenei.ir</h1>
+      <div class="stats-grid" id="khameneiStats"></div>
+      
+      <div class="card">
+        <h2>📅 توزیع بر اساس سال</h2>
+        <div class="bar-chart" id="yearChart"></div>
+      </div>
+      
+      <div class="card">
+        <h2>📋 آخرین بیانات</h2>
+        <table><thead><tr><th>شناسه</th><th>عنوان</th><th>تاریخ</th><th>حجم (کاراکتر)</th></tr></thead>
+        <tbody id="khameneiTable"></tbody></table>
+      </div>
+    </div>
+    
+    <!-- CORPUS TAB -->
+    <div id="tab-corpus" class="tab-content" style="display:none">
+      <h1>📦 پیکره‌های ساخته‌شده</h1>
+      <div id="corpusContent" class="card">
+        <div class="empty">پیکره‌ها بعد از اجرای pipeline ساخته می‌شوند</div>
+      </div>
+    </div>
+    
+    <!-- QUEUE TAB -->
+    <div id="tab-queue" class="tab-content" style="display:none">
+      <h1>⏳ صف کراول</h1>
+      <div class="site-tabs">
+        <button class="site-tab active" onclick="filterQueue('all')">همه</button>
+        <button class="site-tab" onclick="filterQueue('pending')">در انتظار</button>
+        <button class="site-tab" onclick="filterQueue('crawling')">در حال کراول</button>
+        <button class="site-tab" onclick="filterQueue('done')">انجام شده</button>
+      </div>
+      <div class="card">
+        <table><thead><tr><th>#</th><th>سایت</th><th>آدرس</th><th>نوع</th><th>وضعیت</th><th>اولویت</th><th>تاریخ ایجاد</th></tr></thead>
+        <tbody id="queueTable"></tbody></table>
+      </div>
+    </div>
+    
+    <!-- DB TAB -->
+    <div id="tab-db" class="tab-content" style="display:none">
+      <h1>🗄️ دیتابیس</h1>
+      <div class="card">
+        <h2>📊 جداول</h2>
+        <div id="dbTables"></div>
+      </div>
+      <div class="card">
+        <h2>💾 بک‌آپ</h2>
+        <p style="font-size:13px; color:var(--dim)">
+          مسیر: <code>backend/thesaurus.db</code><br>
+          دستور بک‌آپ: <code>cp backend/thesaurus.db backups/thesaurus_$(date +%Y%m%d).db</code>
+        </p>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+const API = 'http://127.0.0.1:5000';
+let currentTab = 'overview';
+let queueFilter = 'all';
+
+async function fetchAPI(path) {
+  try {
+    const r = await fetch(`${API}${path}`);
+    if (!r.ok) throw new Error(`${r.status}`);
+    return await r.json();
+  } catch (e) {
+    console.error(`API error: ${path}`, e);
+    return null;
+  }
+}
+
+function switchTab(tab) {
+  document.querySelectorAll('.tab-content').forEach(t => t.style.display = 'none');
+  document.querySelectorAll('.nav-item').forEach(n => n.classList.remove('active'));
+  document.getElementById(`tab-${tab}`).style.display = 'block';
+  document.querySelector(`.nav-item[onclick="switchTab('${tab}')"]`)?.classList.add('active');
+  currentTab = tab;
+  loadTab(tab);
+}
+
+async function loadTab(tab) {
+  document.getElementById('loading').style.display = 'block';
+  switch(tab) {
+    case 'overview': await loadOverview(); break;
+    case 'thesaurus': await loadThesaurus(); break;
+    case 'khamenei': await loadKhamenei(); break;
+    case 'corpus': await loadCorpus(); break;
+    case 'queue': await loadQueue(); break;
+    case 'db': await loadDB(); break;
+  }
+  document.getElementById('loading').style.display = 'none';
+  document.getElementById('lastRefresh').textContent = `🕐 آخرین بروزرسانی: ${new Date().toLocaleTimeString('fa-IR')}`;
+}
+
+// ─── OVERVIEW ───
+async function loadOverview() {
+  const stats = await fetchAPI('/api/stats');
+  if (!stats) return;
+  
+  document.getElementById('overviewStats').innerHTML = `
+    <div class="stat-card"><div class="label">کل آیتم‌های کراول‌شده</div><div class="value blue">${stats.crawled_total.toLocaleString('fa-IR')}</div></div>
+    <div class="stat-card"><div class="label">در صف</div><div class="value orange">${stats.queue_pending.toLocaleString('fa-IR')}</div></div>
+    <div class="stat-card"><div class="label">انجام شده</div><div class="value green">${stats.queue_done.toLocaleString('fa-IR')}</div></div>
+    <div class="stat-card"><div class="label">نوع‌های محتوا</div><div class="value">${Object.keys(stats.by_type || {}).length}</div></div>
+  `;
+  
+  // Site chart
+  const types = stats.by_type || {};
+  const maxVal = Math.max(...Object.values(types), 1);
+  document.getElementById('siteChart').innerHTML = Object.entries(types).map(([k,v]) => `
+    <div class="bar-wrapper">
+      <div class="bar-val">${v}</div>
+      <div class="bar" style="height:${(v/maxVal*100)}%; background: var(--accent)"></div>
+      <div class="bar-label">${k}</div>
+    </div>
+  `).join('');
+  
+  document.getElementById('queueStats').innerHTML = `
+    <div class="stat-card"><div class="label">در حال کراول</div><div class="value orange">${stats.queue_crawling}</div></div>
+    <div class="stat-card"><div class="label">در صف</div><div class="value blue">${stats.queue_pending}</div></div>
+    <div class="stat-card"><div class="label">انجام شده</div><div class="value green">${stats.queue_done}</div></div>
+    <div class="stat-card"><div class="label">کل صف</div><div class="value">${stats.queue_total}</div></div>
+  `;
+  
+  document.getElementById('recentActivity').innerHTML = `✅ سرور فعال است | ${stats.crawled_total} آیتم ذخیره شده | ${stats.queue_pending} کار در صف`;
+}
+
+// ─── THESAURUS ───
+async function loadThesaurus() {
+  const stats = await fetchAPI('/api/stats');
+  const terms = await fetchAPI('/api/thesaurus/recent?limit=20');
+  
+  document.getElementById('thesaurusStats').innerHTML = `
+    <div class="stat-card"><div class="label">کل اصطلاحات</div><div class="value blue">${(stats.by_type?.term || 0).toLocaleString('fa-IR')}</div></div>
+    <div class="stat-card"><div class="label">کلیدواژه‌ها</div><div class="value orange">${(stats.by_type?.keyword || 0).toLocaleString('fa-IR')}</div></div>
+    <div class="stat-card"><div class="label">نمایه‌ها</div><div class="value">${(stats.by_type?.index || 0).toLocaleString('fa-IR')}</div></div>
+  `;
+  
+  // Science distribution chart (placeholder - needs real data)
+  document.getElementById('scienceChart').innerHTML = '<div class="empty">برای مشاهده توزیع دقیق، نیاز به endpoint اختصاصی است</div>';
+  
+  // Recent items table
+  let tableHtml = '';
+  if (terms && terms.length > 0) {
+    terms.forEach((t, i) => {
+      tableHtml += `<tr>
+        <td>${i+1}</td>
+        <td>${t.item_type || '-'}</td>
+        <td>${(t.title || '').substring(0, 50)}</td>
+        <td>${(t.science_field || '-').substring(0, 30)}</td>
+        <td>${(t.crawled_at || '-').substring(0, 10)}</td>
+      </tr>`;
+    });
+  }
+  document.getElementById('thesaurusTable').innerHTML = tableHtml || '<tr><td colspan="5" class="empty">داده‌ای یافت نشد</td></tr>';
+}
+
+// ─── KHAMENEI ───
+async function loadKhamenei() {
+  const stats = await fetchAPI('/api/khamenei/stats');
+  const recent = await fetchAPI('/api/khamenei/recent?limit=20');
+  
+  if (stats) {
+    document.getElementById('khameneiStats').innerHTML = `
+      <div class="stat-card"><div class="label">کل بیانات</div><div class="value blue">${(stats.total || 0).toLocaleString('fa-IR')}</div></div>
+      <div class="stat-card"><div class="label">کل کاراکتر</div><div class="value green">${(stats.total_chars || 0).toLocaleString('fa-IR')}</div></div>
+      <div class="stat-card"><div class="label">صفحات منحصربفرد</div><div class="value orange">${(stats.pages || 0).toLocaleString('fa-IR')}</div></div>
+    `;
+  }
+  
+  let tableHtml = '';
+  if (recent && recent.length > 0) {
+    recent.forEach(s => {
+      tableHtml += `<tr>
+        <td>#${s.speech_id}</td>
+        <td>${(s.title || '').substring(0, 60)}</td>
+        <td>${s.speech_date || '-'}</td>
+        <td>${(s.char_count || 0).toLocaleString('fa-IR')}</td>
+      </tr>`;
+    });
+  }
+  document.getElementById('khameneiTable').innerHTML = tableHtml || '<tr><td colspan="4" class="empty">هنوز بیانی کراول نشده</td></tr>';
+}
+
+// ─── CORPUS ───
+async function loadCorpus() {
+  const corpus = await fetchAPI('/api/corpus/list');
+  if (corpus && corpus.files) {
+    let html = '<table><thead><tr><th>فایل</th><th>حجم</th><th>آیتم</th><th>توضیح</th></tr></thead><tbody>';
+    corpus.files.forEach(f => {
+      html += `<tr>
+        <td>📄 ${f.name}</td>
+        <td>${f.size || '-'}</td>
+        <td>${f.entries || '-'}</td>
+        <td>${f.description || '-'}</td>
+      </tr>`;
+    });
+    html += '</tbody></table>';
+    document.getElementById('corpusContent').innerHTML = html;
+  } else {
+    document.getElementById('corpusContent').innerHTML = `
+      <div class="empty">
+        <p>هنوز پیکره‌ای ساخته نشده</p>
+        <p style="margin-top:12px; font-size:12px">با دستور زیر پیکره بسازید:</p>
+        <code style="display:block;margin-top:8px;padding:8px;background:#0b1120;border-radius:6px;">cd corpus && python pipeline.py</code>
+      </div>
+    `;
+  }
+}
+
+// ─── QUEUE ───
+function filterQueue(f) { queueFilter = f; loadQueue(); }
+async function loadQueue() {
+  const jobs = await fetchAPI(`/api/queue?filter=${queueFilter}&limit=50`);
+  const stats = await fetchAPI('/api/stats');
+  
+  // Progress bar
+  const pct = stats.queue_total > 0 ? Math.round(stats.queue_done / stats.queue_total * 100) : 0;
+  
+  let tableHtml = '';
+  if (jobs && jobs.length > 0) {
+    jobs.forEach(j => {
+      const statusBadge = j.status === 'done' ? '<span class="badge ok">انجام شد</span>' :
+                         j.status === 'crawling' ? '<span class="badge warn">در حال کراول</span>' :
+                         '<span class="badge err">در انتظار</span>';
+      const siteName = j.url?.includes('thesaurus') ? 'اصطلاح‌نامه' : j.url?.includes('khamenei') ? 'بیانات' : 'سایر';
+      tableHtml += `<tr>
+        <td>${j.id}</td>
+        <td>${siteName}</td>
+        <td title="${j.url}">${(j.url || '').substring(0, 60)}</td>
+        <td>${j.page_type || '-'}</td>
+        <td>${statusBadge}</td>
+        <td>${j.priority || 0}</td>
+        <td>${(j.created_at || '').substring(0, 10)}</td>
+      </tr>`;
+    });
+  }
+  document.getElementById('queueTable').innerHTML = tableHtml || '<tr><td colspan="7" class="empty">صف خالی است</td></tr>';
+}
+
+// ─── DB ───
+async function loadDB() {
+  const info = await fetchAPI('/api/db/info');
+  if (info) {
+    let html = '<table><thead><tr><th>جدول</th><th>تعداد رکورد</th><th>اندازه</th><th>توضیح</th></tr></thead><tbody>';
+    (info.tables || []).forEach(t => {
+      html += `<tr><td>${t.name}</td><td>${t.rows?.toLocaleString('fa-IR') || 0}</td><td>${t.size || '-'}</td><td>${t.description || '-'}</td></tr>`;
+    });
+    html += '</tbody></table>';
+    document.getElementById('dbTables').innerHTML = html;
+  }
+}
+
+// Init
+loadTab('overview');
+setInterval(() => loadTab(currentTab), 10000);
+</script>
+</body>
+</html>
