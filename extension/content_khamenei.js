@@ -1,7 +1,7 @@
 // Content Script for farsi.khamenei.ir
 // Priority: main speech text (div.Content) + page URL + links/metadata
 
-const BACKEND = 'http://127.0.0.1:5000';
+const BACKEND = 'http://127.0.0.1:5055';
 let lastUrl = '';
 let extracting = false;
 

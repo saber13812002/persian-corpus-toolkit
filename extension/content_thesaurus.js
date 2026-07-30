@@ -2,7 +2,7 @@
 // Phase 1: list pages (100/page) → /api/phase1/seed-batch (dedupe)
  // Phase 2: promote payloads → /api/phase2/complete-batch (full DB save)
 
-const BACKEND = (window.PCT && PCT.BACKEND) || 'http://127.0.0.1:5000';
+const BACKEND = (window.PCT && PCT.BACKEND) || 'http://127.0.0.1:5055';
 const ELASTIC = (window.PCT && PCT.ELASTIC_URL) || 'https://thesaurus.eiis.iki.ac.ir/fa/api/elastic/search';
 const BASE = (window.PCT && PCT.THESAURUS_BASE) || 'https://thesaurus.eiis.iki.ac.ir';
 const PAGE_SIZE = (window.PCT && PCT.PAGE_SIZE) || 100;

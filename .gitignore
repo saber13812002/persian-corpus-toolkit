@@ -22,3 +22,7 @@ build/
 # OS
 Thumbs.db
 .DS_Store
+
+backend/.venv/
+backend/thesaurus.db
+*.db

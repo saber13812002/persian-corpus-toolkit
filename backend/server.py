@@ -5,13 +5,24 @@ Flask API + SQLite - Crawl queue manager & data store
 
 import sqlite3, json, hashlib, time, os, re
 from datetime import datetime, timezone
-from flask import Flask, request, jsonify, g
+from flask import Flask, request, jsonify, g, send_from_directory, redirect
 from flask_cors import CORS
 
 app = Flask(__name__, static_folder='../dashboard', static_url_path='/dashboard')
 CORS(app)
 
 DB_PATH = os.path.join(os.path.dirname(__file__), 'thesaurus.db')
+
+
+@app.route('/')
+def root():
+    return redirect('/dashboard/')
+
+
+@app.route('/dashboard')
+@app.route('/dashboard/')
+def dashboard_index():
+    return send_from_directory(app.static_folder, 'index.html')
 
 
 # ═══════════════════════════════════════
@@ -1408,6 +1419,6 @@ if __name__ == '__main__':
     db.commit()
     db.close()
     print(f"🚀 Persian Corpus Toolkit Backend")
-    print(f"   API:    http://127.0.0.1:5000")
-    print(f"   Dashboard: http://127.0.0.1:5000/dashboard")
-    app.run(host='127.0.0.1', port=5000, debug=False, use_reloader=False)
+    print(f"   API:    http://127.0.0.1:5055")
+    print(f"   Dashboard: http://127.0.0.1:5055/dashboard")
+    app.run(host='0.0.0.0', port=5055, debug=False, use_reloader=False)

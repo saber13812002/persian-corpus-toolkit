@@ -28,7 +28,7 @@ function bindEvents() {
   document.getElementById('btnStop').addEventListener('click', stop);
   document.getElementById('btnReset').addEventListener('click', reset);
   document.getElementById('btnDashboard').addEventListener('click', () => {
-    chrome.tabs.create({ url: 'http://127.0.0.1:5000/dashboard' });
+    chrome.tabs.create({ url: 'http://127.0.0.1:5055/dashboard' });
   });
 }
 

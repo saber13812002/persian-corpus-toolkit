@@ -106,7 +106,7 @@ def discover_ids(year=None, max_pages=50):
     return sorted(all_ids, key=int, reverse=True)
 
 
-def submit_to_backend(speech, backend_url="http://127.0.0.1:5000"):
+def submit_to_backend(speech, backend_url="http://127.0.0.1:5055"):
     """Submit extracted speech to the Flask backend."""
     try:
         r = requests.post(f"{backend_url}/api/khamenei/submit", json=speech, timeout=30)
@@ -115,7 +115,7 @@ def submit_to_backend(speech, backend_url="http://127.0.0.1:5000"):
         return {"error": str(e)}
 
 
-def scrape_all(years=None, start_from=None, max_per_run=100, delay=2, backend="http://127.0.0.1:5000"):
+def scrape_all(years=None, start_from=None, max_per_run=100, delay=2, backend="http://127.0.0.1:5055"):
     """
     Main scraping orchestrator.
     - Discover IDs from list pages
@@ -193,7 +193,7 @@ if __name__ == "__main__":
     parser.add_argument("--year", type=int, help="Filter by year (e.g. 1404)")
     parser.add_argument("--max", type=int, default=100, help="Max speeches to scrape (default: 100)")
     parser.add_argument("--delay", type=float, default=2.0, help="Delay between requests in seconds")
-    parser.add_argument("--backend", default="http://127.0.0.1:5000", help="Backend URL")
+    parser.add_argument("--backend", default="http://127.0.0.1:5055", help="Backend URL")
     args = parser.parse_args()
     
     if args.discover:
