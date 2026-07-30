@@ -42,6 +42,29 @@ function textOf(el) {
   return (el.innerText || el.textContent || '').replace(/\s+/g, ' ').trim();
 }
 
+/** Convert Persian/Arabic-Indic digits → ASCII so ۱۴۰۴/۰۱/۰۱ → 1404/01/01 */
+function toAsciiDigits(s) {
+  const map = {
+    '۰': '0', '۱': '1', '۲': '2', '۳': '3', '۴': '4',
+    '۵': '5', '۶': '6', '۷': '7', '۸': '8', '۹': '9',
+    '٠': '0', '١': '1', '٢': '2', '٣': '3', '٤': '4',
+    '٥': '5', '٦': '6', '٧': '7', '٨': '8', '٩': '9',
+  };
+  return String(s || '').replace(/[۰-۹٠-٩]/g, (d) => map[d] || d);
+}
+
+/** Prefer span.oliveDate (Jalali), then meta block */
+function extractJalaliDate(metaText) {
+  const olive = document.querySelector('span.oliveDate, .oliveDate');
+  if (olive) {
+    const m = toAsciiDigits(textOf(olive)).match(/(\d{4}\/\d{2}\/\d{2})/);
+    if (m) return m[1];
+  }
+  const raw = toAsciiDigits(metaText || document.body.innerText || '');
+  const m2 = raw.match(/(\d{4}\/\d{2}\/\d{2})/);
+  return m2 ? m2[1] : '';
+}
+
 async function discoverIds() {
   console.log('[Khamenei] Discovering speech IDs...');
   const ids = new Set();
@@ -176,10 +199,8 @@ function extractSpeechDetail() {
     xpathFirst('//*[@id="newsContentInnerSide"]/div[2]/div[1]/div') ||
     xpathFirst('//*[@id="newsContentInnerSide"]//div[contains(@class,"")][1]');
   const metaText = textOf(metaNode);
-
-  let date = '';
-  const dateMatch = (metaText || document.body.innerText || '').match(/(\d{4}\/\d{2}\/\d{2})/);
-  if (dateMatch) date = dateMatch[1];
+  const date = extractJalaliDate(metaText);
+  const year = date ? date.slice(0, 4) : '';
 
   // Priority: class="Content" main body
   let content = '';
@@ -196,8 +217,13 @@ function extractSpeechDetail() {
     if (newsDiv) content = textOf(newsDiv);
   }
 
-  if (date && content.startsWith(date)) {
-    content = content.substring(date.length).trim();
+  // Strip leading date (ASCII or Persian digits) from content body
+  if (date) {
+    const asciiContent = toAsciiDigits(content);
+    if (asciiContent.startsWith(date)) {
+      // remove same length prefix from original (digits are 1:1)
+      content = content.substring(date.length).trim();
+    }
   }
 
   let audioUrl = '';
@@ -244,6 +270,7 @@ function extractSpeechDetail() {
     url: pageUrl,
     title,
     date,
+    year,
     content,
     meta_text: metaText,
     audio_url: audioUrl,

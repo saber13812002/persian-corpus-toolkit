@@ -35,10 +35,25 @@ def extract_speech(speech_id):
     title = re.sub(r'\s*[-–|]\s*KHAMENEI\.IR.*$', '', title, flags=re.I).strip()
     title = re.sub(r'\s*[-–|]\s*پایگاه.*$', '', title).strip()
     
-    # Date
-    date_match = re.search(r'(\d{4}/\d{2}/\d{2})', text)
-    date = date_match.group(1) if date_match else ""
-    
+    def to_ascii_digits(s):
+        table = str.maketrans("۰۱۲۳۴۵۶۷۸۹٠١٢٣٤٥٦٧٨٩", "01234567890123456789")
+        return (s or "").translate(table)
+
+    # Date: prefer span.oliveDate (Jalali Persian digits)
+    date = ""
+    olive = re.search(
+        r'<span[^>]*class="[^"]*oliveDate[^"]*"[^>]*>([^<]+)</span>',
+        text, re.I,
+    )
+    if olive:
+        m = re.search(r'(\d{4}/\d{2}/\d{2})', to_ascii_digits(olive.group(1)))
+        if m:
+            date = m.group(1)
+    if not date:
+        m = re.search(r'(\d{4}/\d{2}/\d{2})', to_ascii_digits(text))
+        date = m.group(1) if m else ""
+    year = date[:4] if date else ""
+
     # Main content
     content = ""
     content_div = re.search(r'<div[^>]*class="Content"[^>]*>(.*?)</div>', text, re.DOTALL)
@@ -50,9 +65,9 @@ def extract_speech(speech_id):
         if news_match:
             content = re.sub(r'<[^>]+>', ' ', news_match.group(1))
             content = re.sub(r'\s+', ' ', content).strip()
-    
-    # Clean date prefix
-    if date and content.startswith(date):
+
+    # Clean date prefix (ASCII or Persian digits)
+    if date and to_ascii_digits(content).startswith(date):
         content = content[len(date):].strip()
     
     # Audio
@@ -68,6 +83,7 @@ def extract_speech(speech_id):
         "speech_id": speech_id,
         "title": title,
         "date": date,
+        "year": year,
         "content": content,
         "audio_url": audio_url,
         "tags": tags,

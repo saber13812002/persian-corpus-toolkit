@@ -164,6 +164,14 @@
       <div class="card">
         <h2>📅 توزیع بر اساس سال</h2>
         <div class="bar-chart" id="yearChart"></div>
+        <div style="margin-top:12px;display:flex;gap:8px;flex-wrap:wrap">
+          <button type="button" onclick="resetKhamenei('phase2')" style="padding:8px 12px;border-radius:8px;border:1px solid var(--border);background:#78350f;color:var(--orange);cursor:pointer;font-family:inherit">
+            🔄 ریست فاز۲ (نگه‌داشتن لیست، کراول دوباره برای تاریخ)
+          </button>
+          <button type="button" onclick="resetKhamenei('full')" style="padding:8px 12px;border-radius:8px;border:1px solid var(--border);background:#450a0a;color:var(--red);cursor:pointer;font-family:inherit">
+            🗑️ ریست کامل بیانات
+          </button>
+        </div>
       </div>
       
       <div class="card">
@@ -253,6 +261,25 @@ async function loadTab(tab) {
   document.getElementById('lastRefresh').textContent = `🕐 آخرین بروزرسانی: ${new Date().toLocaleTimeString('fa-IR')}`;
 }
 
+async function resetKhamenei(mode) {
+  const msg = mode === 'full'
+    ? 'همه لیست و بیانات خامنه.ای پاک شود و از فاز۱ شروع کنیم؟'
+    : 'بیانات ذخیره‌شده پاک شود و صف فاز۲ دوباره pending شود؟ (لیست فاز۱ می‌ماند)';
+  if (!confirm(msg)) return;
+  try {
+    const r = await fetch(`${API}/api/khamenei/reset`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ mode }),
+    });
+    const d = await r.json();
+    alert(d.message || 'ریست شد');
+    await loadKhamenei();
+  } catch (e) {
+    alert('خطا در ریست: ' + e);
+  }
+}
+
 // ─── OVERVIEW ───
 async function loadOverview() {
   const stats = await fetchAPI('/api/stats');
@@ -324,11 +351,30 @@ async function loadKhamenei() {
   if (stats) {
     document.getElementById('khameneiStats').innerHTML = `
       <div class="stat-card"><div class="label">کل بیانات</div><div class="value blue">${(stats.total || 0).toLocaleString('fa-IR')}</div></div>
+      <div class="stat-card"><div class="label">با تاریخ</div><div class="value green">${(stats.with_date || 0).toLocaleString('fa-IR')}</div></div>
+      <div class="stat-card"><div class="label">بدون تاریخ</div><div class="value orange">${(stats.without_date || 0).toLocaleString('fa-IR')}</div></div>
       <div class="stat-card"><div class="label">در صف</div><div class="value">${(stats.pending || 0).toLocaleString('fa-IR')}</div></div>
       <div class="stat-card"><div class="label">آخرین کراول</div><div class="value" style="font-size:16px">${stats.last_crawled_at || '-'}</div></div>
       <div class="stat-card"><div class="label">کل کاراکتر</div><div class="value green">${(stats.total_chars || 0).toLocaleString('fa-IR')}</div></div>
-      <div class="stat-card"><div class="label">صفحات منحصربفرد</div><div class="value orange">${(stats.pages || 0).toLocaleString('fa-IR')}</div></div>
     `;
+
+    const byYear = stats.by_year || {};
+    const years = Object.keys(byYear);
+    const chart = document.getElementById('yearChart');
+    if (!years.length) {
+      chart.innerHTML = '<div class="empty" style="padding:12px">هنوز توزیع سالی نیست — بعد از کراول با تاریخ اینجا می‌آید</div>';
+    } else {
+      const max = Math.max(...years.map(y => byYear[y]), 1);
+      chart.innerHTML = years.map(y => {
+        const n = byYear[y];
+        const h = Math.max(8, Math.round((n / max) * 100));
+        return `<div title="${y}: ${n}" style="flex:1;display:flex;flex-direction:column;align-items:center;gap:4px;min-width:28px">
+          <div style="font-size:10px;color:var(--dim)">${Number(n).toLocaleString('fa-IR')}</div>
+          <div style="width:100%;height:${h}px;background:var(--accent);border-radius:4px 4px 0 0"></div>
+          <div style="font-size:10px;color:var(--text)">${y}</div>
+        </div>`;
+      }).join('');
+    }
   }
   
   let tableHtml = '';

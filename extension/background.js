@@ -33,6 +33,16 @@ async function handle(msg) {
       await fetch(`${BACKEND}/api/reset-queue`, { method: 'POST' });
       crawlState.mode = 'idle';
       return { ok: true };
+    case 'resetKhameneiPhase2': {
+      const r = await fetch(`${BACKEND}/api/khamenei/reset`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ mode: 'phase2' }),
+      });
+      const data = await r.json();
+      crawlState.mode = 'idle';
+      return { ok: !!data.ok, ...data };
+    }
     case 'getStats':
       return getStats(msg.site || 'thesaurus');
     case 'phaseProgress':

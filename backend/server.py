@@ -13,6 +13,24 @@ CORS(app)
 
 DB_PATH = os.path.join(os.path.dirname(__file__), 'thesaurus.db')
 
+_PERSIAN_DIGIT_TRANS = str.maketrans("۰۱۲۳۴۵۶۷۸۹٠١٢٣٤٥٦٧٨٩", "01234567890123456789")
+
+
+def to_ascii_digits(s):
+    return (s or "").translate(_PERSIAN_DIGIT_TRANS)
+
+
+def normalize_jalali_date(s):
+    """Normalize ۱۴۰۴/۰۱/۰۱ or 1404/01/01 → 1404/01/01; return '' if invalid."""
+    ascii_s = to_ascii_digits(s).strip()
+    m = re.search(r'(\d{4}/\d{2}/\d{2})', ascii_s)
+    return m.group(1) if m else ''
+
+
+def jalali_year(date_str):
+    d = normalize_jalali_date(date_str)
+    return d[:4] if d else ''
+
 
 @app.route('/')
 def root():
@@ -243,7 +261,8 @@ def phase2_complete():
         speech = {
             'speech_id': data.get('speech_id') or data.get('item_id'),
             'title': data.get('title', ''),
-            'date': data.get('date', ''),
+            'date': data.get('date', '') or data.get('speech_date', ''),
+            'year': data.get('year', ''),
             'content': data.get('content', ''),
             'audio_url': data.get('audio_url', ''),
             'video_url': data.get('video_url', ''),
@@ -424,7 +443,8 @@ def _phase2_save_khamenei(db, speech):
     if not content:
         return {'status': 'empty'}
     title = speech.get('title') or ''
-    speech_date = speech.get('date') or ''
+    speech_date = normalize_jalali_date(speech.get('date') or speech.get('speech_date') or '')
+    speech_year = jalali_year(speech_date) or jalali_year(speech.get('year') or '')
     audio_url = speech.get('audio_url') or ''
     image_url = speech.get('image_url') or ''
     video_url = speech.get('video_url') or ''
@@ -434,31 +454,33 @@ def _phase2_save_khamenei(db, speech):
     related_links = json.dumps(speech.get('related_links') or [], ensure_ascii=False)
     extra_links = json.dumps(speech.get('extra_links') or [], ensure_ascii=False)
     char_count = len(content)
-    chash = content_hash(content)
+    # Include date in hash so date-only fixes trigger update on re-crawl
+    chash = content_hash(f"{content}|{speech_date}")
     existing = db.execute(
-        "SELECT content_hash FROM khamenei_speeches WHERE speech_id=?", (speech_id,)
+        "SELECT content_hash, speech_date FROM khamenei_speeches WHERE speech_id=?", (speech_id,)
     ).fetchone()
     if existing:
-        if existing['content_hash'] == chash:
-            return {'status': 'skipped'}
+        old_date = (existing['speech_date'] or '').strip()
+        if existing['content_hash'] == chash and old_date:
+            return {'status': 'skipped', 'date': speech_date, 'year': speech_year}
         db.execute(
-            """UPDATE khamenei_speeches SET title=?, speech_date=?, content=?, content_hash=?,
+            """UPDATE khamenei_speeches SET title=?, speech_date=?, speech_year=?, content=?, content_hash=?,
                char_count=?, audio_url=?, image_url=?, video_url=?, url=?, meta_text=?,
                tags=?, related_links=?, extra_links=?, crawled_at=datetime('now')
                WHERE speech_id=?""",
-            (title, speech_date, content, chash, char_count, audio_url, image_url,
+            (title, speech_date, speech_year, content, chash, char_count, audio_url, image_url,
              video_url, page_url, meta_text, tags, related_links, extra_links, speech_id)
         )
-        return {'status': 'updated'}
+        return {'status': 'updated', 'date': speech_date, 'year': speech_year}
     db.execute(
         """INSERT INTO khamenei_speeches
-           (speech_id, title, speech_date, content, content_hash, char_count,
+           (speech_id, title, speech_date, speech_year, content, content_hash, char_count,
             audio_url, image_url, video_url, url, meta_text, tags, related_links, extra_links)
-           VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
-        (speech_id, title, speech_date, content, chash, char_count,
+           VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+        (speech_id, title, speech_date, speech_year, content, chash, char_count,
          audio_url, image_url, video_url, page_url, meta_text, tags, related_links, extra_links)
     )
-    return {'status': 'inserted'}
+    return {'status': 'inserted', 'date': speech_date, 'year': speech_year}
 
 
 @app.route('/api/pipeline/status')
@@ -1093,6 +1115,7 @@ def ensure_khamenei_schema(db):
         speech_id TEXT PRIMARY KEY,
         title TEXT,
         speech_date TEXT,
+        speech_year TEXT,
         content TEXT,
         content_hash TEXT,
         char_count INTEGER,
@@ -1115,9 +1138,17 @@ def ensure_khamenei_schema(db):
         ('video_url', 'TEXT'),
         ('related_links', 'TEXT'),
         ('extra_links', 'TEXT'),
+        ('speech_year', 'TEXT'),
     ]:
         if col not in cols:
             db.execute(f"ALTER TABLE khamenei_speeches ADD COLUMN {col} {typedef}")
+    # Backfill year from speech_date when possible
+    db.execute("""
+        UPDATE khamenei_speeches
+        SET speech_year = substr(speech_date, 1, 4)
+        WHERE (speech_year IS NULL OR speech_year = '')
+          AND speech_date IS NOT NULL AND length(speech_date) >= 4
+    """)
     db.commit()
 
 
@@ -1132,12 +1163,70 @@ def khamenei_stats():
         "SELECT COUNT(*) as c FROM crawl_queue WHERE page_type='khamenei_speech' AND status='pending'"
     ).fetchone()['c']
     last = db.execute("SELECT MAX(crawled_at) as d FROM khamenei_speeches").fetchone()['d']
+    with_date = db.execute(
+        "SELECT COUNT(*) as c FROM khamenei_speeches WHERE speech_date IS NOT NULL AND speech_date != ''"
+    ).fetchone()['c']
+    without_date = total - with_date
+    by_year_rows = db.execute("""
+        SELECT COALESCE(NULLIF(speech_year,''), substr(speech_date,1,4), 'نامشخص') AS year,
+               COUNT(*) AS c
+        FROM khamenei_speeches
+        GROUP BY year
+        ORDER BY year DESC
+    """).fetchall()
+    by_year = {r['year']: r['c'] for r in by_year_rows}
     return jsonify({
         "total": total,
         "total_chars": total_chars,
         "pages": pages,
         "pending": pending,
         "last_crawled_at": last,
+        "with_date": with_date,
+        "without_date": without_date,
+        "by_year": by_year,
+    })
+
+
+@app.route('/api/khamenei/reset', methods=['POST'])
+def khamenei_reset():
+    """
+    Reset Khamenei crawl for re-test (e.g. after date extraction fix).
+    mode=phase2 (default): keep Phase1 URL list, wipe saved speeches, re-queue Phase2.
+    mode=full: also delete khamenei queue + progress (start Phase1 from scratch).
+    """
+    db = get_db()
+    ensure_khamenei_schema(db)
+    data = request.get_json(silent=True) or {}
+    mode = (data.get('mode') or 'phase2').lower()
+
+    deleted_speeches = db.execute("SELECT COUNT(*) as c FROM khamenei_speeches").fetchone()['c']
+    db.execute("DELETE FROM khamenei_speeches")
+
+    if mode == 'full':
+        deleted_queue = db.execute(
+            "SELECT COUNT(*) as c FROM crawl_queue WHERE site='khamenei' OR page_type='khamenei_speech'"
+        ).fetchone()['c']
+        db.execute("DELETE FROM crawl_queue WHERE site='khamenei' OR page_type='khamenei_speech'")
+        db.execute("DELETE FROM crawl_progress WHERE key LIKE 'khamenei%'")
+        requeued = 0
+    else:
+        deleted_queue = 0
+        cur = db.execute(
+            """UPDATE crawl_queue
+               SET status='pending', started_at=NULL, finished_at=NULL, content_hash=NULL
+               WHERE site='khamenei' OR page_type='khamenei_speech'"""
+        )
+        requeued = cur.rowcount
+
+    db.commit()
+    return jsonify({
+        "ok": True,
+        "mode": mode,
+        "deleted_speeches": deleted_speeches,
+        "deleted_queue": deleted_queue,
+        "requeued": requeued,
+        "message": "فاز۲ ریست شد — دوباره فاز۲ را بزن" if mode != 'full'
+                   else "کامل ریست شد — دوباره از فاز۱ شروع کن",
     })
 
 
@@ -1274,66 +1363,28 @@ def khamenei_submit():
     ensure_khamenei_schema(db)
     data = request.get_json() or {}
     speech_id = str(data.get('speech_id', ''))
-    title = data.get('title', '')
-    speech_date = data.get('date', '')
-    content = data.get('content', '')
-    audio_url = data.get('audio_url', '')
-    image_url = data.get('image_url', '')
-    video_url = data.get('video_url', '')
-    page_url = data.get('url') or f"https://farsi.khamenei.ir/speech-content?id={speech_id}"
-    meta_text = data.get('meta_text', '')
-    tags = json.dumps(data.get('tags', []), ensure_ascii=False)
-    related_links = json.dumps(data.get('related_links', []), ensure_ascii=False)
-    extra_links = json.dumps(data.get('extra_links', []), ensure_ascii=False)
-    char_count = len(content)
-    chash = content_hash(content)
-
-    if not speech_id:
-        return jsonify({"status": "error", "reason": "missing speech_id"}), 400
-    if not content:
-        return jsonify({"status": "empty", "reason": "no content"}), 200
-
-    existing = db.execute(
-        "SELECT content_hash FROM khamenei_speeches WHERE speech_id=?", (speech_id,)
-    ).fetchone()
-    if existing:
-        if existing['content_hash'] == chash:
-            # Still mark queue done for resume correctness
-            db.execute(
-                "UPDATE crawl_queue SET status='done', finished_at=datetime('now') WHERE page_type='khamenei_speech' AND url LIKE ?",
-                (f"%id={speech_id}%",)
-            )
-            db.commit()
-            return jsonify({"status": "skipped", "reason": "unchanged"})
-        db.execute(
-            """UPDATE khamenei_speeches SET title=?, speech_date=?, content=?, content_hash=?,
-               char_count=?, audio_url=?, image_url=?, video_url=?, url=?, meta_text=?,
-               tags=?, related_links=?, extra_links=?, crawled_at=datetime('now')
-               WHERE speech_id=?""",
-            (title, speech_date, content, chash, char_count, audio_url, image_url,
-             video_url, page_url, meta_text, tags, related_links, extra_links, speech_id)
-        )
+    result = _phase2_save_khamenei(db, {
+        'speech_id': speech_id,
+        'title': data.get('title', ''),
+        'date': data.get('date', ''),
+        'year': data.get('year', ''),
+        'content': data.get('content', ''),
+        'audio_url': data.get('audio_url', ''),
+        'image_url': data.get('image_url', ''),
+        'video_url': data.get('video_url', ''),
+        'url': data.get('url') or f"https://farsi.khamenei.ir/speech-content?id={speech_id}",
+        'meta_text': data.get('meta_text', ''),
+        'tags': data.get('tags', []),
+        'related_links': data.get('related_links', []),
+        'extra_links': data.get('extra_links', []),
+    })
+    if result.get('status') in ('inserted', 'updated', 'skipped'):
         db.execute(
             "UPDATE crawl_queue SET status='done', finished_at=datetime('now') WHERE page_type='khamenei_speech' AND url LIKE ?",
             (f"%id={speech_id}%",)
         )
         db.commit()
-        return jsonify({"status": "updated"})
-
-    db.execute(
-        """INSERT INTO khamenei_speeches
-           (speech_id, title, speech_date, content, content_hash, char_count,
-            audio_url, image_url, video_url, url, meta_text, tags, related_links, extra_links)
-           VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
-        (speech_id, title, speech_date, content, chash, char_count,
-         audio_url, image_url, video_url, page_url, meta_text, tags, related_links, extra_links)
-    )
-    db.execute(
-        "UPDATE crawl_queue SET status='done', finished_at=datetime('now') WHERE page_type='khamenei_speech' AND url LIKE ?",
-        (f"%id={speech_id}%",)
-    )
-    db.commit()
-    return jsonify({"status": "inserted"})
+    return jsonify(result)
 
 
 @app.route('/api/khamenei/seed', methods=['POST'])
@@ -1396,27 +1447,7 @@ if __name__ == '__main__':
     init_db()
     db = sqlite3.connect(DB_PATH)
     db.row_factory = sqlite3.Row
-    # reuse schema helper via direct SQL for boot
-    db.executescript("""
-    CREATE TABLE IF NOT EXISTS khamenei_speeches (
-        speech_id TEXT PRIMARY KEY,
-        title TEXT,
-        speech_date TEXT,
-        content TEXT,
-        content_hash TEXT,
-        char_count INTEGER,
-        audio_url TEXT,
-        image_url TEXT,
-        video_url TEXT,
-        url TEXT,
-        meta_text TEXT,
-        tags TEXT,
-        related_links TEXT,
-        extra_links TEXT,
-        crawled_at TEXT DEFAULT (datetime('now'))
-    );
-    """)
-    db.commit()
+    ensure_khamenei_schema(db)
     db.close()
     print(f"🚀 Persian Corpus Toolkit Backend")
     print(f"   API:    http://127.0.0.1:5055")

@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
   "name": "Persian Corpus Crawler",
-  "version": "3.1",
-  "description": "Two-phase corpus crawler: list (deduped) → full save. Thesaurus Elastic + khamenei speeches.",
+  "version": "3.2",
+  "description": "Two-phase corpus crawler: list → full save. Jalali date (oliveDate) + year stats. Thesaurus + khamenei.",
   "permissions": ["activeTab", "storage", "scripting", "tabs"],
   "host_permissions": [
     "https://thesaurus.eiis.iki.ac.ir/*",

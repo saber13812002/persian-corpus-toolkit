@@ -27,6 +27,7 @@ function bindEvents() {
   document.getElementById('btnSingle').addEventListener('click', startSingle);
   document.getElementById('btnStop').addEventListener('click', stop);
   document.getElementById('btnReset').addEventListener('click', reset);
+  document.getElementById('btnResetPhase2').addEventListener('click', resetPhase2Dates);
   document.getElementById('btnDashboard').addEventListener('click', () => {
     chrome.tabs.create({ url: 'http://127.0.0.1:5055/dashboard' });
   });
@@ -130,6 +131,22 @@ function stop() {
 function reset() {
   chrome.runtime.sendMessage({ action: 'reset' }, () => {
     log('🔄 صف ریست شد', 'info');
+    refreshStats();
+  });
+}
+
+function resetPhase2Dates() {
+  if (currentSite !== 'khamenei') {
+    log('این دکمه فقط برای بیانات است — سایت بیانات را انتخاب کن', 'warn');
+    return;
+  }
+  if (!confirm('بیانات ذخیره‌شده پاک شود و فاز۲ از اول برای ثبت تاریخ دوباره اجرا شود؟\n(لیست فاز۱ می‌ماند)')) return;
+  chrome.runtime.sendMessage({ action: 'resetKhameneiPhase2' }, (resp) => {
+    if (resp && resp.ok) {
+      log(`🔄 ریست فاز۲: ${resp.requeued || 0} مورد در صف — حالا فاز۲ را بزن`, 'ok');
+    } else {
+      log('خطا در ریست: ' + (resp?.message || ''), 'err');
+    }
     refreshStats();
   });
 }
