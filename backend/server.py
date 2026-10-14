@@ -11,7 +11,7 @@ from flask_cors import CORS
 app = Flask(__name__, static_folder='../dashboard', static_url_path='/dashboard')
 CORS(app)
 
-DB_PATH = os.path.join(os.path.dirname(__file__), 'thesaurus.db')
+DB_PATH = os.environ.get('PCT_DB') or os.path.join(os.path.dirname(__file__), 'thesaurus.db')
 
 _PERSIAN_DIGIT_TRANS = str.maketrans("۰۱۲۳۴۵۶۷۸۹٠١٢٣٤٥٦٧٨٩", "01234567890123456789")
 
@@ -1452,7 +1452,9 @@ if __name__ == '__main__':
     db.row_factory = sqlite3.Row
     ensure_khamenei_schema(db)
     db.close()
+    host = os.environ.get('HOST', '0.0.0.0')
+    port = int(os.environ.get('PORT', '5055'))
     print("Persian Corpus Toolkit Backend")
-    print("   API:    http://127.0.0.1:5055")
-    print("   Dashboard: http://127.0.0.1:5055/dashboard")
-    app.run(host='0.0.0.0', port=5055, debug=False, use_reloader=False)
+    print(f"   API:    http://{host}:{port}")
+    print(f"   Dashboard: http://{host}:{port}/dashboard")
+    app.run(host=host, port=port, debug=False, use_reloader=False)

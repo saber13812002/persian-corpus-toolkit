@@ -1,5 +1,5 @@
 // Background — orchestrate two-phase crawls for thesaurus + khamenei
-const BACKEND = 'http://127.0.0.1:5055';
+const BACKEND = 'https://corpus.ai.ismc.ir';
 const KHAMENEI_HOST = 'farsi.khamenei.ir';
 const THESAURUS_HOST = 'thesaurus.eiis.iki.ac.ir';
 

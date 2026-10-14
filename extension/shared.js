@@ -1,6 +1,6 @@
 // Shared constants (classic script — no ES modules)
 var PCT = window.PCT || {};
-PCT.BACKEND = 'http://127.0.0.1:5055';
+PCT.BACKEND = 'https://corpus.ai.ismc.ir';
 PCT.ELASTIC_URL = 'https://thesaurus.eiis.iki.ac.ir/fa/api/elastic/search';
 PCT.THESAURUS_BASE = 'https://thesaurus.eiis.iki.ac.ir';
 PCT.KHAMENEI_HOST = 'farsi.khamenei.ir';

@@ -1,13 +1,13 @@
 {
   "manifest_version": 3,
   "name": "Persian Corpus Crawler",
-  "version": "3.2",
+  "version": "3.3",
   "description": "Two-phase corpus crawler: list → full save. Jalali date (oliveDate) + year stats. Thesaurus + khamenei.",
   "permissions": ["activeTab", "storage", "scripting", "tabs"],
   "host_permissions": [
     "https://thesaurus.eiis.iki.ac.ir/*",
     "https://farsi.khamenei.ir/*",
-    "http://127.0.0.1:5055/*"
+    "https://corpus.ai.ismc.ir/*"
   ],
   "background": {
     "service_worker": "background.js"

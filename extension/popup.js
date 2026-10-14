@@ -2,10 +2,13 @@
 let currentSite = 'thesaurus';
 let refreshInterval = null;
 
+const BACKEND = 'https://corpus.ai.ismc.ir';
+
 document.addEventListener('DOMContentLoaded', async () => {
   bindEvents();
   await detectActiveSite();
   updateHint();
+  await checkConnection();
   refreshStats();
   refreshInterval = setInterval(refreshStats, 3000);
 });
@@ -29,7 +32,7 @@ function bindEvents() {
   document.getElementById('btnReset').addEventListener('click', reset);
   document.getElementById('btnResetPhase2').addEventListener('click', resetPhase2Dates);
   document.getElementById('btnDashboard').addEventListener('click', () => {
-    chrome.tabs.create({ url: 'http://127.0.0.1:5055/dashboard' });
+    chrome.tabs.create({ url: 'https://corpus.ai.ismc.ir/dashboard' });
   });
 }
 
@@ -113,11 +116,37 @@ function runBoth() {
   });
 }
 
+async function checkConnection() {
+  const el = document.getElementById('connText');
+  try {
+    const r = await fetch(`${BACKEND}/api/stats`);
+    if (!r.ok) throw new Error('HTTP ' + r.status);
+    el.textContent = 'وصل به corpus.ai.ismc.ir';
+    el.style.color = '#2ecc71';
+    log('ویجت به corpus.ai.ismc.ir وصل است', 'ok');
+  } catch (e) {
+    el.textContent = 'قطع';
+    el.style.color = '#e74c3c';
+    log('ویجت وصل نشد: ' + e.message, 'err');
+  }
+}
+
 function startSingle() {
   log('📄 کراول صفحه فعلی...', 'info');
   chrome.runtime.sendMessage({ action: 'startSingle' }, (resp) => {
-    if (resp?.ok === false) log('❌ ' + (resp.message || 'خطا'), 'err');
-    else log('✅ ارسال شد', 'ok');
+    if (chrome.runtime.lastError) {
+      log('❌ ' + chrome.runtime.lastError.message, 'err');
+      return;
+    }
+    if (resp?.ok === false) {
+      log('❌ ' + (resp.message || resp.status || 'خطا'), 'err');
+      return;
+    }
+    const sp = resp?.speech || {};
+    log(
+      `✅ ${resp?.status || 'ok'} #${sp.speech_id || '-'} تاریخ=${sp.date || 'خالی'} سال=${sp.year || '-'}`,
+      sp.date ? 'ok' : 'warn'
+    );
   });
 }
 
