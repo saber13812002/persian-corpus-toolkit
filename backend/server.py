@@ -110,7 +110,6 @@ def init_db():
 
     CREATE INDEX IF NOT EXISTS idx_queue_status ON crawl_queue(status, priority);
     CREATE INDEX IF NOT EXISTS idx_queue_url ON crawl_queue(url);
-    CREATE INDEX IF NOT EXISTS idx_queue_site_status ON crawl_queue(site, status);
     CREATE INDEX IF NOT EXISTS idx_crawled_url ON crawled_data(url);
     CREATE INDEX IF NOT EXISTS idx_crawled_hash ON crawled_data(content_hash);
     CREATE INDEX IF NOT EXISTS idx_crawled_type ON crawled_data(item_type);
@@ -130,6 +129,11 @@ def init_db():
             except Exception:
                 pass
     db.commit()
+    # Create site index after migration
+    try:
+        db.execute("CREATE INDEX IF NOT EXISTS idx_queue_site_status ON crawl_queue(site, status)")
+    except Exception:
+        pass
     db.close()
 
 
@@ -150,10 +154,9 @@ def content_hash(data):
     return hashlib.sha256(data.encode()).hexdigest()
 
 
-try:
-    from sciences import THESAURUS_SCIENCES, THESAURUS_SCIENCE_IDS
-except ImportError:
-    from .sciences import THESAURUS_SCIENCES, THESAURUS_SCIENCE_IDS  # noqa
+import sys, os
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from sciences import THESAURUS_SCIENCES, THESAURUS_SCIENCE_IDS
 
 
 # ═══════════════════════════════════════
@@ -231,7 +234,7 @@ def phase2_next_batch():
     rows = db.execute(
         """SELECT id, url, page_type, science_id, title, payload, item_id, source_page, site
            FROM crawl_queue
-           WHERE status='pending' AND site=?
+           WHERE status='pending' AND site=? AND page_type NOT IN ('khamenei_speech', 'list')
            ORDER BY priority DESC, id ASC LIMIT ?""",
         (site, limit)
     ).fetchall()
@@ -537,7 +540,7 @@ def next_job():
     """
     db = get_db()
     row = db.execute(
-        "SELECT * FROM crawl_queue WHERE status='pending' ORDER BY priority DESC, id ASC LIMIT 1"
+        "SELECT * FROM crawl_queue WHERE status='pending' AND page_type NOT IN ('khamenei_speech', 'list') ORDER BY priority DESC, id ASC LIMIT 1"
     ).fetchone()
     if row is None:
         return jsonify(None)
@@ -1449,7 +1452,7 @@ if __name__ == '__main__':
     db.row_factory = sqlite3.Row
     ensure_khamenei_schema(db)
     db.close()
-    print(f"🚀 Persian Corpus Toolkit Backend")
-    print(f"   API:    http://127.0.0.1:5055")
-    print(f"   Dashboard: http://127.0.0.1:5055/dashboard")
+    print("Persian Corpus Toolkit Backend")
+    print("   API:    http://127.0.0.1:5055")
+    print("   Dashboard: http://127.0.0.1:5055/dashboard")
     app.run(host='0.0.0.0', port=5055, debug=False, use_reloader=False)

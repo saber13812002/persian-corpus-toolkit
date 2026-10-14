@@ -3,9 +3,12 @@ Khamenei.ir Speech Scraper - Standalone Python Script
 Can run independently or be called by the extension backend.
 Discovers and extracts all speeches from farsi.khamenei.ir/speech.
 """
-import requests, re, sys, io, time, json, os, urllib3
+import requests, re, sys, time, json, os, urllib3
 urllib3.disable_warnings()
-sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8')
+try:
+    sys.stdout.reconfigure(encoding='utf-8')
+except Exception:
+    pass
 
 BASE = "https://farsi.khamenei.ir"
 DB_PATH = os.path.join(os.path.dirname(__file__), '..', 'backend', 'thesaurus.db')
@@ -15,12 +18,20 @@ headers = {
     "Accept": "text/html,application/xhtml+xml,*/*",
     "Accept-Language": "fa,en-US;q=0.9,en;q=0.8",
 }
+NO_PROXY = {'http': None, 'https': None}
+
+# Robust session: ignore Windows registry/system proxy (broken VPN leftover),
+# use browser-like headers so khamenei.ir doesn't 403.
+_session = requests.Session()
+_session.trust_env = False
+_session.headers.update(headers)
+_session.verify = False
 
 def extract_speech(speech_id):
     """Extract all data from a speech content page."""
     url = f"{BASE}/speech-content?id={speech_id}"
     try:
-        r = requests.get(url, headers=headers, verify=False, timeout=30)
+        r = _session.get(url, timeout=30)
     except Exception as e:
         return {"error": str(e), "speech_id": speech_id}
     
@@ -101,7 +112,7 @@ def discover_ids(year=None, max_pages=50):
             url += f"&year={year}"
         
         try:
-            r = requests.get(url, headers=headers, verify=False, timeout=30)
+            r = _session.get(url, timeout=30)
         except:
             print(f"  Failed to load page {page}")
             break
@@ -125,7 +136,7 @@ def discover_ids(year=None, max_pages=50):
 def submit_to_backend(speech, backend_url="http://127.0.0.1:5055"):
     """Submit extracted speech to the Flask backend."""
     try:
-        r = requests.post(f"{backend_url}/api/khamenei/submit", json=speech, timeout=30)
+        r = _session.post(f"{backend_url}/api/khamenei/submit", json=speech, timeout=30)
         return r.json()
     except Exception as e:
         return {"error": str(e)}
@@ -154,11 +165,11 @@ def scrape_all(years=None, start_from=None, max_per_run=100, delay=2, backend="h
     # Filter already-done from backend (true resume)
     done_ids = set()
     try:
-        r = requests.get(f"{backend}/api/khamenei/stats")
+        r = _session.get(f"{backend}/api/khamenei/stats")
         done_count = r.json().get('total', 0)
         print(f"  Already crawled: {done_count}")
         # Prefer pending queue if available
-        pr = requests.get(f"{backend}/api/khamenei/pending?limit=5000", timeout=30)
+        pr = _session.get(f"{backend}/api/khamenei/pending?limit=5000", timeout=30)
         pending = pr.json().get('ids') or []
         if pending:
             all_ids = [str(x) for x in pending]
