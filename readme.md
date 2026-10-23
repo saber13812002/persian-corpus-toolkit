@@ -14,7 +14,7 @@
 | 2 | بیانات `farsi.khamenei.ir/speech` (متن/عنوان/تاریخ جلالی/صوت/فیلم) | ✅ فعال |
 | 3 | **سیستم پروژه** (v3.5): پروژه برای هر دامنه، نقطه‌های استخراج، کراول قطعه‌قطعه با resume | ✅ فعال (تست واقعی Chrome باقی‌مانده) |
 | 4 | سایت‌های نام‌دار با فیلدهای آماده (`tasnim.hamtaa.org` seed شده) | ✅ فعال |
-| 5 | داشبورد آنلاین `corpus.ai.ismc.ir/dashboard` | ✅ فعال |
+| 5 | داشبورد آنلاین `corpus.ai.ismc.ir/dashboard` (تب «پروژه‌ها» + صفحه‌بندی + جزئیات + احراز هویت رمز) | ✅ فعال (PCM-04/09) |
 | 6 | پایپلاین پیکره + دیتaset + آپلود HuggingFace | ✅ در دسترس |
 | 7 | ایندکسر RAG | 🚧 در دست توسعه |
 
@@ -44,9 +44,11 @@
 │  Flask Backend (پورت ۵۰۵۵، SQLite WAL)                │
 │  • server.py      — API اصلی + فاز۱/۲ + harvest      │
 │  • projects.py    — پروژه/نقطه/صفحه/گزارش ★          │
+│  • auth.py        — احراز هویت داشبورد (scrypt+cookie) │
+│  • dashboard_api.py — API خواندنی داشبورد ★           │
 │  • sites.py       — سایت‌های نام‌دار + فیلدها ★      │
 │  • sciences.py    — ۱۳ علم اصطلاح‌نامه               │
-│  • test_api.py + test_projects.py — 17 تست            │
+│  • 3 test files (api/projects/dashboard) — 32 تست     │
 ├────────────────────────────────────────────────────────┤
 │  Corpus Pipeline (corpus/)                             │
 │  • build_corpus.py / build_dataset.py / pipeline.py    │
@@ -64,10 +66,13 @@ persian-corpus-toolkit/
 ├── backend/
 │   ├── server.py            # API اصلی (فاز۱/۲، harvest، khamenei)
 │   ├── projects.py          # ★ سیستم پروژه (v3.5)
+│   ├── auth.py              # ★ احراز هویت داشبورد (PCM-09)
+│   ├── dashboard_api.py     # ★ API خواندنی داشبورد (PCM-04)
 │   ├── sites.py             # ★ سایت‌ها و فیلدهای آماده
 │   ├── sciences.py          # ۱۳ علم
-│   ├── test_api.py          # ۷ تست
-│   ├── test_projects.py     # ۱۰ تست جریان پروژه
+│   ├── test_api.py          # ۸ تست
+│   ├── test_projects.py     # ۹ تست جریان پروژه
+│   ├── test_dashboard.py    # ۱۵ تست (auth A01-A08 + داشبورد D01-D07)
 │   ├── requirements.txt
 │   ├── Dockerfile
 │   └── thesaurus.db         # (gitignored)
@@ -81,10 +86,12 @@ persian-corpus-toolkit/
 │   ├── test_popup.js        # ۸ تست UI (node)
 │   └── icons/
 ├── corpus/                  # پایپلاین پیکره و دیتاست
-├── dashboard/               # داشبورد استاتیک
-├── deploy/                  # nginx vhost + systemd
+├── dashboard/               # داشبورد (تب‌های اصلی + «پروژه‌ها» + overlay ورود)
+├── deploy/                  # nginx vhost + systemd + اسکریپت‌های دپلوی PCM
+├── docs/                    # project-dashboard.md · dashboard-authentication.md
 ├── docker-compose.yml       # backend محلی روی 127.0.0.1:5055
-└── گزارش-وضعیت-پروژه.md / گزارش-PCM-02.md
+├── AGENTS.md                # قواعد سخت دپلوی/مهاجرت/رمز
+└── گزارش-وضعیت-پروژه.md / گزارش-PCM-0X.md
 ```
 
 ---
@@ -147,6 +154,18 @@ python upload_to_hf.py --token hf_... --username ...
 | `/api/projects/<id>/pages` | POST | ذخیره صفحه `{url, values}` — dedup با SHA-256 |
 | `/api/projects/<id>/report` | POST | گزارش اجرا `{saved, skipped, failed, cursor_url, status}` |
 
+### داشبورد (PCM-04/09 — 🔒 نیاز به ورود)
+
+| Endpoint | Method | توضیح |
+|---|---|---|
+| `/api/auth/login` | POST | ورود `{password}` → cookie `pct_session` (HttpOnly/Secure/SameSite=Lax) |
+| `/api/auth/logout` | POST | باطل‌کردن session |
+| `/api/auth/status` | GET | `{auth_enabled, authenticated}` |
+| `/api/dashboard/projects` | GET | فهرست پروژه‌ها — جستجو/فیلتر/status/مرتب‌سازی/صفحه‌بندی سمت سرور |
+| `/api/dashboard/projects/<id>` | GET | جزئیات: فیلدها، pages_summary، values_sample آخرین صفحه |
+
+سند کامل: [docs/project-dashboard.md](docs/project-dashboard.md) و [docs/dashboard-authentication.md](docs/dashboard-authentication.md)
+
 ### سایت‌ها
 
 | Endpoint | Method | توضیح |
@@ -178,6 +197,7 @@ python upload_to_hf.py --token hf_... --username ...
 | `project_pages` | ★ صفحات ذخیره‌شده (values_json + SHA-256) |
 | `sites`, `site_fields` | سایت‌های نام‌دار و فیلدهای آماده |
 | `captures` | captures عمومی |
+| `auth_meta`, `auth_sessions`, `auth_rate` | ★ احراز هویت داشبورد (scrypt-hash، sessionهای ۷روزه، rate-limit) |
 
 جدول‌های جدید **خودکار** و **additive** ساخته می‌شوند (migration امن برای DBهای قدیمی).
 
@@ -198,7 +218,7 @@ cp backups/thesaurus_20260802.db backend/thesaurus.db       # بازیابی
 ## 🧪 تست‌ها
 
 ```bash
-cd backend && python -m unittest test_api test_projects -v   # 17/17
+cd backend && python -m unittest test_api test_projects test_dashboard -v   # 32/32
 cd extension && node test_popup.js                            # 8/8
 node --check extension/popup.js extension/background.js extension/content_picker.js
 node -e "JSON.parse(require('fs').readFileSync('extension/manifest.json'))"
@@ -221,11 +241,20 @@ node -e "JSON.parse(require('fs').readFileSync('extension/manifest.json'))"
 | پورت | `127.0.0.1:5055` (nginx `corpus.ai.ismc.ir` جلوی آن است) |
 | DB | bind-mount: `./backend/thesaurus.db → /data/thesaurus.db` (SQLite WAL — فایل پایدار، نه volume نام‌دار) |
 
-**روند به‌روزرسانی (تأییدشده در PCM-03):**
-1. بکاپ: `deploy/pcm03_backup.sh` → `/home/saber/backups/thesaurus-<TS>.db` + `PRAGMA integrity_check`
+**داشبورد + احراز هویت (PCM-04/09 — از ۱۴۰۵/۰۸/۰۱):**
+- داشبورد: `https://corpus.ai.ismc.ir/dashboard/` — tab «📁 پروژه‌ها» (فهرست + صفحه‌بندی + جزئیات)
+- ورود: `POST /api/auth/login` با رمز؛ cookie `pct_session` (HttpOnly/Secure/SameSite=Lax)
+- رمز: **فقط** در `.env` سرور (gitignored، chmod 600) — در DB به‌صورت scrypt-hash؛ هرگز در کد/Git/لاگ
+- APIهای نوشتاری اکستنشن (`/api/projects*`) **باز می‌مانند** → کراول زنده هرگز با ورود داشبورد قطع نمی‌شود
+- اگر رمزی seed نشده باشد (محیط توسعه)، APIهای داشبورد بدون ورود باز می‌مانند
+
+**روند به‌روزرسانی (تأییدشده در PCM-03/04):**
+1. بکاپ: `deploy/pcm04_deploy.sh` → `/home/saber/backups/thesaurus-<TS>.db` + `PRAGMA integrity_check`
 2. سشن‌شات کد: tar کل پوشه استقرار (به‌جز DB) → `/home/saber/backups/pct-deploy-<TS>.tar.gz`
-3. انتقال کد `origin/main` به پوشه استقرار (DB در tar نباشد)
-4. `docker compose build backend && docker compose up -d backend` — **فقط recreate backend؛ بدون `down`**
+3. تضمین `.env` (رمز داشبورد، chmod 600) — فقط در سرور، هرگز در Git
+4. انتقال کد `origin/main` به پوشه استقرار (DB در tar نباشد)
+5. `docker compose build backend && docker compose up -d backend` — **فقط recreate backend؛ بدون `down`**
+6. smoke test: health + auth (401 بدون cookie / 200 با cookie) + API اکستنشن باز + integrity_check
 
 **قوانین:**
 - ⛔ `docker-compose down` ممنوع — فقط `up -d backend` (recreate)

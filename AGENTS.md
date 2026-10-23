@@ -1,0 +1,83 @@
+# AGENTS.md — راهنمای کار روی persian-corpus-toolkit
+
+این فایل قواعد دائمی برای هر کسی/هوش مصنوعی که روی این ریپازیتوری کار می‌کند.
+قواعد زیر **مطلق** هستند و جزئیات مأموریت‌های تکی (PCM-01…PCM-10) به آن‌ها اضافه می‌شوند.
+
+## ۱. محدوده‌ی مجاز (scope)
+
+- **فقط** زیرسیستم پیکره: `backend/`, `dashboard/`, `extension/`, `corpus/`, `deploy/`, `docs/`.
+- **هرگز** روی NotebookLM، RAG indexer (جزء زیرمجموعه‌ی دیگر)، یا QA Bank دست نزنید.
+- هرگز DB production (`backend/thesaurus.db` روی s52) را خارج از بکاپ‌برده‌شده لمس نکنید.
+
+## ۲. قواعد سخت (hard rules)
+
+1. **بدون بکاپ، مهاجرت نمی‌شود** — قبل از هر تغییر schema:
+   `sqlite3 thesaurus.db ".backup /home/saber/backups/thesaurus-<TS>.db"` + `PRAGMA integrity_check`.
+2. **مهاجرت‌ها فقط افزایشی** (additive): `ALTER TABLE ... ADD COLUMN` + backfill + index.
+   هیچ `DROP`/`RENAME`/تغییر نوع ستون در production.
+3. **`docker compose down -v` ممنوع** — فقط `docker compose build backend && docker compose up -d backend`.
+4. **هر مرحله: تست → commit → push → deploy → smoke test → گزارش.** بدون تست سبز، deploy نمی‌شود.
+5. **رمز/توکن در کد، Git، لاگ، metric یا گزارش نمی‌آید.** رمز داشبورد فقط در
+   `.env` سرور (gitignored، chmod 600) و در DB به‌صورت scrypt-hash.
+6. **APIهای نوشتاری اکستنشن باز می‌مانند** (`/api/projects*`) — کراول زنده نباید با
+   تغییرات داشبورد قطع شود. فقط namespace‌های خواندنی داشبورد (`/api/dashboard/*`) پشت auth.
+7. SQL پارامتری‌شده (placeholder)؛ `ORDER BY` فقط از whitelist؛ `LIMIT/OFFSET` برای صفحه‌بندی —
+   کل‌جدول‌بارگذاری در APIها ممنوع.
+8. خروج‌های DOM در کلاینت از `escHtml` (XSS)؛ هیچ HTML خام بدون sanitize.
+9. عدد آمار/درصد ساختگی ندهید — فقط شمارنده‌های واقعی DB، با تعریف مکتوب.
+
+## ۳. دپلوی (s52 = 172.20.1.52)
+
+```text
+SSH:     ssh -p 22 saber@172.20.1.52          # 2222 = GitLab، نه SSH
+DIR:     /home/saber/saberprojects/persian-corpus-toolkit   # کپی کد (نه git repo)
+DB:      backend/thesaurus.db  (bind-mount به /data/thesaurus.db در container)
+NGINX:   443 ssl → 127.0.0.1:5055 با X-Forwarded-Proto
+BACKUP:  /home/saber/backups/  (thesaurus-<TS>.db + pct-deploy-<TS>.tar.gz)
+```
+
+مراحل استاندارد (نمونه: `deploy/pcm04_deploy.sh`):
+1. بکاپ آنلاین DB + integrity_check
+2. اسنپ‌شات deploy dir (بدون DB)
+3. `.env` را تضمین کن (chmod 600)
+4. کد جدید را extract کن
+5. `docker compose build backend && docker compose up -d backend`
+6. health-wait + smoke test (endpointهای کلیدی + چک auth)
+7. integrity_check مجدد + شمارش‌ها (مقایسه با قبل)
+
+## ۴. تست‌ها
+
+```bash
+cd backend && python -m unittest test_api test_projects test_dashboard -v
+```
+
+- 32 تست: `test_api.py` (فاز۱/۲ + پروژه)، `test_projects.py` (جریان CRUD)،
+  `test_dashboard.py` (auth A01-A08 + داشبورد D01-D07).
+- تست‌ها DB موقتی می‌سازند (`PCT_DB`) و `PCT_DASHBOARD_PASSWORD` را قبل از import server ست می‌کنند.
+- روی Windows: هر connection باید بسته شود (open handle مانع `os.remove` می‌شود).
+
+## ۵. ساختار فنی
+
+- Flask + SQLite (WAL) روی ۵۰۵۵؛ Docker Compose؛ اکستنشن Chrome MV3.
+- `backend/server.py` — API اصلی + wiring · `projects.py` — پروژه/نقطه/صفحه ·
+  `auth.py` — احراز هویت (PCM-09) · `dashboard_api.py` — API خواندنی داشبورد (PCM-04) ·
+  `sites.py` — سایت‌های seed.
+- داشبورد: HTML+JS تک‌صفحه‌ای بدون framework در `dashboard/index.html`؛ همه‌ی
+  fetchها `credentials: same-origin` و 401 → overlay ورود.
+
+## ۶. نقشه‌ی راه (ترتیب اجرا)
+
+| فاز | وضعیت |
+|-----|-------|
+| PCM-01 رفع «پروژه ساخته نمی‌شود» | ✅ |
+| PCM-02 برنامه و ممیزی | ✅ |
+| PCM-03 deploy + ممیزی production | ✅ |
+| **PCM-04** تب پروژه‌ها (فهرست/جزئیات/صفحه‌بندی) + **PCM-09** auth | ✅ (این دپلوی) |
+| **PCM-05** مرور صفحه‌به‌صفحه / آیتم‌به‌آیتم | ⏳ |
+| **PCM-06** نمای آمار واقعی | ⏳ |
+| **PCM-07** ناوبری دوسویه + checkpoint/resume + کنترل Start/Pause/Resume/Retry | ⏳ |
+| **PCM-08** موتور transform + reprocess | ⏳ |
+| **PCM-10** health/metrics + ۴ داشبورد Grafana (زیرساخت موجود s52) | ⏳ |
+
+گزارش‌ها: `گزارش-PCM-0X.md` (۱۱ بخش: وضعیت قبل، طراحی، مهاجرت، فایل/API، تست،
+نتیجه production، SHA+لینک، git status، بکاپ/rollback، موارد باقی‌مانده، روش تست دستی).
