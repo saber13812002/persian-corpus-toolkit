@@ -5,13 +5,17 @@ Flask API + SQLite - Crawl queue manager & data store
 
 import sqlite3, json, hashlib, time, os, re
 from datetime import datetime, timezone
-from flask import Flask, request, jsonify, g, send_from_directory, redirect
+from flask import Flask, request, jsonify, g, send_from_directory, redirect, abort
+from werkzeug.middleware.proxy_fix import ProxyFix
 from flask_cors import CORS
 
 STATIC_DIR = os.environ.get('STATIC_DIR') or os.path.abspath(
     os.path.join(os.path.dirname(__file__), '..', 'dashboard')
 )
 app = Flask(__name__, static_folder=STATIC_DIR, static_url_path='/dashboard')
+# Production runs behind nginx (X-Forwarded-*); trust one proxy hop so
+# request.is_secure / remote_addr are correct for cookie + rate limiting.
+app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1, x_proto=1, x_host=1)
 CORS(app)
 
 DB_PATH = os.environ.get('PCT_DB') or os.path.join(os.path.dirname(__file__), 'thesaurus.db')
@@ -43,6 +47,9 @@ def root():
 @app.route('/dashboard')
 @app.route('/dashboard/')
 def dashboard_index():
+    # PCM-09: the page itself is public; all project data lives behind
+    # /api/auth/* + /api/dashboard/* (401 without a session cookie).
+    # The UI shows the login overlay client-side when auth is enabled.
     return send_from_directory(app.static_folder, 'index.html')
 
 
@@ -139,9 +146,12 @@ def init_db():
         pass
     from sites import ensure_sites_schema, seed_default_sites
     from projects import ensure_projects_schema
+    from dashboard_api import ensure_dashboard_schema
     ensure_sites_schema(db)
     seed_default_sites(db)
     ensure_projects_schema(db)
+    ensure_dashboard_schema(db)
+    _init_auth(db)
     db.close()
 
 
@@ -1452,8 +1462,17 @@ def khamenei_seed():
 
 from sites import register_site_routes
 from projects import register_project_routes
+from auth import ensure_auth_schema, seed_password, register_auth_routes
+from dashboard_api import register_dashboard_routes
 register_site_routes(app, get_db)
 register_project_routes(app, get_db)
+register_auth_routes(app, get_db)
+register_dashboard_routes(app, get_db)
+
+
+def _init_auth(db):
+    ensure_auth_schema(db)
+    seed_password(db)
 
 
 # ═══════════════════════════════════════

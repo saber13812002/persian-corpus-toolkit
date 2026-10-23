@@ -10,6 +10,9 @@ services:
       PORT: "5055"
       PCT_DB: /data/thesaurus.db
       STATIC_DIR: /dashboard
+      # Dashboard password (PCM-09): value comes from the local .env file
+      # (gitignored). Never hardcode the password in this file or the repo.
+      PCT_DASHBOARD_PASSWORD: ${PCT_DASHBOARD_PASSWORD:-}
     volumes:
       - ./backend/thesaurus.db:/data/thesaurus.db
       - ./dashboard:/dashboard:ro

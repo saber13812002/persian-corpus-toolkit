@@ -81,6 +81,25 @@
   .empty { text-align: center; padding: 40px; color: var(--dim); }
   .refresh { font-size: 11px; color: var(--dim); margin-top: 8px; }
   
+  /* Projects & login (PCM-04 / PCM-09) */
+  .mini-btn { padding:6px 10px; border-radius:6px; border:1px solid var(--border); background:transparent; color:var(--text); cursor:pointer; font-family:inherit; font-size:12px; }
+  .mini-btn:hover { background:#334155; }
+  .mini-btn:disabled { opacity:.4; cursor:default; }
+  .search-ctl { padding:6px 10px; border-radius:6px; border:1px solid var(--border); background:#0b1120; color:var(--text); font-family:inherit; font-size:12px; }
+  .pager { display:flex; gap:10px; align-items:center; margin-top:12px; }
+  .pg-label { font-size:12px; color:var(--dim); }
+  .url-cell { max-width:260px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .json-box { background:#0b1120; border-radius:8px; padding:12px; font-size:11px; overflow-x:auto; direction:ltr; text-align:left; }
+  .detail-head { display:flex; align-items:center; gap:12px; margin-bottom:16px; }
+  #loginOverlay { position:fixed; inset:0; background:rgba(2,6,23,.88); z-index:100; display:none; align-items:center; justify-content:center; }
+  .login-box { background:var(--card); border:1px solid var(--border); border-radius:12px; padding:28px; width:320px; text-align:center; }
+  .login-box h2 { margin-bottom:8px; }
+  .login-box .dim { color:var(--dim); font-size:12px; margin-bottom:16px; }
+  .login-box input { width:100%; padding:10px 12px; border-radius:8px; border:1px solid var(--border); background:#0b1120; color:var(--text); font-family:inherit; margin-bottom:12px; }
+  .login-box button[type=submit] { width:100%; padding:10px; border-radius:8px; border:none; background:var(--accent); color:#0f172a; font-weight:700; cursor:pointer; font-family:inherit; }
+  .login-error { color:var(--red); font-size:12px; margin-top:10px; min-height:16px; }
+  .logout-btn { margin:16px 20px 0; background:none; border:1px solid var(--border); color:var(--dim); border-radius:8px; padding:8px 14px; cursor:pointer; font-family:inherit; font-size:12px; width:calc(100% - 40px); }
+  
   /* Charts (simple CSS) */
   .bar-chart { display: flex; align-items: end; gap: 8px; height: 120px; padding: 8px 0; }
   .bar-wrapper { flex: 1; display: flex; flex-direction: column; align-items: center; gap: 4px; }
@@ -110,7 +129,9 @@
     <button class="nav-item" onclick="switchTab('khamenei')">🎤 بیانات</button>
     <button class="nav-item" onclick="switchTab('corpus')">📦 پیکره‌ها</button>
     <button class="nav-item" onclick="switchTab('queue')">⏳ صف کراول</button>
+    <button class="nav-item" onclick="switchTab('projects')">📁 پروژه‌ها</button>
     <button class="nav-item" onclick="switchTab('db')">🗄️ دیتابیس</button>
+    <button class="logout-btn" id="logoutBtn" style="display:none" onclick="doLogout()">🚪 خروج</button>
   </div>
   
   <div class="main" id="main">
@@ -189,6 +210,47 @@
       </div>
     </div>
     
+    <!-- PROJECTS TAB (PCM-04) -->
+    <div id="tab-projects" class="tab-content" style="display:none">
+      <h1>📁 پروژه‌ها</h1>
+      <div id="projectsList" class="card">
+        <div class="pager" style="margin-top:0; justify-content:space-between; flex-wrap:wrap; gap:8px">
+          <div style="display:flex; gap:8px; flex-wrap:wrap">
+            <input class="search-ctl" id="projSearch" placeholder="جستجو در نام یا دامنه..." onkeydown="if(event.key==='Enter')projGo(1)">
+            <select class="search-ctl" id="projStatus" onchange="projGo(1)">
+              <option value="">همه وضعیت‌ها</option>
+              <option value="draft">draft</option>
+              <option value="tested">tested</option>
+              <option value="running">running</option>
+              <option value="paused">paused</option>
+            </select>
+            <select class="search-ctl" id="projSort" onchange="projGo(1)">
+              <option value="updated_at">مرتب: آخرین فعالیت</option>
+              <option value="created_at">مرتب: ایجاد</option>
+              <option value="name">مرتب: نام</option>
+              <option value="saved_count">مرتب: صفحات ذخیره</option>
+            </select>
+            <select class="search-ctl" id="projPerPage" onchange="projGo(1)">
+              <option>10</option><option>25</option><option>50</option>
+            </select>
+          </div>
+          <div style="display:flex; gap:8px">
+            <select class="search-ctl" id="projOrder" onchange="projGo(1)">
+              <option value="DESC">جدول به قدیم</option>
+              <option value="ASC">قدیم به جدول</option>
+            </select>
+            <button class="mini-btn" onclick="projGo(1)">جستجو</button>
+          </div>
+        </div>
+        <div id="projTableWrap" style="margin-top:12px"></div>
+        <div class="pager" id="projPager"></div>
+      </div>
+      <div id="projectDetail" class="card" style="display:none">
+        <button class="mini-btn" onclick="backToProjList()">→ بازگشت به فهرست</button>
+        <div id="projDetailBody" style="margin-top:16px"></div>
+      </div>
+    </div>
+    
     <!-- QUEUE TAB -->
     <div id="tab-queue" class="tab-content" style="display:none">
       <h1>⏳ صف کراول</h1>
@@ -222,14 +284,28 @@
   </div>
 </div>
 
+<!-- LOGIN OVERLAY (PCM-09) -->
+<div id="loginOverlay">
+  <form class="login-box" onsubmit="doLogin(event)">
+    <h2>🔐 ورود به داشبورد</h2>
+    <div class="dim">برای مشاهده پروژه‌ها و داده‌ها رمز عبور لازم است</div>
+    <input type="password" id="loginPassword" placeholder="رمز عبور" autocomplete="current-password">
+    <button type="submit">ورود</button>
+    <div class="login-error" id="loginError"></div>
+  </form>
+</div>
+
 <script>
 const API = '';
 let currentTab = 'overview';
 let queueFilter = 'all';
+let authReady = false;
+let projState = { page: 1, detailId: null };
 
 async function fetchAPI(path) {
   try {
-    const r = await fetch(`${API}${path}`);
+    const r = await fetch(`${API}${path}`, { credentials: 'same-origin' });
+    if (r.status === 401) { showLogin('نیازمند ورود — نشست منقضی یا خارج شد'); return null; }
     if (!r.ok) throw new Error(`${r.status}`);
     return await r.json();
   } catch (e) {
@@ -255,6 +331,7 @@ async function loadTab(tab) {
     case 'khamenei': await loadKhamenei(); break;
     case 'corpus': await loadCorpus(); break;
     case 'queue': await loadQueue(); break;
+    case 'projects': await loadProjects(); break;
     case 'db': await loadDB(); break;
   }
   document.getElementById('loading').style.display = 'none';
@@ -460,8 +537,174 @@ async function loadDB() {
   }
 }
 
+// ─── AUTH (PCM-09) ───
+function showLogin(msg) {
+  document.getElementById('loginOverlay').style.display = 'flex';
+  if (msg) document.getElementById('loginError').textContent = msg;
+}
+function hideLogin() {
+  document.getElementById('loginOverlay').style.display = 'none';
+  document.getElementById('loginError').textContent = '';
+  document.getElementById('logoutBtn').style.display = (authReady && authState.authenticated) ? 'block' : 'none';
+}
+let authState = { auth_enabled: false, authenticated: false };
+async function checkAuth() {
+  const r = await fetch(`${API}/api/auth/status`, { credentials: 'same-origin' });
+  if (!r.ok) return;
+  authState = await r.json();
+  if (authState.authenticated) hideLogin();
+  else if (authState.auth_enabled) showLogin('برای مشاهده داده‌ها وارد شوید');
+  authReady = true;
+}
+async function doLogin(ev) {
+  ev.preventDefault();
+  const pw = document.getElementById('loginPassword').value;
+  const r = await fetch(`${API}/api/auth/login`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ password: pw }), credentials: 'same-origin',
+  });
+  const d = await r.json().catch(() => ({}));
+  if (r.ok && d.ok) {
+    document.getElementById('loginPassword').value = '';
+    authState.authenticated = true;
+    hideLogin();
+    loadTab(currentTab);
+  } else {
+    document.getElementById('loginError').textContent = d.message || 'خطا در ورود';
+  }
+}
+async function doLogout() {
+  await fetch(`${API}/api/auth/logout`, { method: 'POST', credentials: 'same-origin' });
+  authState.authenticated = false;
+  hideLogin();
+  showLogin('خارج شدید — برای ادامه وارد شوید');
+  loadTab(currentTab);
+}
+
+// ─── PROJECTS (PCM-04) ───
+const faNum = n => Number(n || 0).toLocaleString('fa-IR');
+const statusBadge = s => s === 'running' ? '<span class="badge warn">در حال اجرا</span>'
+  : s === 'paused' ? '<span class="badge warn">مکث</span>'
+  : s === 'tested' ? '<span class="badge ok">تست‌شده</span>'
+  : '<span class="badge">پیش‌نویس</span>';
+function escHtml(s) {
+  // Literal-free entity map: avoids tool-input normalization of entity text.
+  const AMPP = [38, 97, 109, 112, 59].map(c => String.fromCharCode(c)).join('');   // ampersand entity
+  const LT   = [60, 98, 116, 59].map(c => String.fromCharCode(c)).join('');       // less-than entity
+  const GT   = [62, 103, 116, 59].map(c => String.fromCharCode(c)).join('');      // greater-than entity
+  const QT   = [38, 113, 117, 111, 116, 59].map(c => String.fromCharCode(c)).join(''); // quote entity
+  const APOS = [38, 35, 39, 59].map(c => String.fromCharCode(c)).join('');        // apostrophe entity
+  const map = { '&': AMPP, '<': LT, '>': GT, '"': QT, "'": APOS };
+  return String(s ?? '').replace(/[&<>"']/g, c => map[c]);
+}
+async function loadProjects() {
+  if (projState.detailId) { renderProjectDetail(projState.detailId); return; }
+  await projGo(projState.page);
+}
+async function projGo(page) {
+  projState.page = page;
+  const search = document.getElementById('projSearch').value.trim();
+  const status = document.getElementById('projStatus').value;
+  const sort = document.getElementById('projSort').value;
+  const order = document.getElementById('projOrder').value;
+  const perPage = document.getElementById('projPerPage').value;
+  const d = await fetchAPI(`/api/dashboard/projects?page=${page}&per_page=${perPage}&search=${encodeURIComponent(search)}&status=${encodeURIComponent(status)}&sort=${sort}&order=${order}`);
+  const wrap = document.getElementById('projTableWrap');
+  if (!d) { wrap.innerHTML = '<div class="empty">داده دریافت نشد</div>'; return; }
+  let html = `<table><thead><tr>
+    <th>#</th><th>نام پروژه</th><th>دامنه</th><th>فیلدها</th><th>صفحات</th>
+    <th>موفق</th><th>خطا</th><th>وضعیت</th><th>آخرین فعالیت</th><th>ایجاد</th><th></th>
+  </tr></thead><tbody>`;
+  if (!d.projects.length) {
+    html += '<tr><td colspan="11" class="empty">پروژه‌ای یافت نشد</td></tr>';
+  }
+  d.projects.forEach(p => {
+    html += `<tr>
+      <td>${p.id}</td>
+      <td><b>${escHtml(p.name)}</b></td>
+      <td>${escHtml(p.host)}</td>
+      <td>${faNum(p.fields_count)}</td>
+      <td>${faNum(p.pages_count)}</td>
+      <td style="color:var(--green)">${faNum(p.saved_count)}</td>
+      <td style="color:${p.failed_count ? 'var(--red)' : 'var(--dim)'}">${faNum(p.failed_count)}</td>
+      <td>${statusBadge(p.status)}</td>
+      <td>${(p.updated_at || '').substring(0, 16)}</td>
+      <td>${(p.created_at || '').substring(0, 10)}</td>
+      <td><button class="mini-btn" onclick="openProjDetail(${p.id})">جزئیات</button></td>
+    </tr>`;
+  });
+  html += '</tbody></table>';
+  wrap.innerHTML = html;
+  // pager
+  const tp = d.total_pages || 1;
+  document.getElementById('projPager').innerHTML = `
+    <button class="mini-btn" ${page <= 1 ? 'disabled' : ''} onclick="projGo(${page - 1})">→ قبلی</button>
+    <span class="pg-label">صفحه ${faNum(page)} از ${faNum(tp)} · کل ${faNum(d.total)} پروژه</span>
+    <button class="mini-btn" ${page >= tp ? 'disabled' : ''} onclick="projGo(${page + 1})">بعدی ←</button>`;
+}
+async function openProjDetail(id) { projState.detailId = id; await renderProjectDetail(id); }
+async function backToProjList() { projState.detailId = null; await projGo(projState.page); }
+async function renderProjectDetail(id) {
+  document.getElementById('projectsList').style.display = 'none';
+  document.getElementById('projectDetail').style.display = 'block';
+  const p = await fetchAPI(`/api/dashboard/projects/${id}`);
+  const body = document.getElementById('projDetailBody');
+  if (!p) { body.innerHTML = '<div class="empty">پروژه دریافت نشد</div>'; return; }
+  const ps = p.pages_summary || {};
+  let html = `
+    <div class="detail-head">
+      <h1>📁 ${escHtml(p.name)}</h1>
+      ${statusBadge(p.status)}
+    </div>
+    <div class="stats-grid">
+      <div class="stat-card"><div class="label">دامنه</div><div class="value" style="font-size:15px">${escHtml(p.host)}</div></div>
+      <div class="stat-card"><div class="label">URL شروع</div><div class="value" style="font-size:12px;word-break:break-all">${escHtml(p.start_url || '-')}</div></div>
+      <div class="stat-card"><div class="label">Cursor فعلی</div><div class="value" style="font-size:11px;word-break:break-all">${escHtml(p.cursor_url || '-')}</div></div>
+      <div class="stat-card"><div class="label">قاعده صفحه بعد</div><div class="value" style="font-size:13px">${escHtml(p.next_mode)}${p.next_param ? ' → ' + escHtml(p.next_param) : ''}</div></div>
+    </div>
+    <div class="stats-grid">
+      <div class="stat-card"><div class="label">صفحات ذخیره‌شده</div><div class="value green">${faNum(ps.total)}</div></div>
+      <div class="stat-card"><div class="label">موفق (شمارنده)</div><div class="value blue">${faNum(p.saved_count)}</div></div>
+      <div class="stat-card"><div class="label">ردشده</div><div class="value orange">${faNum(p.skipped_count)}</div></div>
+      <div class="stat-card"><div class="label">خطادار</div><div class="value red">${faNum(p.failed_count)}</div></div>
+      <div class="stat-card"><div class="label">سرعت (صفحه/دقیقه)</div><div class="value">${faNum(p.pages_per_minute)}</div></div>
+      <div class="stat-card"><div class="label">آخرین فعالیت</div><div class="value" style="font-size:14px">${escHtml(p.updated_at || '-')}</div></div>
+    </div>
+    ${p.last_message ? `<div class="card" style="margin-bottom:12px"><h2>📝 آخرین پیام</h2><div style="font-size:12px;word-break:break-all">${escHtml(p.last_message)}</div></div>` : ''}
+    <div class="card">
+      <h2>🎯 فیلدهای تعریف‌شده (${p.points.length})</h2>
+      ${p.points.length ? `<table><thead><tr><th>برچسب</th><th>منبع</th><th>Selector</th><th>Transform</th><th>نمونه ذخیره‌شده</th></tr></thead><tbody>` +
+        p.points.map(pt => `<tr>
+          <td><b>${escHtml(pt.tag)}</b></td>
+          <td>${escHtml(pt.source)}</td>
+          <td style="font-family:monospace;font-size:11px;direction:ltr;text-align:left">${escHtml(pt.selector) || '-'}</td>
+          <td>${escHtml(pt.transform)}</td>
+          <td style="max-width:340px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${escHtml(pt.sample)}">${escHtml(pt.sample) || '-'}</td>
+        </tr>`).join('') + '</tbody></table>' : '<div class="empty">هنوز نقطه‌ای تعریف نشده</div>'}
+    </div>
+    <div class="card">
+      <h2>📄 آخرین صفحه ثبت‌شده</h2>
+      ${ps.last_url ? `
+        <div style="font-size:12px;margin-bottom:8px">
+          <a href="${escHtml(ps.last_url)}" target="_blank" rel="noopener" style="color:var(--accent);word-break:break-all">${escHtml(ps.last_url)}</a>
+          <span class="pg-label"> · ثبت: ${escHtml(p.updated_at || '')}</span>
+        </div>
+        <pre class="json-box">${escHtml(JSON.stringify(p.values_sample || {}, null, 2))}</pre>
+        <button class="mini-btn" style="margin-top:8px" onclick="copyJson()">📋 کپی JSON</button>
+      ` : '<div class="empty">هنوز صفحه‌ای ثبت نشده</div>'}
+    </div>`;
+  body.innerHTML = html;
+  window._lastJson = JSON.stringify(p.values_sample || {});
+}
+function copyJson() {
+  navigator.clipboard?.writeText(window._lastJson || '').catch(() => {});
+}
+
 // Init
-loadTab('overview');
+(async function init() {
+  await checkAuth();
+  loadTab('overview');
+})();
 setInterval(() => loadTab(currentTab), 10000);
 </script>
 </body>

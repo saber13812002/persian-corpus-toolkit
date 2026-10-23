@@ -27,6 +27,7 @@ def ensure_projects_schema(db):
         failed_count      INTEGER DEFAULT 0,
         last_message      TEXT DEFAULT '',
         tested_at         TEXT,
+        created_at        TEXT,
         updated_at        TEXT DEFAULT (datetime('now'))
     );
     CREATE TABLE IF NOT EXISTS project_points (
@@ -118,6 +119,8 @@ def register_project_routes(app, get_db):
     def create_project():
         db = get_db()
         ensure_projects_schema(db)
+        from dashboard_api import ensure_dashboard_schema  # created_at column
+        ensure_dashboard_schema(db)
         data = request.get_json(silent=True) or {}
         name = (data.get("name") or "").strip()
         host = (data.get("host") or "").lower().strip()
@@ -132,8 +135,8 @@ def register_project_routes(app, get_db):
         start_url = (data.get("start_url") or "").split("#")[0].strip()
         cur = db.execute(
             """INSERT INTO projects
-               (name, host, start_url, next_mode, next_param, next_step, pages_per_minute, cursor_url, status)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'draft')""",
+               (name, host, start_url, next_mode, next_param, next_step, pages_per_minute, cursor_url, status, created_at)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'draft', datetime('now'))""",
             (
                 name,
                 host,
