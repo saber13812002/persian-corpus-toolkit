@@ -41,6 +41,61 @@
 - صفحه‌بندی: `COUNT(*)` برای `total` + `LIMIT ? OFFSET ?` — هیچ‌وقت کل جدول بارگذاری نمی‌شود.
 - `fields_count` / `pages_count` با زیر‌پرس از `project_points` / `project_pages`.
 
+### `GET /api/dashboard/projects/<id>/pages` (PCM-05)
+
+فهرست صفحات ذخیره‌شده‌ی پروژه (فقط خواندنی):
+
+| پارامتر | پیش‌فرض | توضیح |
+|---------|---------|-------|
+| `search`  | — | LIKE روی `url` **یا** `values_json` (متن هر فیلد) |
+| `sort`    | `id` | فقط این‌ها: `id` / `captured_at` / `url` |
+| `order`   | `DESC` | `ASC` / `DESC` |
+| `page`    | `1` | از ۱ |
+| `per_page`| `10` | ۱ تا ۱۰۰ |
+
+پاسخ:
+
+```json
+{
+  "pages": [
+    {
+      "id": 1,
+      "url": "https://tasnim.hamtaa.org/payload?item_index=39004",
+      "captured_at": "2026-10-23 08:50:16",
+      "values": { "متن": "...", "برگ": "39004" },
+      "prev_id": null,
+      "next_id": 2
+    }
+  ],
+  "total": 373, "page": 1, "per_page": 3, "total_pages": 125
+}
+```
+
+- **`prev_id`/`next_id` با `LAG`/`LEAD`** محاسبه می‌شوند و **ترتیب خود لیست** را دنبال می‌کنند
+  (همان `ORDER BY` + همان `WHERE`) — نه `id±1` خام؛ در هر sort/فیلتری درست‌اند.
+- پروژه‌ی ناموجود → `404`.
+
+### `GET /api/dashboard/projects/<id>/pages/<page_id>` (PCM-05)
+
+جزئیات یک صفحه:
+
+```json
+{
+  "id": 1,
+  "url": "https://...",
+  "captured_at": "2026-10-23 08:50:16",
+  "content_hash": "9f2c...",
+  "values": { "متن": "...", "برگ": "39004" },
+  "raw_values_json": "{\"متن\": \"...\", \"برگ\": \"39004\"}",
+  "position": { "index": 1, "total": 373 },
+  "field_errors": []
+}
+```
+
+- `position` بر اساس ترتیب ثبت (`id`) است؛ `field_errors` از PCM-07/08 شروع به پرشدن می‌کند
+  (تا آن زمان خالی است — ساختگی نیست).
+- صفحه‌ی ناموجود یا متعلق به پروژه‌ی دیگر → `404`.
+
 ### `GET /api/dashboard/projects/<id>`
 
 آیتم کامل + موارد زیر:
@@ -66,6 +121,13 @@
 - دکمه‌ی «جزئیات» روی هر ردیف → کارت جزئیات: کارت‌های آمار (ذخیره/رد/خطا/صفحات/فیلدها)،
   جدول فیلدها (tag، source، selector، transform)، JSON آخرین صفحه با دکمه‌ی کپی،
   آدرس آخرین URL و دکمه‌ی بازگشت به فهرست.
+- **کارت «📄 صفحات (N)» (PCM-05)**: مرور صفحه‌به‌صفحه — جستجو در URL یا متن فیلدها،
+  sort (شماره/زمان ثبت/URL)، جهت، تعداد در صفحه، pager؛ هر ردیف URL (باز در تب جدید) +
+  نمایه فیلدها + دکمه‌های «مشاهده» و «کپی».
+- **نمای صفحه (PCM-05)**: Previous/Next بر اساس `prev_id`/`next_id` همان لیست (با همان
+  فیلتر/sort)، موقعیت «X از Y»، جدول فیلدها با کل متن، JSON خام + کپی، hash محتوا.
+  «بازگشت به فهرست» حالت (صفحه/جستجو/sort) را حفظ می‌کند؛ state در `pageBrowser` است تا
+  رفرش خودکار ۱۰ ثانیه‌ای آن را بازنویسی نکند.
 - صفحه‌بندی: دکمه‌های صفحه‌به‌صفحه + «صفحه X از Y».
 - هر مقدار از API قبل از واردشدن در DOM از `escHtml` عبور می‌کند (XSS-safe).
 
@@ -89,4 +151,15 @@
 - **APIهای نوشتاری اکستنشن باز می‌مانند** (`/api/projects*`) تا کراول زنده قطع نشود.
 
 تست‌ها: `backend/test_dashboard.py` → `D01..D07` (صفحه‌بندی، جستجو، فیلتر، sort،
-جزئیات، 404، created_at).
+جزئیات، 404، created_at) + `P01..P07` (PCM-05: صفحه‌بندی صفحات، جستجوی URL،
+جستجوی متن فارسی فیلدها، Previous/Next هم‌راستای ترتیب لیست شامل فهرست فیلترشده،
+جزئیات صفحه + position، 404ها و scope بین پروژه‌ها، sort DESC + url).
+
+## دپلوی
+
+`deploy/pcm05_deploy.sh`: بکاپ آنلاین DB + integrity + اسنپ‌شات کد → extract →
+`docker compose build backend && up -d backend` (بدون `down`) → health-wait →
+smoke (auth 401/200، dashboard 200، **pages list/detail با 401/404**، extension open) →
+**regression نوشتاری** (ساخت پروژه + ذخیره صفحه، سپس پاک‌سازی) → مقایسه pre/post
+شمارنده‌های پروژه ۲ + نمونه‌ی ۱۵ ثانیه‌ای برای تأیید ادامه‌ی کراول زنده.
+بسته‌بندی کد: `deploy/pack_pcm05.py` (بدون .git/.env/DB).

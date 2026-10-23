@@ -14,7 +14,7 @@
 | 2 | بیانات `farsi.khamenei.ir/speech` (متن/عنوان/تاریخ جلالی/صوت/فیلم) | ✅ فعال |
 | 3 | **سیستم پروژه** (v3.5): پروژه برای هر دامنه، نقطه‌های استخراج، کراول قطعه‌قطعه با resume | ✅ فعال (تست واقعی Chrome باقی‌مانده) |
 | 4 | سایت‌های نام‌دار با فیلدهای آماده (`tasnim.hamtaa.org` seed شده) | ✅ فعال |
-| 5 | داشبورد آنلاین `corpus.ai.ismc.ir/dashboard` (تب «پروژه‌ها» + صفحه‌بندی + جزئیات + احراز هویت رمز) | ✅ فعال (PCM-04/09) |
+| 5 | داشبورد آنلاین `corpus.ai.ismc.ir/dashboard` (تب «پروژه‌ها» + مرور صفحه‌به‌صفحه + جستجو + Previous/Next + احراز هویت رمز) | ✅ فعال (PCM-04/05/09) |
 | 6 | پایپلاین پیکره + دیتaset + آپلود HuggingFace | ✅ در دسترس |
 | 7 | ایندکسر RAG | 🚧 در دست توسعه |
 
@@ -48,7 +48,7 @@
 │  • dashboard_api.py — API خواندنی داشبورد ★           │
 │  • sites.py       — سایت‌های نام‌دار + فیلدها ★      │
 │  • sciences.py    — ۱۳ علم اصطلاح‌نامه               │
-│  • 3 test files (api/projects/dashboard) — 32 تست     │
+│  • 3 test files (api/projects/dashboard) — 39 تست     │
 ├────────────────────────────────────────────────────────┤
 │  Corpus Pipeline (corpus/)                             │
 │  • build_corpus.py / build_dataset.py / pipeline.py    │
@@ -72,7 +72,7 @@ persian-corpus-toolkit/
 │   ├── sciences.py          # ۱۳ علم
 │   ├── test_api.py          # ۸ تست
 │   ├── test_projects.py     # ۹ تست جریان پروژه
-│   ├── test_dashboard.py    # ۱۵ تست (auth A01-A08 + داشبورد D01-D07)
+│   ├── test_dashboard.py    # ۲۲ تست (auth A01-A08 + D01-D07 + صفحات P01-P07)
 │   ├── requirements.txt
 │   ├── Dockerfile
 │   └── thesaurus.db         # (gitignored)
@@ -163,6 +163,8 @@ python upload_to_hf.py --token hf_... --username ...
 | `/api/auth/status` | GET | `{auth_enabled, authenticated}` |
 | `/api/dashboard/projects` | GET | فهرست پروژه‌ها — جستجو/فیلتر/status/مرتب‌سازی/صفحه‌بندی سمت سرور |
 | `/api/dashboard/projects/<id>` | GET | جزئیات: فیلدها، pages_summary، values_sample آخرین صفحه |
+| `/api/dashboard/projects/<id>/pages` | GET | **PCM-05** فهرست صفحات — جستجو (URL/متن فیلدها)، sort، صفحه‌بندی، prev/next |
+| `/api/dashboard/projects/<id>/pages/<page_id>` | GET | **PCM-05** جزئیات صفحه — values، position، JSON خام، field_errors |
 
 سند کامل: [docs/project-dashboard.md](docs/project-dashboard.md) و [docs/dashboard-authentication.md](docs/dashboard-authentication.md)
 
@@ -218,7 +220,7 @@ cp backups/thesaurus_20260802.db backend/thesaurus.db       # بازیابی
 ## 🧪 تست‌ها
 
 ```bash
-cd backend && python -m unittest test_api test_projects test_dashboard -v   # 32/32
+cd backend && python -m unittest test_api test_projects test_dashboard -v   # 39/39
 cd extension && node test_popup.js                            # 8/8
 node --check extension/popup.js extension/background.js extension/content_picker.js
 node -e "JSON.parse(require('fs').readFileSync('extension/manifest.json'))"
@@ -243,6 +245,8 @@ node -e "JSON.parse(require('fs').readFileSync('extension/manifest.json'))"
 
 **داشبورد + احراز هویت (PCM-04/09 — از ۱۴۰۵/۰۸/۰۱):**
 - داشبورد: `https://corpus.ai.ismc.ir/dashboard/` — tab «📁 پروژه‌ها» (فهرست + صفحه‌بندی + جزئیات)
+- **PCM-05:** کارت «📄 صفحات» در جزئیات هر پروژه — مرور صفحه‌به‌صفحه، جستجو در URL/متن فیلدها،
+  sort/صفحه‌بندی، Previous/Next هم‌راستای ترتیب لیست، JSON خام هر صفحه + کپی (فقط خواندنی، بدون مهاجرت schema)
 - ورود: `POST /api/auth/login` با رمز؛ cookie `pct_session` (HttpOnly/Secure/SameSite=Lax)
 - رمز: **فقط** در `.env` سرور (gitignored، chmod 600) — در DB به‌صورت scrypt-hash؛ هرگز در کد/Git/لاگ
 - APIهای نوشتاری اکستنشن (`/api/projects*`) **باز می‌مانند** → کراول زنده هرگز با ورود داشبورد قطع نمی‌شود
