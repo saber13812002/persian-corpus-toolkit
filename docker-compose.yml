@@ -1,0 +1,16 @@
+services:
+  backend:
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
+    ports:
+      - "127.0.0.1:5055:5055"
+    environment:
+      HOST: 0.0.0.0
+      PORT: "5055"
+      PCT_DB: /data/thesaurus.db
+      STATIC_DIR: /dashboard
+    volumes:
+      - ./backend/thesaurus.db:/data/thesaurus.db
+      - ./dashboard:/dashboard:ro
+    restart: unless-stopped

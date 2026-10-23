@@ -8,7 +8,10 @@ from datetime import datetime, timezone
 from flask import Flask, request, jsonify, g, send_from_directory, redirect
 from flask_cors import CORS
 
-app = Flask(__name__, static_folder='../dashboard', static_url_path='/dashboard')
+STATIC_DIR = os.environ.get('STATIC_DIR') or os.path.abspath(
+    os.path.join(os.path.dirname(__file__), '..', 'dashboard')
+)
+app = Flask(__name__, static_folder=STATIC_DIR, static_url_path='/dashboard')
 CORS(app)
 
 DB_PATH = os.environ.get('PCT_DB') or os.path.join(os.path.dirname(__file__), 'thesaurus.db')
@@ -134,6 +137,11 @@ def init_db():
         db.execute("CREATE INDEX IF NOT EXISTS idx_queue_site_status ON crawl_queue(site, status)")
     except Exception:
         pass
+    from sites import ensure_sites_schema, seed_default_sites
+    from projects import ensure_projects_schema
+    ensure_sites_schema(db)
+    seed_default_sites(db)
+    ensure_projects_schema(db)
     db.close()
 
 
@@ -1440,6 +1448,12 @@ def khamenei_seed():
             pass
     db.commit()
     return jsonify({"seeded": added, "already_crawled": skipped_done, "requested": len(ids)})
+
+
+from sites import register_site_routes
+from projects import register_project_routes
+register_site_routes(app, get_db)
+register_project_routes(app, get_db)
 
 
 # ═══════════════════════════════════════

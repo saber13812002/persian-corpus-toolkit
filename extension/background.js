@@ -10,12 +10,12 @@ let crawlState = {
   khamenei: { listPage: 1, ids: [], idx: 0, delayMs: 2000, errors: 0 },
 };
 
-chrome.runtime.onMessage.addListener((msg, _s, sendResponse) => {
-  handle(msg).then(sendResponse).catch((e) => sendResponse({ ok: false, message: String(e) }));
+chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
+  handle(msg, sender).then(sendResponse).catch((e) => sendResponse({ ok: false, message: String(e) }));
   return true;
 });
 
-async function handle(msg) {
+async function handle(msg, sender) {
   switch (msg.action) {
     case 'runPhase1':
       return runPhase1(msg.site || 'thesaurus');
@@ -45,6 +45,14 @@ async function handle(msg) {
     }
     case 'getStats':
       return getStats(msg.site || 'thesaurus');
+    case 'openProject':
+      return controlPicker('openProject', { projectId: msg.projectId });
+    case 'testProject':
+      return controlPicker('testProject', { projectId: msg.projectId });
+    case 'startReading':
+      return startReading(msg, sender);
+    case 'stopReading':
+      return stopReading();
     case 'phaseProgress':
     case 'phaseDone':
       // relay to popup if open
@@ -213,6 +221,22 @@ async function onKhameneiPhase2Result(msg) {
   await navigateKhameneiDetail();
 }
 
+async function controlPicker(action, extra) {
+  const tabs = await chrome.tabs.query({ active: true, currentWindow: true });
+  const tab = tabs[0];
+  if (!tab?.id || !/^https?:/i.test(tab.url || '')) {
+    return { ok: false, message: 'یک صفحه وب باز کن' };
+  }
+  try {
+    await chrome.scripting.executeScript({ target: { tabId: tab.id }, files: ['content_picker.js'] });
+  } catch (_) {}
+  try {
+    return await chrome.tabs.sendMessage(tab.id, { action, ...(extra || {}) });
+  } catch (e) {
+    return { ok: false, message: e.message };
+  }
+}
+
 async function startSingle() {
   const tabs = await chrome.tabs.query({ active: true, currentWindow: true });
   if (!tabs[0]) return { ok: false, message: 'تب فعالی نیست' };
@@ -312,3 +336,193 @@ chrome.tabs.onUpdated.addListener(async (tabId, info, tab) => {
     }
   }
 });
+
+let reading = false;
+
+function advanceUrl(url, project) {
+  const next = new URL(url);
+  const param = project.next_param;
+  if (project.next_mode !== 'url_param' || !param) {
+    throw new Error('قانون صفحه بعد ذخیره نشده');
+  }
+  if (!next.searchParams.has(param)) throw new Error('پارامتر ' + param + ' در لینک نیست');
+  const n = parseInt(next.searchParams.get(param), 10);
+  if (!Number.isFinite(n)) throw new Error('پارامتر صفحه عدد نیست');
+  next.searchParams.set(param, String(n + (Number(project.next_step) || 1)));
+  return next.toString();
+}
+
+async function postReport(projectId, body) {
+  const r = await fetch(`${BACKEND}/api/projects/${projectId}/report`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  });
+  return r.json();
+}
+
+async function startReading(msg, sender) {
+  const projectId = msg.projectId;
+  const info = await fetch(`${BACKEND}/api/projects/${projectId}`).then((r) => r.json());
+  if (!info.id) return { ok: false, message: 'پروژه پیدا نشد' };
+  if (info.status === 'draft' || !info.tested_at) {
+    return { ok: false, message: 'اول آزمایش این صفحه باید موفق شود' };
+  }
+  if (info.next_mode !== 'url_param' || !info.next_param) {
+    return { ok: false, message: 'قانون صفحه بعد ذخیره نشده' };
+  }
+  let tabId = sender?.tab?.id;
+  if (!tabId) {
+    const tabs = await chrome.tabs.query({ active: true, currentWindow: true });
+    tabId = tabs[0]?.id;
+  }
+  if (!tabId) return { ok: false, message: 'تب صفحه باز نیست' };
+  const pages = Math.max(1, Math.min(12, Number(msg.pagesPerMinute || info.pages_per_minute || 4)));
+  await postReport(projectId, { status: 'running', message: `خواندن شروع شد، ${pages} صفحه در دقیقه` });
+  await chrome.storage.local.set({
+    pctRun: { active: true, projectId, tabId, pagesPerMinute: pages, emptyStreak: 0 },
+  });
+  chrome.alarms.create('pctRead', { delayInMinutes: 1, periodInMinutes: 1 });
+  runMinute();
+  return { ok: true, message: `خواندن شروع شد، ${pages} صفحه در دقیقه` };
+}
+
+async function stopReading() {
+  reading = false;
+  await chrome.alarms.clear('pctRead');
+  const stored = await chrome.storage.local.get('pctRun');
+  const run = stored.pctRun;
+  if (run?.projectId) {
+    await postReport(run.projectId, { status: 'paused', message: 'خواندن متوقف شد' });
+  }
+  await chrome.storage.local.set({ pctRun: { ...(run || {}), active: false } });
+  return { ok: true, message: 'خواندن متوقف شد' };
+}
+
+function waitComplete(tabId, timeout) {
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(() => {
+      chrome.tabs.onUpdated.removeListener(onUp);
+      reject(new Error('صفحه دیر باز شد'));
+    }, timeout);
+    function onUp(id, info) {
+      if (id === tabId && info.status === 'complete') {
+        clearTimeout(timer);
+        chrome.tabs.onUpdated.removeListener(onUp);
+        resolve();
+      }
+    }
+    chrome.tabs.onUpdated.addListener(onUp);
+  });
+}
+
+async function extractWhenReady(tabId, payload) {
+  let last = 'اسکریپت صفحه جواب نداد';
+  for (let i = 0; i < 8; i += 1) {
+    try {
+      await chrome.scripting.executeScript({ target: { tabId }, files: ['content_picker.js'] });
+    } catch (_) {}
+    try {
+      return await chrome.tabs.sendMessage(tabId, payload);
+    } catch (e) {
+      last = e.message;
+      await sleep(400);
+    }
+  }
+  return { ok: false, message: last };
+}
+
+async function runMinute() {
+  if (reading) return;
+  const stored = await chrome.storage.local.get('pctRun');
+  const run = stored.pctRun;
+  if (!run?.active) return;
+  reading = true;
+  let saved = 0;
+  let skipped = 0;
+  let failed = 0;
+  try {
+    const project = await fetch(`${BACKEND}/api/projects/${run.projectId}`).then((r) => r.json());
+    if (!project?.id || project.status === 'paused') {
+      await chrome.storage.local.set({ pctRun: { ...run, active: false } });
+      await chrome.alarms.clear('pctRead');
+      return;
+    }
+    let cursor = project.cursor_url || project.start_url;
+    const pages = Math.max(1, Math.min(12, Number(run.pagesPerMinute || project.pages_per_minute || 4)));
+    const gap = Math.max(2000, Math.floor(60000 / pages) - 4000);
+    let emptyStreak = run.emptyStreak || 0;
+    for (let i = 0; i < pages; i += 1) {
+      const fresh = await chrome.storage.local.get('pctRun');
+      if (!fresh.pctRun?.active) break;
+      let next;
+      try {
+        next = advanceUrl(cursor, project);
+      } catch (e) {
+        await postReport(run.projectId, { status: 'paused', failed: 1, message: e.message });
+        await chrome.storage.local.set({ pctRun: { ...run, active: false } });
+        await chrome.alarms.clear('pctRead');
+        return;
+      }
+      try {
+        await chrome.tabs.update(run.tabId, { url: next });
+        await waitComplete(run.tabId, 20000);
+        await sleep(600);
+        const result = await extractWhenReady(run.tabId, {
+          action: 'extractProject',
+          projectId: project.id,
+          points: project.points,
+        });
+        if (!result?.ok) {
+          emptyStreak += 1;
+          failed += 1;
+          await postReport(run.projectId, { failed: 1, cursor_url: next, message: result?.message || 'صفحه خوانده نشد' });
+          if (emptyStreak >= 2) {
+            await postReport(run.projectId, {
+              status: 'paused',
+              message: 'دو صفحه پشت‌سرهم متن نداشت. خواندن ایستاد.',
+            });
+            await chrome.storage.local.set({ pctRun: { ...run, active: false, emptyStreak } });
+            await chrome.alarms.clear('pctRead');
+            return;
+          }
+        } else {
+          emptyStreak = 0;
+          if (result.status === 'skipped') skipped += 1;
+          else saved += 1;
+          const label = Object.entries(result.values || {}).map(([k, v]) => `${k}=${String(v || '').slice(0, 24)}`).join(' ');
+          await postReport(run.projectId, {
+            cursor_url: next,
+            message: `${result.status}: ${label || next}`,
+          });
+        }
+        cursor = next;
+        await chrome.storage.local.set({ pctRun: { ...run, emptyStreak, active: true } });
+      } catch (e) {
+        failed += 1;
+        await postReport(run.projectId, { failed: 1, message: e.message });
+      }
+      if (i < pages - 1) await sleep(gap);
+    }
+    const summary = await fetch(`${BACKEND}/api/projects/${run.projectId}`).then((r) => r.json());
+    await postReport(run.projectId, {
+      status: 'running',
+      message: `این دقیقه ${saved} ذخیره، ${skipped} رد، ${failed} خطا. مجموع ${summary.saved_count || 0}.`,
+    });
+  } finally {
+    reading = false;
+  }
+}
+
+chrome.alarms.onAlarm.addListener((alarm) => {
+  if (alarm.name === 'pctRead') runMinute();
+});
+
+async function resumeReadingAlarm() {
+  const stored = await chrome.storage.local.get('pctRun');
+  if (stored.pctRun?.active) {
+    chrome.alarms.create('pctRead', { delayInMinutes: 1, periodInMinutes: 1 });
+  }
+}
+chrome.runtime.onStartup.addListener(resumeReadingAlarm);
+chrome.runtime.onInstalled.addListener(resumeReadingAlarm);

@@ -1,13 +1,15 @@
 {
   "manifest_version": 3,
   "name": "Persian Corpus Crawler",
-  "version": "3.3",
-  "description": "Two-phase corpus crawler: list → full save. Jalali date (oliveDate) + year stats. Thesaurus + khamenei.",
-  "permissions": ["activeTab", "storage", "scripting", "tabs"],
+  "version": "3.5",
+  "description": "Define a tafsir project, pick page points, then read several pages a minute.",
+  "permissions": ["activeTab", "storage", "scripting", "tabs", "alarms"],
   "host_permissions": [
     "https://thesaurus.eiis.iki.ac.ir/*",
     "https://farsi.khamenei.ir/*",
-    "https://corpus.ai.ismc.ir/*"
+    "https://corpus.ai.ismc.ir/*",
+    "https://tasnim.hamtaa.org/*",
+    "<all_urls>"
   ],
   "background": {
     "service_worker": "background.js"
@@ -25,6 +27,11 @@
     {
       "matches": ["https://farsi.khamenei.ir/*"],
       "js": ["shared.js", "content_khamenei.js"],
+      "run_at": "document_idle"
+    },
+    {
+      "matches": ["http://*/*", "https://*/*"],
+      "js": ["content_picker.js"],
       "run_at": "document_idle"
     }
   ],

@@ -37,6 +37,13 @@
     .stat-row:last-child { border-bottom: none; }
     .stat-val { color: #e94560; font-weight: 600; }
     .hint { font-size: 10px; color: #94a3b8; margin-top: 6px; line-height: 1.5; }
+    .steps { display: flex; gap: 4px; margin-bottom: 10px; }
+    .steps span { flex: 1; text-align: center; font-size: 10px; color: #94a3b8; border-bottom: 2px solid #334155; padding-bottom: 4px; }
+    label { display: block; font-size: 11px; color: #94a3b8; margin: 6px 0 3px; }
+    input, select { width: 100%; padding: 7px; border-radius: 6px; border: 1px solid #334155; background: #0f172a; color: #f8fafc; font-family: inherit; }
+    .report { background: #0d1117; border-radius: 6px; padding: 8px; min-height: 36px; font-size: 12px; line-height: 1.5; margin-top: 8px; }
+    details { margin-top: 8px; }
+    summary { cursor: pointer; color: #94a3b8; font-size: 12px; padding: 6px 0; }
     .log { background: #0d1117; border-radius: 6px; padding: 8px; max-height: 120px; overflow-y: auto; font-size: 10px; font-family: Consolas, monospace; }
     .log .ok { color: #2ecc71; } .log .err { color: #e74c3c; } .log .info { color: #3498db; } .log .warn { color: #f39c12; }
     .status-bar { display: flex; align-items: center; gap: 8px; padding: 6px 12px; background: #0f3460; font-size: 11px; }
@@ -48,8 +55,8 @@
 </head>
 <body>
   <div class="header">
-    <h1>📚 Persian Corpus Crawler</h1>
-    <span>فاز ۱ لیست یکتا → فاز ۲ ذخیره کامل</span>
+    <h1>خواندن تفسیر</h1>
+    <span>پروژه، نقطه‌ها، آزمایش، بعد خواندن</span>
   </div>
   <div class="status-bar">
     <div class="dot idle" id="statusDot"></div>
@@ -58,6 +65,37 @@
     <span style="font-size:10px;color:#64748b" id="siteTag"></span>
   </div>
   <div class="content">
+    <div class="steps" aria-hidden="true">
+      <span>۱ پروژه</span><span>۲ نقطه‌ها</span><span>۳ آزمایش</span><span>۴ خواندن</span>
+    </div>
+    <div class="section">
+      <label for="projectName">نام پروژه</label>
+      <input id="projectName" type="text" placeholder="مثلا: تفسیر تسنیم" autocomplete="off">
+      <label for="projectSelect">پروژه‌های این سایت</label>
+      <select id="projectSelect"><option value="">در حال خواندن…</option></select>
+      <div class="btn-row" style="margin-top:8px">
+        <button type="button" class="btn-primary" id="btnCreateProject">ساختن از این صفحه</button>
+      </div>
+    </div>
+    <div class="section">
+      <div class="section-title">نقطه‌های صفحه</div>
+      <div class="btn-row">
+        <button type="button" class="btn-secondary" id="btnEditPoints">انتخاب و ویرایش</button>
+      </div>
+      <div class="hint" id="pointHint">روی متن تفسیر کلیک کن، اسم نقطه را بنویس، ذخیره کن. برای عوض کردنش ویرایش را بزن.</div>
+    </div>
+    <div class="section">
+      <label for="pagesPerMinute">در هر دقیقه چند صفحه</label>
+      <input id="pagesPerMinute" type="number" min="1" max="12" value="4">
+      <div class="btn-row" style="margin-top:8px">
+        <button type="button" class="btn-primary" id="btnTestProject">آزمایش و شروع</button>
+        <button type="button" class="btn-stop" id="btnStopRead">توقف</button>
+      </div>
+      <div class="report" id="reportText" role="status" aria-live="polite" aria-atomic="true">اول پروژه را از این صفحه بساز.</div>
+    </div>
+
+    <details>
+      <summary>ابزارهای قبلی — اصطلاح‌نامه و بیانات</summary>
     <div class="site-selector">
       <button type="button" class="site-btn active" id="siteThesaurus" data-site="thesaurus">
         <span class="icon">📖</span>اصطلاح‌نامه
@@ -98,7 +136,8 @@
       <div class="stat-row"><span>✅ ذخیره‌شده:</span><span class="stat-val" id="statSaved">-</span></div>
       <div class="stat-row"><span>📅 آخرین:</span><span class="stat-val" id="statLast">-</span></div>
     </div>
-    <div class="log" id="logBox"><div class="entry info">🟢 آماده — ابتدا فاز ۱ سپس فاز ۲</div></div>
+    </details>
+    <div class="log" id="logBox"><div class="entry info">پروژه تفسیر را از صفحهٔ باز بساز</div></div>
   </div>
   <script src="popup.js"></script>
 </body>
