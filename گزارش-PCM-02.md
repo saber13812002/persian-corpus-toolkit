@@ -13,7 +13,7 @@
 |---|---|---|
 | ۱ — بررسی کامل Git | ✅ | در مخزن صحیح، شعبه `main`، همگام با `origin/main` (آدرد عقب/پیش نیست) |
 | ۲ — اجرای تست‌ها | ✅ | Backend **17/17** — UI **8/8** — syntax 6 JS — manifest معتبر |
-| ۳ — Commit و Push | ✅ | فقط فایل‌های PCM-01/02 stage شده‌اند؛ بدون `git add .`؛ بدون force push |
+| ۳ — Commit و Push | ✅ | HEAD روی remote: `b096e2d` — بدون force push |
 | ۴ — آماده‌بودن Production | ⚠️ **BLOCKED** | `/api/projects` روی سرور **404** است (بکند قدیمی). SSH به s52 → `Permission denied (publickey)`؛ بررسی Docker/volume/DB روی سرور ممکن نبود |
 | ۵ — استقرار | ⏸️ منتظر تأیید | برنامه در بخش ۳؛ طبق دستورالعمل بدون تأیید صریح کاربر اجرا نمی‌شود |
 | ۶ — تست واقعی Chrome | ⏸️ **BLOCKED** | دسترسی به Chrome از این محیط نیست؛ چک‌لیست عملیاتی در بخش ۵ |
@@ -21,7 +21,18 @@
 
 ---
 
-## ۲. شواهد تست (اجرا شده ۲۰۲۶-۱۰-۲۳)
+## ۲. نتیجه Git (تحقق‌شده روی remote)
+
+| مورد | مقدار |
+|---|---|
+| Branch | `main` |
+| Commit HEAD (روی remote) | `b096e2d6f4ed9bb045c147370907671465dea42c` |
+| لینک مستقیم | https://github.com/saber13812002/persian-corpus-toolkit/commit/b096e2d6f4ed9bb045c147370907671465dea42c |
+| Commit قبلی (کد PCM-01) | `e4a460014582dae992d1a5b6d14feb9bff00c2cc` — https://github.com/saber13812002/persian-corpus-toolkit/commit/e4a460014582dae992d1a5b6d14feb9bff00c2cc |
+| Push | ✅ موفق، بعد از `git fetch` تأیید شد که `origin/main` دقیقاً روی HEAD است |
+| توضیح | هنگام فاز ۳ مشخص شد کد PCM-01 از قبل به‌صورت commit `e4a4600` (پیام «کامیت») روی remote ثبت شده است. تغییرات باقی‌مانده (readme بازنویسی‌شده + این گزارش) با rebase تمیز روی آن سوار و push شدند — بدون force push، بدون overwrite. |
+
+## ۳. شواهد تست (اجرا شده ۲۰۲۶-۱۰-۲۳)
 
 ### ۲.۱ Backend — `cd backend && python -m unittest test_api test_projects -v` (Python 3.14.7)
 
@@ -59,9 +70,9 @@
 
 ---
 
-## ۳. وضعیت Production و برنامه استقرار
+## ۴. وضعیت Production و برنامه استقرار
 
-### ۳.۱ پرواز HTTP زنده (از شبکه کاربر، ۲۰۲۶-۱۰-۲۳)
+### ۴.۱ پرواز HTTP زنده (از شبکه کاربر، ۲۰۲۶-۱۰-۲۳)
 
 | Endpoint | وضعیت | نتیجه |
 |---|---|---|
@@ -71,7 +82,7 @@
 
 **تشخیص قطعی:** بکند روی s52 بین نسخه‌های `4efe107` و `f40b0a6` کار می‌کند؛ ماژول‌های [`projects.py`](backend/projects.py:1) و `sites.py` و routeهایشان روی سرور نیستند. این همان خطای 404 گزارش‌شده PCM-01 است و **تنها** مانع عملیاتی ثبت پروژه است.
 
-### ۳.۲ مانع دسترسی سرور
+### ۴.۲ مانع دسترسی سرور
 
 ```
 ssh s52  (HostName 172.20.1.52, Port 2222, User saber, از jump53)
@@ -80,7 +91,7 @@ ssh s52  (HostName 172.20.1.52, Port 2222, User saber, از jump53)
 
 کلید SSH این دستگاه برای کاربر `saber` روی s52 ثبت نشده است. **تا رفع این مورد، فاز ۴ (بکاپ/شناسایی volume/rollback روی سرور) و فاز ۵ (استقرار) BLOCKED است.**
 
-### ۳.۳ برنامه استقرار (برای اجرا فقط بعد از تأیید کاربر)
+### ۴.۳ برنامه استقرار (برای اجرا فقط بعد از تأیید کاربر)
 
 1. کد Commit جدید روی s52: `git pull` (یا clone تازه) — بدون تغییر دست‌نخورده روی داده‌ها.
 2. شناسایی روش فعلی استقرار (compose/فولدر/volume واقعی) و ثبت در گزارش.
@@ -95,7 +106,7 @@ ssh s52  (HostName 172.20.1.52, Port 2222, User saber, از jump53)
 7. تأیید حفظ داده‌های قدیمی: مقایسه `crawled_total`/`queue_done` با خروجی `/api/stats` قبل از استقرار.
 8. **Rollback:** تصویر قبلی باقی می‌ماند؛ `docker compose up -d backend` با تصویر قبلی. اسکیمای جدید **additive** است (فقط جدول‌های جدید `projects`, `project_points`, `project_pages`, `sites`, `site_fields`, `captures` — هیچ ستونی به جداول قدیمی اضافه/حذف نمی‌شود) → اجرای نسخه قدیمی روی DB جدید امن است.
 
-### ۳.۴ تفاوت Local و Production (ثبت‌شده)
+### ۴.۴ تفاوت Local و Production (ثبت‌شده)
 
 | مورد | Local | Production |
 |---|---|---|
@@ -105,7 +116,7 @@ ssh s52  (HostName 172.20.1.52, Port 2222, User saber, از jump53)
 
 ---
 
-## ۴. فهرست فایل‌های تغییرکرده در این commit
+## ۵. فهرست فایل‌های تغییرکرده در commitهای PCM-01/02
 
 **کد Backend:**
 - [`backend/projects.py`](backend/projects.py:1) — ★ سیستم پروژه (جدید): جدول‌ها + `GET/POST /api/projects`, `GET/POST /api/projects/<id>`, `points`, `pages`, `report`
@@ -130,7 +141,7 @@ ssh s52  (HostName 172.20.1.52, Port 2222, User saber, از jump53)
 
 ---
 
-## ۵. چک‌لیست تست واقعی Chrome (فاز ۶ — توسط کاربر/ایجنت با دسترسی Chrome)
+## ۶. چک‌لیست تست واقعی Chrome (فاز ۶ — توسط کاربر/ایجنت با دسترسی Chrome)
 
 بعد از استقرار فاز ۵ و تأیید:
 
@@ -149,18 +160,18 @@ ssh s52  (HostName 172.20.1.52, Port 2222, User saber, از jump53)
 
 ---
 
-## ۶. راهنمای تحویل به ایجنت‌های هوش مصنوعی (Handoff)
+## ۷. راهنمای تحویل به ایجنت‌های هوش مصنوعی (Handoff)
 
 > این بخش برای ایجنت بعدی (یا توسعه‌دهنده) نوشته شده تا بدون مطالعه کامل کد، توسعه را ادامه دهد.
 
-### ۶.۱ قوانین سخت
+### ۷.۱ قوانین سخت
 - فقط روی این repository کار کن؛ ارتباط با هیچ پروژه دیگری ندارد.
 - **بدون تأیید صریح کاربر، هیچ تغییر روی Production** (s52 / `corpus.ai.ismc.ir`) — نه restart، نه rebuild، نه `docker-compose down`.
 - `git add .` ممنوع؛ فقط فایل‌های مرتبط. بدون force push.
 - دیتابیس (`*.db`)، `.env`، رمز و کلید هرگز در Git.
 - آزمون خودکار سبز ≠ عملیاتی سبز؛ قبل از بستن هر PCM، آزمون واقعی Chrome الزامی است.
 
-### ۶.۲ اجرای سریع
+### ۷.۲ اجرای سریع
 ```bash
 # Backend محلی (پورت 5055)
 cd backend && pip install -r requirements.txt && python server.py
@@ -178,7 +189,7 @@ curl http://127.0.0.1:5055/api/stats
 curl http://127.0.0.1:5055/api/projects
 ```
 
-### ۶.۳ معماری جریان پروژه (v3.5)
+### ۷.۳ معماری جریان پروژه (v3.5)
 ```
 popup.js ──POST /api/projects {name,host,start_url,next_*}──► projects.py
    │                                                      │  جدول projects
@@ -199,19 +210,19 @@ resume: `cursor_url` ستون پروژه است؛ بعد از هر صفحه ذخ
 pause خودکار: بعد از 2 صفحه خالی پشت‌سرهم → status=paused (resume با شروع مجدد).
 ```
 
-### ۶.۴ مراحل استفاده عملی (روند کاربر)
+### ۷.۴ مراحل استفاده عملی (روند کاربر)
 1. **دامنه:** صفحه سایت هدف در Chrome باز است (مثلاً `tasnim.hamtaa.org`).
 2. **نام و دامنه:** در popup، نام پروژه را بنویس ← «ساختن از این صفحه» — `host` خودکار از URL تب خوانده می‌شود و پروژه سمت سرور ذخیره می‌شود.
 3. **Inspect/نقطه‌ها:** «انتخاب و ویرایش» → پنل روی صفحه باز می‌شود؛ روی هر المنت کلیک → یک `tag` (مثل `verse_arabic`, `translation`, `page`) با selector و transform تعریف می‌شود (همان «اینسپکت المنت» به‌صورت امن بدون DevTools).
 4. **آزمایش:** «آزمایش» یک صفحه را با همان نقاط استخراج و ذخیره می‌کند (اولین صفحه موفق → `status=tested`).
 5. **کراول قطعه‌قطعه‌ی قابل‌ادامه:** «شروع خواندن» — هر دقیقه چند صفحه، شمارش saved/skipped در `/api/projects/<id>`؛ هر زمان قطع شد، از آخرین `cursor_url` ادامه می‌یابد.
 
-### ۶.۵ افزودن دامنه/سایت جدید
+### ۷.۵ افزودن دامنه/سایت جدید
 1. اگر سایت «نام‌دار» است: در `sites.py` رکورد + فیلدهای پیش‌فرض (مثل seed تسنیم) اضافه کن و تست `test_api` بساز.
 2. برای سایت دلخواهی: هیچ کدی لازم نیست — خودکار از popup ساخته می‌شود (host از URL). فقط نقطه‌ها در پنل تعریف می‌شوند.
 3. transform جدید برای الگوهای خاص: در `content_picker.js` (سمت استخراج) و `projects.py` (معتبرسازی) — تست در `test_projects.py`.
 
-### ۶.۶ عیب‌یابی سریع
+### ۷.۶ عیب‌یابی سریع
 | علامت | علت | اقدام |
 |---|---|---|
 | popup: «سرور نسخهٔ قدیمی است (404)» | بکند سرور بدون `projects.py` است | فاز ۵ این سند (بعد از تأیید) |
@@ -221,7 +232,7 @@ pause خودکار: بعد از 2 صفحه خالی پشت‌سرهم → status
 | 409 | تکرار | از لیست ComboBox انتخاب کن |
 | `saved_count` بالا نمی‌رود | نقاط روی صفحه منطبق نیستند | پنل → «آزمایش» → نمونه‌ها را نگاه کن |
 
-### ۶.۷ وضعیت‌های باز (backlog)
+### ۷.۷ وضعیت‌های باز (backlog)
 - B1 `background.js`: `sleep(2500)` ثابت بعد از `tabs.create` → تبدیل به polling `tabs.get` تا `status==='complete'`
 - B2 `waitComplete` روی تب درحال-load گاهی فایر نمی‌شود → listener قبل از `tabs.update`
 - `corpus/build_project_corpus.py`: خروجی `project_pages` به txt/jsonl
@@ -231,11 +242,11 @@ pause خودکار: بعد از 2 صفحه خالی پشت‌سرهم → status
 
 ---
 
-## ۷. وضعیت نهایی PCM-01: **PARTIAL**
+## ۸. وضعیت نهایی PCM-01: **PARTIAL**
 
 - کد و API: ✅ سالم و تست‌شده (17/17 + 8/8)
-- Git: ✅ commit و push روی `origin/main`
-- Backend Production: ⏸️ نسخه قدیمی — استقرار منتظر تأیید کاربر + رفع SSH
-- Chrome E2E: ⏸️ انجام‌نشده — چک‌لیست بخش ۵
+- Git: ✅ commit و push روی `origin/main` — HEAD `b096e2d`
+- Backend Production: ⏸️ نسخه قدیمی (404 روی `/api/projects`) — استقرار منتظر تأیید کاربر + رفع دسترسی SSH
+- Chrome E2E: ⏸️ انجام‌نشده — چک‌لیست بخش ۶
 
 تا استقرار بکند و آزمون واقعی Chrome، PCM-01 بسته نمی‌شود و وارد توسعه عمیق Inspect Element/Crawler نمی‌شود.
