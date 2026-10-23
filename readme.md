@@ -1,220 +1,253 @@
 # 📚 Persian Corpus Toolkit (پیکره‌ساز فارسی)
 
-ابزار جامع کراول، دیتابیس و پیکره‌سازی برای سایت‌های علمی و محتوایی فارسی
+ابزار کراول، دیتابیس و پیکره‌سازی برای سایت‌های علمی و محتوایی فارسی — با اکستنشن کروم (Manifest V3)، بکند Flask/SQLite و پایپلاین پیکره.
 
-## 🎯 پشتیبانی از سایت‌ها
+**Production:** https://corpus.ai.ismc.ir · **Repository:** https://github.com/saber13812002/persian-corpus-toolkit
 
-| # | سایت | وضعیت | نوع محتوا |
-|---|------|--------|-----------|
-| 1 | `thesaurus.eiis.iki.ac.ir` | ✅ کامل | اصطلاح‌نامه علوم عقلی اسلامی |
-| 2 | `farsi.khamenei.ir/speech` | 🚧 در حال توسعه | بیانات و سخنرانی‌ها |
+---
 
-## 🏗 معماری کلی
+## 🎯 امکانات
 
-```
-┌──────────────────────────────────────────────────┐
-│  Chrome Extension (اکستنشن کروم)                  │
-│  • کراول با سشن واقعی مرورگر                       │
-│  • استخراج هوشمند DOM                             │
-│  • پیمایش خودکار صفحات                            │
-├──────────────────────────────────────────────────┤
-│  Flask Backend (سرور محلی)                        │
-│  • مدیریت صف کراول                                │
-│  • Upsert هوشمند با content hash                  │
-│  • SQLite Database                               │
-├──────────────────────────────────────────────────┤
-│  Corpus Pipeline (پایپلاین پیکره)                  │
-│  • تبدیل دیتابیس به پیکره متنی خام                 │
-│  • ساخت دیتاست Instruction-Tuning                 │
-│  • آپلود خودکار به 🤗 HuggingFace                 │
-├──────────────────────────────────────────────────┤
-│  RAG Indexer (ایندکسر RAG - در دست توسعه)          │
-│  • محاسبه Embedding با GPU                        │
-│  • تخمین زمان با تست اولیه                        │
-│  • سگمنت‌بندی و Resume                           │
-└──────────────────────────────────────────────────┘
-```
+| # | قابلیت | وضعیت |
+|---|--------|--------|
+| 1 | اصطلاح‌نامه `thesaurus.eiis.iki.ac.ir` (فاز۱ لیست + فاز۲ تعاریف کامل) | ✅ فعال |
+| 2 | بیانات `farsi.khamenei.ir/speech` (متن/عنوان/تاریخ جلالی/صوت/فیلم) | ✅ فعال |
+| 3 | **سیستم پروژه** (v3.5): پروژه برای هر دامنه، نقطه‌های استخراج، کراول قطعه‌قطعه با resume | ✅ فعال (تست واقعی Chrome باقی‌مانده) |
+| 4 | سایت‌های نام‌دار با فیلدهای آماده (`tasnim.hamtaa.org` seed شده) | ✅ فعال |
+| 5 | داشبورد آنلاین `corpus.ai.ismc.ir/dashboard` | ✅ فعال |
+| 6 | پایپلاین پیکره + دیتaset + آپلود HuggingFace | ✅ در دسترس |
+| 7 | ایندکسر RAG | 🚧 در دست توسعه |
 
-## 📁 ساختار پروژه
+### سیستم پروژه (هسته v3.5)
+
+به‌جای «کراول یکسره»، یک **پروژه** (یک کتاب/سایت) تعریف می‌شود:
+
+1. در Popup: نام پروژه + دامنه (خودکار از تب فعال) → «ساختن از این صفحه»
+2. «انتخاب و ویرایش» → پنل روی صفحه → کلیک روی المنت‌ها = تعریف **نقطه** (tag + selector + transform)
+3. «آزمایش و شروع» → حلقه خواندن: هر دقیقه N صفحه (N=1..12) با `chrome.alarms`
+4. هر صفحه با **SHA-256** dedup می‌شود؛ شمارنده‌های saved/skipped/failed تجمعی‌اند
+5. **Resume:** موقعیت خواندن در `cursor_url` ذخیره می‌شود — بعد از هر قطعی (بستن کروم، refresh، 2 صفحه خالی) از آخرین کراول ادامه می‌یابد
+6. Pause خودکار بعد از 2 صفحه خالی پشت‌سرهم؛ resume با شروع مجدد
+
+---
+
+## 🏗 معماری
 
 ```
-thesaurus-crawler/
-├── backend/                    # سرور Flask + SQLite
-│   ├── server.py              # API اصلی
-│   └── requirements.txt
-├── extension/                  # اکستنشن کروم (Manifest V3)
-│   ├── manifest.json
-│   ├── background.js           # Service Worker - صف و هماهنگی
-│   ├── content.js              # Content Script - استخراج DOM
-│   ├── popup.html              # UI پاپ‌آپ اکستنشن
-│   ├── popup.js
+┌────────────────────────────────────────────────────────┐
+│  Chrome Extension (Manifest V3)                        │
+│  • popup.js/popup.html  — UI پروژه و آمار             │
+│  • content_picker.js    — پنل روی صفحه: انتخاب نقطه   │
+│  • background.js        — حلقه خواندن دقیقه‌ای (alarm)  │
+│  • content_thesaurus.js / content_khamenei.js          │
+├────────────────────────────────────────────────────────┤
+│  Flask Backend (پورت ۵۰۵۵، SQLite WAL)                │
+│  • server.py      — API اصلی + فاز۱/۲ + harvest      │
+│  • projects.py    — پروژه/نقطه/صفحه/گزارش ★          │
+│  • sites.py       — سایت‌های نام‌دار + فیلدها ★      │
+│  • sciences.py    — ۱۳ علم اصطلاح‌نامه               │
+│  • test_api.py + test_projects.py — 17 تست            │
+├────────────────────────────────────────────────────────┤
+│  Corpus Pipeline (corpus/)                             │
+│  • build_corpus.py / build_dataset.py / pipeline.py    │
+│  • upload_to_hf.py — آپلود به 🤗 HuggingFace          │
+├────────────────────────────────────────────────────────┤
+│  RAG Indexer (در دست توسعه)                           │
+│  • Embedding با GPU، تخمین زمان، resume، anti-ban      │
+└────────────────────────────────────────────────────────┘
+```
+
+### ساختار پروژه
+
+```
+persian-corpus-toolkit/
+├── backend/
+│   ├── server.py            # API اصلی (فاز۱/۲، harvest، khamenei)
+│   ├── projects.py          # ★ سیستم پروژه (v3.5)
+│   ├── sites.py             # ★ سایت‌ها و فیلدهای آماده
+│   ├── sciences.py          # ۱۳ علم
+│   ├── test_api.py          # ۷ تست
+│   ├── test_projects.py     # ۱۰ تست جریان پروژه
+│   ├── requirements.txt
+│   ├── Dockerfile
+│   └── thesaurus.db         # (gitignored)
+├── extension/
+│   ├── manifest.json        # v3.5
+│   ├── popup.html / popup.js
+│   ├── background.js        # service worker + حلقه minute-loop
+│   ├── content_picker.js    # ★ پنل انتخاب نقطه روی صفحه
+│   ├── content_thesaurus.js / content_khamenei.js
+│   ├── shared.js
+│   ├── test_popup.js        # ۸ تست UI (node)
 │   └── icons/
-├── corpus/                     # پایپلاین پیکره و دیتاست
-│   ├── build_corpus.py         # ساخت پیکره متنی خام
-│   ├── build_dataset.py        # ساخت دیتاست فاین‌تیون
-│   ├── upload_to_hf.py         # آپلود به HuggingFace
-│   ├── pipeline.py             # اجرای کامل پایپلاین
-│   └── output/                 # خروجی‌ها (gitignored)
-├── rag/                        # ایندکسر RAG (در دست توسعه)
-├── README.md
-└── .gitignore
+├── corpus/                  # پایپلاین پیکره و دیتاست
+├── dashboard/               # داشبورد استاتیک
+├── deploy/                  # nginx vhost + systemd
+├── docker-compose.yml       # backend محلی روی 127.0.0.1:5055
+└── گزارش-وضعیت-پروژه.md / گزارش-PCM-02.md
 ```
 
-## 🚀 نصب و راه‌اندازی - یک مرحله‌ای
+---
+
+## 🚀 نصب و راه‌اندازی
 
 ### پیش‌نیازها
-- Python 3.10+
-- Google Chrome
-- Git (برای همگام‌سازی با گیت‌هاب)
+- Python 3.10+ (تست‌شده روی 3.12/3.14)
+- Google Chrome (برای اکستنشن)
+- Git
 
-### 1. دریافت پروژه
+### 1. دریافت
 
 ```bash
-git clone https://github.com/YOUR_USERNAME/persian-corpus-toolkit.git
+git clone https://github.com/saber13812002/persian-corpus-toolkit.git
 cd persian-corpus-toolkit
 ```
 
-### 2. نصب بکند
+### 2. بکند (دو روش)
 
 ```bash
+# روش A — مستقیم
 cd backend
 pip install -r requirements.txt
-python server.py
-# ← روی http://127.0.0.1:5000 اجرا می‌شود
+python server.py            # ← http://127.0.0.1:5055
+
+# روش B — Docker (مطابق Production)
+docker compose up -d --build
 ```
 
-### 3. نصب اکستنشن کروم
+### 3. اکستنشن کروم
 
-1. آدرس `chrome://extensions` را در کروم باز کنید
-2. **Developer mode** را روشن کنید (بالا-راست)
-3. روی **Load unpacked** کلیک کنید
-4. پوشه `extension/` را انتخاب کنید
-5. یک تب از سایت هدف باز کنید (مثلاً `thesaurus.eiis.iki.ac.ir/fa/list/`)
-6. روی آیکون اکستنشن کلیک کنید ← `🌱 Seed` ← `🚀 کراول کامل`
+1. `chrome://extensions` ← **Developer mode** روشن
+2. **Load unpacked** ← پوشه `extension/`
+3. صفحه سایت هدف را باز کن و روی آیکون اکستنشن کلیک کن
+4. برای سیستم پروژه: نام پروژه بنویس ← «ساختن از این صفحه» ← «انتخاب و ویرایش» (پنل روی صفحه) ← «آزمایش و شروع»
+
+> برای تست محلی، ثابت `BACKEND` در `popup.js`، `background.js` و `content_picker.js` را به `http://127.0.0.1:5055` تغییر بده. در حالت Production همه‌جا `https://corpus.ai.ismc.ir` است.
 
 ### 4. ساخت پیکره
 
 ```bash
 cd corpus
-python pipeline.py
-# خروجی در پوشه corpus/output/
+python pipeline.py          # خروجی در corpus/output/
+python upload_to_hf.py --token hf_... --username ...
 ```
 
-### 5. آپلود به HuggingFace
+---
 
-```bash
-# از قبل یک توکن از https://huggingface.co/settings/tokens بسازید
-python upload_to_hf.py --token hf_YOUR_TOKEN --username YOUR_USERNAME
-```
+## 📊 API Endpoints (پورت 5055)
+
+### سیستم پروژه (v3.5)
+
+| Endpoint | Method | توضیح |
+|---|---|---|
+| `/api/projects?host=…` | GET | فهرست پروژه‌ها (فیلتر بر اساس دامنه) |
+| `/api/projects` | POST | ساخت پروژه `{name, host, start_url, next_mode, next_param, next_step, pages_per_minute}` |
+| `/api/projects/<id>` | GET/POST | مشاهده / ویرایش |
+| `/api/projects/<id>/points` | POST/DELETE | تعریف/ویرایش/اعاده‌نام/حذف نقطه |
+| `/api/projects/<id>/pages` | POST | ذخیره صفحه `{url, values}` — dedup با SHA-256 |
+| `/api/projects/<id>/report` | POST | گزارش اجرا `{saved, skipped, failed, cursor_url, status}` |
+
+### سایت‌ها
+
+| Endpoint | Method | توضیح |
+|---|---|---|
+| `/api/sites` | GET | فهرست سایت‌های نام‌دار + فیلدها |
+| `/api/sites/match?host=…` | GET | فیلدهای آماده یک سایت |
+| `/api/captures` | POST | ذخیره و dedup صفحات عمومی |
+
+### فازهای کلاسیک
+
+| Endpoint | Method | توضیح |
+|---|---|---|
+| `/api/phase1/seed-batch`, `/api/phase2/next-batch`, `/api/phase2/complete` | POST | فاز۱/۲ اصطلاح‌نامه |
+| `/api/thesaurus/elastic-harvest(+status)` | GET/POST | harvest سمت سرور (async + resume) |
+| `/api/khamenei/*` | — | seed/submit/reset/stats/pending |
+| `/api/stats`, `/api/pipeline/status`, `/api/queue` | GET | آمار |
+
+---
 
 ## 🗄️ دیتابیس
 
-### محل دیتابیس
-`backend/thesaurus.db` (SQLite)
-
-### ساختار جداول
+`backend/thesaurus.db` (SQLite، WAL mode، gitignored)
 
 | جدول | توضیح |
-|------|-------|
-| `crawl_queue` | صف کراول - URLها با وضعیت pending/done/crawling |
-| `crawled_data` | داده‌های کراول‌شده با content hash برای تشخیص تغییرات |
+|---|---|
+| `crawl_queue`, `crawled_data` | صف و داده‌های کلاسیک (content hash) |
+| `projects` | ★ پروژه‌ها + `cursor_url` (نقطه resume) + شمارنده‌ها |
+| `project_points` | ★ نقطه‌های استخراج (tag + source + selector + transform) |
+| `project_pages` | ★ صفحات ذخیره‌شده (values_json + SHA-256) |
+| `sites`, `site_fields` | سایت‌های نام‌دار و فیلدهای آماده |
+| `captures` | captures عمومی |
+
+جدول‌های جدید **خودکار** و **additive** ساخته می‌شوند (migration امن برای DBهای قدیمی).
 
 ### بک‌آپ و بازیابی
 
 ```bash
-# بک‌آپ
-cp backend/thesaurus.db backups/thesaurus_$(date +%Y%m%d_%H%M%S).db
-
-# یا: (قبل از کراول مجدد)
-sqlite3 backend/thesaurus.db ".backup 'backups/thesaurus_backup.db'"
-
-# بازیابی
-cp backups/thesaurus_20260729.db backend/thesaurus.db
+sqlite3 backend/thesaurus.db ".backup backups/thesaurus_$(date +%Y%m%d_%H%M%S).db"
+sqlite3 backups/thesaurus_xxx.db "PRAGMA integrity_check;"   # تأیید: ok
+cp backups/thesaurus_20260802.db backend/thesaurus.db       # بازیابی
 ```
 
-## 🔄 Upsert هوشمند
+### Upsert هوشمند
 
-بکند با **content hash** (SHA-256) کار می‌کند:
+با **content hash** (SHA-256): آیتم جدید → INSERT · تکراری با همین محتوا → SKIP · تکراری با محتوا تغییرکرده → UPDATE (version+1).
 
-| وضعیت | اتفاق |
-|--------|--------|
-| آیتم جدید | INSERT |
-| آیتم تکراری با محتوای یکسان | SKIP |
-| آیتم تکراری با محتوای تغییر یافته | UPDATE (version+1) |
+---
 
-اگر کراول را مجدداً اجرا کنید، فقط آیتم‌های جدید یا تغییر یافته ذخیره می‌شوند.
+## 🧪 تست‌ها
 
-## 📊 API Endpoints
+```bash
+cd backend && python -m unittest test_api test_projects -v   # 17/17
+cd extension && node test_popup.js                            # 8/8
+node --check extension/popup.js extension/background.js extension/content_picker.js
+node -e "JSON.parse(require('fs').readFileSync('extension/manifest.json'))"
+```
 
-| Endpoint | Method | توضیح |
-|----------|--------|-------|
-| `/api/next-job` | GET | کار بعدی در صف |
-| `/api/submit-result` | POST | ارسال نتیجه کراول یک آیتم |
-| `/api/page-content` | POST | ارسال لیست آیتم‌های یک صفحه |
-| `/api/discover-links` | POST | اضافه کردن لینک‌های کشف‌شده به صف |
-| `/api/seed-categories` | POST | پر کردن صف |
-| `/api/stats` | GET | آمار کلی |
-| `/api/reset-queue` | POST | ریست کارهای stuck |
+قبل از هر commit، هر دو مجموعه تست باید سبز باشند.
 
-## 🎯 سایت‌های پشتیبانی‌شده
+---
 
-### thesaurus.eiis.iki.ac.ir
-- **نوع محتوا**: اصطلاحات فلسفه، منطق، کلام اسلامی
-- **حجم**: ~۳۰۰,۰۰۰ آیتم
-- **API**: ElasticSearch (`/fa/api/elastic/CategorySearch`)
-- **کشف‌شده**: ۹ شاخه علمی، لیست full tree با CategorySearch
+## 🏭 استقرار Production (corpus.ai.ismc.ir)
 
-### farsi.khamenei.ir/speech (🚧)
-- **نوع محتوا**: بیانات و سخنرانی‌ها
-- **ساختار**:
-  - `farsi.khamenei.ir/speech` → لیست بیانات
-  - `farsi.khamenei.ir/speech-content?id=XXXXX` → صفحه هر بیان
-- **داده‌های هدف**:
-  - متن کامل سخنرانی
-  - عنوان
-  - تاریخ
-  - لینک صوت
-  - لینک فیلم
-  - دسته‌بندی
+- سرور `s52` — Docker Compose؛ فقط سرویس `backend`؛ DB در volume (فایل SQLite پایدار)
+- به‌روزرسانی: `git pull && docker compose build backend && docker compose up -d backend`
+- **قوانین:**
+  - ⛔ `docker-compose down` ممنوع
+  - ⛔ بدون تأیید صریح کاربر، هیچ تغییر روی Production
+  - همیشه **قبل** از هر استقرار: بکاپ SQLite با `sqlite3 .backup` + `PRAGMA integrity_check`
+  - Rollback: تصویر قبلی باقی می‌ماند؛ اسکیمای جدید additive است
+- برنامه کامل در [گزارش-PCM-02.md](گزارش-PCM-02.md) بخش ۳
 
-## 🧠 RAG Indexer (در دست توسعه)
-
-### قابلیت‌های برنامه‌ریزی‌شده:
-1. **تست اولیه**: ایندکس ۱۰۰ آیتم برای تخمین سرعت
-2. **تخمین زمان**: محاسبه زمان کل بر اساس GPU موجود
-3. **سگمنت‌بندی**: تقسیم کار به تکه‌های قابل Resume
-4. **Resume خودکار**: ادامه از آخرین نقطه توقف
-5. **Anti-ban**: وقفه‌های تصادفی، exponential backoff
-6. **پشتیبانی از GPU**: CUDA, MPS, CPU fallback
+---
 
 ## 🛠️ راهنمای توسعه‌دهنده
 
-### اضافه کردن سایت جدید
-
-1. در `extension/content.js` یک `detectPageType()` جدید اضافه کنید
-2. در `backend/server.py` یک endpoint `seed` جدید بسازید
-3. در `corpus/` یک `build_corpus_SITENAME.py` جدید ایجاد کنید
+### افزودن سایت/دامنه جدید
+- سایت «نام‌دار»: در `backend/sites.py` رکورد + فیلدهای پیش‌فرض + تست در `test_api.py`
+- سایت دلخواهی: بدون کد — از popup ساخته می‌شود و نقطه‌ها در پنل تعریف می‌شوند
+- transform جدید: در `content_picker.js` (استخراج) + `projects.py` (معتبرسازی) + تست
 
 ### رفع مشکل CORS
-
-در `server.py` از `flask-cors` استفاده شده. اگر مشکل دارید:
-```python
-CORS(app, origins=['chrome-extension://*', 'http://127.0.0.1:5000'])
-```
+در `server.py` از `flask-cors` استفاده شده (origins باز برای `chrome-extension://*`).
 
 ### Debug
-
 ```bash
-# لاگ بکند
-python server.py  # لاگ‌ها در stdout
-
-# لاگ اکستنشن
-# در Chrome: F12 → Console → filter: [Crawler]
-
-# چک دیتابیس
-sqlite3 backend/thesaurus.db "SELECT COUNT(*) FROM crawled_data"
+python server.py                          # لاگ بکند در stdout
+# اکستنشن: F12 → Console → filter: [Crawler]
+# کنسول popup: راست‌کلیک روی popup → Inspect → تب Network
+sqlite3 backend/thesaurus.db "SELECT COUNT(*) FROM project_pages"
 ```
+
+### وضعیت‌های باز (backlog)
+- رفع `sleep` ثابت و `waitComplete` در `background.js` (B1/B2 گزارش PCM-01)
+- `corpus/build_project_corpus.py` (خروجی پروژه به txt/jsonl)
+- RAG indexer · CI (unittest + lint) · یکپارچه‌سازی ثابت `BACKEND` در `shared.js`
+
+جزئیات بیشتر: [گزارش-وضعیت-پروژه.md](گزارش-وضعیت-پروژه.md) و [گزارش-PCM-02.md](گزارش-PCM-02.md)
+
+---
 
 ## 📝 License
 
-CC BY-NC-SA 4.0 - استفاده پژوهشی و آموزشی
+CC BY-NC-SA 4.0 — استفاده پژوهشی و آموزشی
