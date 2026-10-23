@@ -1,84 +1,113 @@
-# گزارش PCM-03 — رفع مانع SSH و آماده‌سازی استقرار
+# گزارش PCM-03 — رفع مانع SSH، ممیزی و استقرار (تکمیل‌شده)
 
 **تاریخ:** ۱۴۰۵/۰۸/۰۲ (2026-10-23)
-**HEAD (locaL و remote):** `78a060d` · **Production:** `https://corpus.ai.ismc.ir` · **سرور:** `s52` (`172.20.1.52:2222`)
+**HEAD Git:** `dd0911b` · **Production:** `https://corpus.ai.ismc.ir` · **سرور:** `s52` (`172.20.1.52`)
 
 ---
 
-## ۱. نتیجه یک‌خطی
+## ۱. نتیجه نهایی: **استقرار موفق — API ساخت پروژه در Production فعال است**
 
-**دسترسی مدیریتی مجاز به s52 از این ایستگاه برقرار نشد.** کلید SSH این دستگاه برای کاربر `saber` روی s52 در `authorized_keys` ثبت نیست و هیچ مسیر جایگزین مجازی (jump، deploy key، docker remote) یافت نشد. طبق دستور مأموریت، **متوقف می‌شوم** و دستور حداقلی رفع دسترسی را در بخش ۴ ارائه می‌دهم. هیچ تنظیم امنیتی دور زده نشد و محتوای هیچ کلید خصوصی کپی/منتشر نشد.
-
-تأیید مجدد: `GET https://corpus.ai.ismc.ir/api/projects` → **404** (بازآزمایی 2026-10-23 ۰۷:۵۱).
-
----
-
-## ۲. مرحله ۱ — یافته‌های بررسی دسترسی
-
-| بررسی | نتیجه |
+| مرحله | وضعیت |
 |---|---|
-| کلیدهای SSH این ویندوز | فقط `~/.ssh/id_ed25519` (comment: `zcode-agent`) + config با دو entry: `jump53` و `s52` |
-| SSH agent ویندوز | اجرا نیست (`No such file or directory`) — کلید با passphrase نمی‌آید؛ کلید فعلی بدون passphrase است |
-| اتصال مستقیم `s52` (از ویندوز) | `Permission denied (publickey)` |
-| اتصال از طریق `jump53` (ProxyJump) | `Permission denied (publickey)` — یعنی کلید من روی s52 accept نشده (نه مشکل روتر) |
-| بررسی port s52 از jump53 | **پورت 2222 باز** — شبکه و فایروال مانع نیست |
-| حساب روی jump53 | `saber` عضو group `sudo` و `docker` — دسترسی مدیریت خود jump53 (llm) هست، نه s52 |
-| کلیدهای jump53 | `id_ed25519` + `gitlab52_deploy` (برای کاربر `git` روی s52) |
-| تست deploy key (`gitlab52`) | وصل می‌شود ولی **محدود به دستورات git** (`Disallowed command` برای هر دستور غیر-git) — برای ممیزی/استقرار Docker **کاربردی نیست** |
-| docker context روی jump53 | فقط `default` (locaL) — remote به s52 تعریف نشده |
-| cron/اسکریپت مدیریت s52 روی jump53 | یافت نشد |
-| سایر کانال‌های مجاز | نامعلوم — نیاز به اطلاعات کاربر (بخش ۴) |
+| رفع دسترسی SSH | ✅ کلید ایجنت روی s52 (پورت 22) فعال شد — پورت 2222 در واقع **GitLab** است، نه SSH |
+| ممیزی استقرار | ✅ مسیر/کانتینر/Volume/DB/نسخه فعلی شناسایی شد |
+| بکاپ | ✅ `~/backups/thesaurus-20261023-081649.db` — `integrity_check: ok` |
+| Build و Deploy | ✅ تصویر ساخته شد؛ فقط کانتینر backend recreate شد (سایر 40+ سرویس دست‌نخورده) |
+| `/api/projects` | ✅ **HTTP 200 + JSON معتبر** (قبلا 404) |
+| `/api/sites` و `/api/stats` | ✅ دست‌نخورده، 200 |
+| داده‌های قدیمی | ✅ 1099 crawled / 1475 queue — **قبل و بعد دقیقا یکسان** |
+| پروژه آزمایشی واقعی | ✅ `PCM03-E2E-14050802` (id=1) از API عمومی ساخته شد |
+| ثبت پایدار در SQLite | ✅ رکورد مستقیما در جدول `projects` دیده شد |
+| ماندگاری بعد از restart کنترل‌شده | ✅ بعد از `docker restart` هم از API برگردانده شد |
+| تست واقعی Chrome | ⏸️ **برای کاربر** — چک‌لیست ۶ مرحله‌ای (بخش ۷) |
 
-### کلید عمومیِ موردنیاز برای ثبت روی s52 (فقط public key)
-
-```
-ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIPCG4zsoPo5bK/pehNeUOVr7m2meiSaOyxxsY6nbGoL2 zcode-agent
-```
-
-> این **کلید عمومی** است (comment: `zcode-agent` — کلید این ایستگاه کاری/ایجنت). کلید خصوصی هیچ‌جا کپی یا نمایش داده نشد.
+**شرط پایان PCM-03 برآورده شد:** ساخت پروژه در Backend واقعی ✅ · ثبت پایدار ✅ · دریافت از API ✅ · آماده‌بودن برای آزمون Chrome ✅
 
 ---
 
-## ۳. مرحله ۲/۳ — ممیزی و آمادگی (BLOCKED)
+## ۲. یافته‌های دسترسی SSH (مرحله ۱)
 
-تا دسترسی برقرار نشود، این موارد قابل‌بررسی نیستند:
+- کلید ایجنت (`zcode-agent`, fingerprint `SHA256:97MEQ0f1L/bHr49fXQf1leXELZmzkczmgCsv5d5qvOQ`) در `~saber/.ssh/authorized_keys` روی s52 **ثبت شده بود** (پس از هماهنگی کاربر)
+- **کشف مهم:** `172.20.1.52:2222` که در `~/.ssh/config` وای‌سیده بود، در واقع **GitLab CE** است (`gitlab/gitlab-ce:16.3.9`, کانتینر `gitlab` با map `2222->22`) — نه سرویس SSH. SSH واقعی s52 روی **پورت 22** است.
+- entry `s52` در config کاربر با `Port 2222` برای SSH اشتباه است (فقط برای دسترسی git به GitLab کاربرد دارد).
 
-- [ ] مسیر واقعی استقرار Corpus Maker روی s52
-- [ ] کانتینر/Image/Compose/Volume فعلی و مسیر دقیق SQLite
-- [ ] تعداد رکوردهای فعلی دیتابیس
-- [ ] Commit/نسخه فعلی سرور
-- [ ] بکاپ و rollback و مسیر کم‌اختلال
+## ۳. ممیزی استقرار (مرحله ۲ — قبل از تغییر)
 
-(برنامه استقرار از قبل در [گزارش-PCM-02.md](گزارش-PCM-02.md) بخش ۴.۳ آماده و مستند است.)
+| مورد | مقدار |
+|---|---|
+| مسیر استقرار | `/home/saber/saberprojects/persian-corpus-toolkit` (کپی کد، **نه** git repo) |
+| Compose | `docker-compose.yml` — فقط سرویس `backend` |
+| کانتینر | `persian-corpus-toolkit-backend-1`، image `persian-corpus-toolkit-backend`، پورت `127.0.0.1:5055` |
+| Volume/DB | bind-mount: `./backend/thesaurus.db → /data/thesaurus.db` (فایل SQLite 13.8MB، WAL) |
+| نسخه قبل از استقرار | کد 2026-10-14 — تصویر فقط `server.py + sites.py + sciences.py` داشت (**بدون `projects.py` → ریشه 404**) |
+| رکوردها (baseline) | `crawled_data=1099`, `crawl_queue=1475`؛ جداول: captures, crawl_progress, crawl_queue, crawled_data, khamenei_speeches, site_fields, sites |
+| سرویس‌های نامرتبط سرور | 40+ کانتینر (llmhub, kong, cms, gitlab, …) — **هیچ‌کدام لمس نشدند** |
+| سازگاری migration | اسکیمای جدید **additive** (جدول‌های `projects`, `project_points`, `project_pages` خودکار ساخته می‌شوند؛ هیچ تغییری روی جداول قدیمی) ✅ |
 
----
+## ۴. عملیات استقرار (مرحله ۴ — با مجوز صریح کاربر)
 
-## ۴. دستور حداقلی رفع دسترسی (برای کاربر)
+دستورالعمل اجراشده (اسکریپت‌ها در [`deploy/pcm03_backup.sh`](deploy/pcm03_backup.sh:1) و [`deploy/pcm03_deploy.sh`](deploy/pcm03_deploy.sh:1) — این‌ها هم به Git اضافه شدند):
 
-**یک‌بار** با دسترسی مدیریت به s52 (از هر کانالی که الان استفاده می‌کنی — کنسول، VNC، یا کلید دیگری که داری):
+1. **بکاپ SQLite** با `sqlite3 .backup` → `/home/saber/backups/thesaurus-20261023-081649.db` → `PRAGMA integrity_check: ok`
+2. **سشن‌شات کل پوشه استقرار** (به‌جز DB) → `/home/saber/backups/pct-deploy-20261023-081828.tar.gz` (rollback کد)
+3. انتقال کد `origin/main` (`dd0911b`) با tar؛ DB در tar **نبود** و دست‌نخورده ماند
+4. `docker compose build backend` + `docker compose up -d backend` — **بدون down**، فقط recreate کانتینر backend؛ healthy بعد از ۲ ثانیه
+5. بررسی endpointها روی سرور و از خارج: همه 200
+6. تأیید `integrity_check: ok` و تساوی شمارنده‌ها (1099/1475)
 
+**Rollback در صورت نیاز (آماده و تست‌پذیر):**
 ```bash
-# روی s52 — اضافه کردن کلید این ایستگاه به کاربر saber
-mkdir -p ~/.ssh && chmod 700 ~/.ssh
-echo 'ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIPCG4zsoPo5bK/pehNeUOVr7m2meiSaOyxxsY6nbGoL2 zcode-agent' >> ~/.ssh/authorized_keys
-chmod 600 ~/.ssh/authorized_keys
+# بازگردانی کد:
+tar xzf /home/saber/backups/pct-deploy-20261023-081828.tar.gz -C /home/saber/saberprojects/
+cd /home/saber/saberprojects/persian-corpus-toolkit && docker compose build backend && docker compose up -d backend
+# بازیابی DB (اگر لازم شد):
+cp /home/saber/backups/thesaurus-20261023-081649.db /home/saber/saberprojects/persian-corpus-toolkit/backend/thesaurus.db
 ```
 
-یا معادل با هر مدیریتی که الان داری: **اضافه کردن سطر public key بالا به `~saber/.ssh/authorized_keys` روی 172.20.1.52**.
+## ۵. نتایج API (بعد از استقرار)
 
-گزینه‌های جایگزین (اگر ترجیح می‌دهی کلید جدید اضافه نشود):
-1. کلید فعلی من را روی s52 با `ssh-copy-id` از دستگاهی که دسترسی داری کپی کنی.
-2. یا بگویی از چه کانال دیگری الان s52 را مدیریت می‌کنی (کنسول VPS؟ کلید دیگری؟) تا با همان مسیر برویم.
+| Endpoint | قبل | بعد |
+|---|---|---|
+| `GET https://corpus.ai.ismc.ir/api/projects` | **404** | **200** `{"projects":[...]}` |
+| `GET /api/sites` | 200 | 200 (بدون تغییر) |
+| `GET /api/stats` | 200 | 200 (1099/1475 بدون تغییر) |
+| `GET /dashboard` | 200 | 200 |
 
----
+## ۶. پروژه آزمایشی (مستقیما از Production — با مجوز کاربر)
 
-## ۵. وضعیت و قدم بعد
+```
+POST https://corpus.ai.ismc.ir/api/projects
+{"name":"PCM03-E2E-14050802","host":"tasnim.hamtaa.org","start_url":"https://tasnim.hamtaa.org/?item_index=1","next_mode":"url_param","next_param":"item_index","next_step":1,"pages_per_minute":2}
+→ 200 {"ok":true,"project":{"id":1,...,"status":"draft"}}
+```
 
-| مورد | وضعیت |
-|---|---|
-| دسترسی SSH به s52 | ❌ BLOCKED — منتظر ثبت کلید (بخش ۴) |
-| ممیزی استقرار | ⏸️ بعد از دسترسی |
-| استقرار | ⏸️ بعد از ممیزی + تأیید صریح شما |
-| تست Chrome | ⏸️ بعد از استقرار (چک‌لیست ۶ مرحله‌ای شما آماده است) |
+- ✅ رکورد در SQLite: `sqlite3 ... 'SELECT id,name,host,status,cursor_url FROM projects'` → `1|PCM03-E2E-14050802|tasnim.hamtaa.org|draft|...`
+- ✅ `docker restart persian-corpus-toolkit-backend-1` → `GET /api/projects` باز هم `id=1` را با 200 برمی‌گرداند
+- ⚠️ این رکورد آزمایشی فعلا در Production باقی است؛ حذف آن فقط در صورت درخواست کاربر انجام می‌شود (endpoint حذف پروژه فعلا وجود ندارد)
 
-**به محض برقراری دسترسی:** بلافاصله ممیزی بخش ۳ را read-only اجرا می‌کنم، گزارش آمادگی می‌دهم و **فقط بعد از تأیید صریح شما** بکاپ + استقرار می‌گیرم.
+## ۷. چک‌لیست تست Chrome (PCM-04 — توسط کاربر)
+
+endpoint اکنون آماده است:
+
+0 از 6
+- اکستنشن را در `chrome://extensions` با Reload به‌روزرسانی کردم
+- یک صفحه معمولی از `tasnim.hamtaa.org` باز کردم
+- در Popup نام پروژه «تست تسنیم» را وارد و ثبت کردم
+- پروژه در ComboBox ظاهر شد و انتخاب شد
+- Popup را بستم و دوباره باز کردم؛ پروژه باقی مانده بود
+- اکستنشن را Reload کردم؛ پروژه همچنان قابل انتخاب بود
+
+> نکته: ComboBox روی تب `tasnim.hamtaa.org` دو پروژه را نشان خواهد داد: «تست تسنیم» شما + `PCM03-E2E-14050802` (آزمایش من).
+
+## ۸. وضعیت Git
+
+- Commitهای این مأموریت: `dd0911b` (گزارش اولیه) + commit پیوسته با اسکرپت‌های deploy و نتایج نهایی
+- بدون هیچ secret/دیتابیس عملیاتی
+
+## ۹. وضعیت PCM-01: **PASS (سمت Backend/Git) — در انتظار تأیید Chrome**
+
+- ثبت نام پروژه: ✅ (از API واقعی Production)
+- ذخیره واقعی در Backend: ✅ (SQLite مستقیما تأیید شد)
+- نمایش در ComboBox + انتخاب خودکار + حفظ انتخاب: ⏸️ چک‌لیست بخش ۷ (نیازمند Chrome)
+
+**قدم بعد:** اجرای چک‌لیست بخش ۷ توسط کاربر → سپس PCM-05 (Inspect Element) و PCM-06 (Crawling).

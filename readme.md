@@ -210,14 +210,31 @@ node -e "JSON.parse(require('fs').readFileSync('extension/manifest.json'))"
 
 ## 🏭 استقرار Production (corpus.ai.ismc.ir)
 
-- سرور `s52` — Docker Compose؛ فقط سرویس `backend`؛ DB در volume (فایل SQLite پایدار)
-- به‌روزرسانی: `git pull && docker compose build backend && docker compose up -d backend`
-- **قوانین:**
-  - ⛔ `docker-compose down` ممنوع
-  - ⛔ بدون تأیید صریح کاربر، هیچ تغییر روی Production
-  - همیشه **قبل** از هر استقرار: بکاپ SQLite با `sqlite3 .backup` + `PRAGMA integrity_check`
-  - Rollback: تصویر قبلی باقی می‌ماند؛ اسکیمای جدید additive است
-- برنامه کامل در [گزارش-PCM-02.md](گزارش-PCM-02.md) بخش ۳
+حقیقت‌های تأییدشده سرور (ممیزی PCM-03 — ۱۴۰۵/۰۸/۰۲):
+
+| مورد | مقدار |
+|---|---|
+| سرور | `s52` (`172.20.1.52`) — SSH واقعی روی **پورت 22** (`ssh saber@172.20.1.52`) |
+| ⚠️ پورت 2222 | **GitLab CE** است (کانتینر `gitlab` با map 2222→22)، **نه** SSH هاست — در `~/.ssh/config` برای SSH استفاده نشود |
+| مسیر استقرار | `/home/saber/saberprojects/persian-corpus-toolkit` (کپی کد؛ **نه** git repo — کد از `origin/main` منتقل می‌شود) |
+| Compose / کانتینر | سرویس `backend` فقط؛ کانتینر `persian-corpus-toolkit-backend-1`؛ image `persian-corpus-toolkit-backend` |
+| پورت | `127.0.0.1:5055` (nginx `corpus.ai.ismc.ir` جلوی آن است) |
+| DB | bind-mount: `./backend/thesaurus.db → /data/thesaurus.db` (SQLite WAL — فایل پایدار، نه volume نام‌دار) |
+
+**روند به‌روزرسانی (تأییدشده در PCM-03):**
+1. بکاپ: `deploy/pcm03_backup.sh` → `/home/saber/backups/thesaurus-<TS>.db` + `PRAGMA integrity_check`
+2. سشن‌شات کد: tar کل پوشه استقرار (به‌جز DB) → `/home/saber/backups/pct-deploy-<TS>.tar.gz`
+3. انتقال کد `origin/main` به پوشه استقرار (DB در tar نباشد)
+4. `docker compose build backend && docker compose up -d backend` — **فقط recreate backend؛ بدون `down`**
+
+**قوانین:**
+- ⛔ `docker-compose down` ممنوع — فقط `up -d backend` (recreate)
+- ⛔ حذف هرگز: فایل `thesaurus.db`، volumeها، یا هر سرویس نامرتبط (سرور 40+ کانتینر دیگر دارد)
+- همیشه **قبل** از هر استقرار: بکاپ SQLite + `integrity_check`
+- Rollback: extract سشن‌شات کد + `docker compose build backend && up -d backend`؛ بازیابی DB از `/home/saber/backups/`
+- اسکیمای `projects` **additive** است (جدول جدید، دست‌نخورده روی جداول قدیمی)
+
+جزئیات کامل ممیزی، بکاپ‌ها و rollback: [گزارش-PCM-03.md](گزارش-PCM-03.md) بخش ۳–۴ · برنامه اولیه: [گزارش-PCM-02.md](گزارش-PCM-02.md) بخش ۳
 
 ---
 
