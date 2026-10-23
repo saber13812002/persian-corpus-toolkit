@@ -683,6 +683,10 @@ async function renderProjectDetail(id) {
         </tr>`).join('') + '</tbody></table>' : '<div class="empty">هنوز نقطه‌ای تعریف نشده</div>'}
     </div>
     <div class="card">
+      <h2>📄 صفحات (<span id="pgTotal">…</span>)</h2>
+      <div id="pagesBody"><div class="empty" style="padding:20px">در حال بارگذاری...</div></div>
+    </div>
+    <div class="card">
       <h2>📄 آخرین صفحه ثبت‌شده</h2>
       ${ps.last_url ? `
         <div style="font-size:12px;margin-bottom:8px">
@@ -695,9 +699,182 @@ async function renderProjectDetail(id) {
     </div>`;
   body.innerHTML = html;
   window._lastJson = JSON.stringify(p.values_sample || {});
+  // PCM-05: page browser — reset only when switching project; the 10s
+  // auto-refresh keeps the same state (page/search/sort/viewing page).
+  if (pageBrowser.projectId !== id) pgReset(id);
+  renderPagesBrowser();
 }
 function copyJson() {
   navigator.clipboard?.writeText(window._lastJson || '').catch(() => {});
+}
+
+// ─── PAGE BROWSING (PCM-05) ───
+const pageBrowser = {
+  projectId: null, page: 1, perPage: 10,
+  search: '', sort: 'id', order: 'ASC',
+  viewingId: null, rows: [],
+};
+function pgReset(id) {
+  pageBrowser.projectId = id;
+  pageBrowser.page = 1;
+  pageBrowser.perPage = 10;
+  pageBrowser.search = '';
+  pageBrowser.sort = 'id';
+  pageBrowser.order = 'ASC';
+  pageBrowser.viewingId = null;
+  pageBrowser.rows = [];
+}
+function pgGo(page) { pageBrowser.page = Math.max(1, page); renderPagesBrowser(); }
+function pgSearch() {
+  const el = document.getElementById('pgSearchInput');
+  pageBrowser.search = el ? el.value.trim() : '';
+  pageBrowser.page = 1;
+  renderPagesBrowser();
+}
+function pgPerPage() {
+  const el = document.getElementById('pgPerPageSel');
+  pageBrowser.perPage = parseInt(el ? el.value : '10', 10) || 10;
+  pageBrowser.page = 1;
+  renderPagesBrowser();
+}
+function pgSort() {
+  const el = document.getElementById('pgSortSel');
+  pageBrowser.sort = el ? el.value : 'id';
+  pageBrowser.page = 1;
+  renderPagesBrowser();
+}
+function pgOrder() {
+  const el = document.getElementById('pgOrderSel');
+  pageBrowser.order = el ? el.value : 'ASC';
+  pageBrowser.page = 1;
+  renderPagesBrowser();
+}
+function pgStep(id) {
+  if (id == null) return;
+  pageBrowser.viewingId = id;
+  renderPagesBrowser();
+}
+function pgBackToList() { pageBrowser.viewingId = null; renderPagesBrowser(); }
+function pgCopy(id) {
+  const row = pageBrowser.rows.find(r => r.id === id);
+  navigator.clipboard?.writeText(row ? JSON.stringify(row.values || {}) : '').catch(() => {});
+}
+function pgCopyCur() {
+  navigator.clipboard?.writeText(window._curPageJson || '').catch(() => {});
+}
+async function renderPagesBrowser() {
+  const pid = pageBrowser.projectId;
+  if (pid == null) return;
+  const qs = `page=${pageBrowser.page}&per_page=${pageBrowser.perPage}`
+    + `&search=${encodeURIComponent(pageBrowser.search)}`
+    + `&sort=${encodeURIComponent(pageBrowser.sort)}&order=${encodeURIComponent(pageBrowser.order)}`;
+  const d = await fetchAPI(`/api/dashboard/projects/${pid}/pages?${qs}`);
+  const body = document.getElementById('pagesBody');
+  if (!body) return;
+  const tot = document.getElementById('pgTotal');
+  if (tot) tot.textContent = faNum(d ? d.total : 0);
+  if (!d) { body.innerHTML = '<div class="empty">داده دریافت نشد</div>'; return; }
+  pageBrowser.rows = d.pages;
+  if (pageBrowser.viewingId != null) await renderPageView();
+  else renderPageList(d);
+}
+function renderPageList(d) {
+  const body = document.getElementById('pagesBody');
+  let html = `
+    <div class="pager" style="margin-top:0; justify-content:space-between; flex-wrap:wrap; gap:8px">
+      <div style="display:flex; gap:8px; flex-wrap:wrap">
+        <input class="search-ctl" id="pgSearchInput" value="${escHtml(pageBrowser.search)}"
+               placeholder="جستجو در URL یا متن فیلدها..." onkeydown="if(event.key==='Enter')pgSearch()">
+        <select class="search-ctl" id="pgSortSel" onchange="pgSort()">
+          <option value="id">مرتب: شماره صفحه</option>
+          <option value="captured_at">مرتب: زمان ثبت</option>
+          <option value="url">مرتب: URL</option>
+        </select>
+        <select class="search-ctl" id="pgOrderSel" onchange="pgOrder()">
+          <option value="ASC">قدیم به جدید</option>
+          <option value="DESC">جدید به قدیم</option>
+        </select>
+        <select class="search-ctl" id="pgPerPageSel" onchange="pgPerPage()">
+          <option>10</option><option>25</option><option>50</option><option>100</option>
+        </select>
+        <button class="mini-btn" onclick="pgSearch()">جستجو</button>
+      </div>
+    </div>
+    <div style="margin-top:12px">
+      <table><thead><tr>
+        <th>#</th><th>URL</th><th>زمان ثبت</th><th>نمایه فیلدها</th><th></th>
+      </tr></thead><tbody>`;
+  if (!d.pages.length) {
+    html += '<tr><td colspan="5" class="empty">صفحه‌ای یافت نشد</td></tr>';
+  }
+  d.pages.forEach(r => {
+    const vals = Object.entries(r.values || {})
+      .map(([k, v]) => `${escHtml(k)}: ${escHtml(String(v).substring(0, 40))}`)
+      .join(' · ');
+    html += `<tr>
+      <td>${faNum(r.id)}</td>
+      <td class="url-cell" title="${escHtml(r.url)}"><a href="${escHtml(r.url)}" target="_blank" rel="noopener" style="color:var(--accent)">${escHtml(r.url)}</a></td>
+      <td style="white-space:nowrap;direction:ltr;text-align:right">${escHtml(r.captured_at || '')}</td>
+      <td style="max-width:320px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${escHtml(vals)}">${vals || '-'}</td>
+      <td style="white-space:nowrap">
+        <button class="mini-btn" onclick="pgStep(${r.id})">مشاهده</button>
+        <button class="mini-btn" onclick="pgCopy(${r.id})">📋</button>
+      </td>
+    </tr>`;
+  });
+  html += '</tbody></table></div>';
+  const tp = d.total_pages || 1;
+  html += `
+    <div class="pager">
+      <button class="mini-btn" ${d.page <= 1 ? 'disabled' : ''} onclick="pgGo(${d.page - 1})">→ قبلی</button>
+      <span class="pg-label">صفحه ${faNum(d.page)} از ${faNum(tp)} · کل ${faNum(d.total)} صفحه</span>
+      <button class="mini-btn" ${d.page >= tp ? 'disabled' : ''} onclick="pgGo(${d.page + 1})">بعدی ←</button>
+    </div>`;
+  body.innerHTML = html;
+  document.getElementById('pgSortSel').value = pageBrowser.sort;
+  document.getElementById('pgOrderSel').value = pageBrowser.order;
+  document.getElementById('pgPerPageSel').value = String(pageBrowser.perPage);
+}
+async function renderPageView() {
+  let body = document.getElementById('pagesBody');
+  if (body) body.innerHTML = '<div class="empty" style="padding:20px">در حال بارگذاری...</div>';
+  const d = await fetchAPI(`/api/dashboard/projects/${pageBrowser.projectId}/pages/${pageBrowser.viewingId}`);
+  body = document.getElementById('pagesBody');
+  if (!body) return;
+  if (!d) { body.innerHTML = '<div class="empty">صفحه دریافت نشد</div>'; return; }
+  const row = pageBrowser.rows.find(r => r.id === pageBrowser.viewingId);
+  const pos = d.position || {};
+  const prevBtn = (row && row.prev_id != null)
+    ? `<button class="mini-btn" onclick="pgStep(${row.prev_id})">→ قبلی</button>`
+    : '<button class="mini-btn" disabled>→ قبلی</button>';
+  const nextBtn = (row && row.next_id != null)
+    ? `<button class="mini-btn" onclick="pgStep(${row.next_id})">بعدی ←</button>`
+    : '<button class="mini-btn" disabled>بعدی ←</button>';
+  const fields = Object.entries(d.values || {});
+  let html = `
+    <div class="pager" style="margin-top:0; justify-content:space-between; flex-wrap:wrap; gap:8px">
+      <button class="mini-btn" onclick="pgBackToList()">→ بازگشت به فهرست</button>
+      <span class="pg-label">صفحه ${faNum(d.id)} · موقعیت ${faNum(pos.index)} از ${faNum(pos.total)}</span>
+      <div style="display:flex; gap:8px">${prevBtn}${nextBtn}</div>
+    </div>
+    <div style="background:#0b1120;border:1px solid var(--border);border-radius:8px;padding:12px;margin-top:12px">
+      <a href="${escHtml(d.url)}" target="_blank" rel="noopener" style="color:var(--accent);word-break:break-all;font-size:12px">${escHtml(d.url)}</a>
+      <div style="font-size:11px;color:var(--dim);margin-top:6px">
+        ثبت: ${escHtml(d.captured_at || '-')}
+        <span style="font-family:monospace;direction:ltr"> · ${escHtml(String(d.content_hash || '').substring(0, 16))}…</span>
+      </div>
+    </div>
+    <div style="margin-top:12px">
+      ${fields.length ? `<table><thead><tr><th style="width:170px">فیلد</th><th>مقدار</th></tr></thead><tbody>`
+        + fields.map(([k, v]) => `<tr><td><b>${escHtml(k)}</b></td><td style="white-space:pre-wrap;word-break:break-word">${escHtml(String(v))}</td></tr>`).join('')
+        + '</tbody></table>' : '<div class="empty" style="padding:16px">مقداری ثبت نشده</div>'}
+    </div>
+    <div style="margin-top:12px">
+      <pre class="json-box">${escHtml(d.raw_values_json || '{}')}</pre>
+      <button class="mini-btn" style="margin-top:8px" onclick="pgCopyCur()">📋 کپی JSON خام</button>
+    </div>`;
+  body.innerHTML = html;
+  window._curPageJson = d.raw_values_json || '';
 }
 
 // Init

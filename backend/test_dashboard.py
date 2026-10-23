@@ -7,7 +7,11 @@ Covers:
   (live crawl is never interrupted by the dashboard login),
   D01 pagination, D02 search, D03 status filter, D04 sorting,
   D05 detail (fields + pages summary + values sample), D06 detail 404,
-  D07 additive created_at migration.
+  D07 additive created_at migration,
+  P01 page pagination, P02 URL search, P03 field-content search,
+  P04 prev/next follow list order (incl. filtered lists), P05 page
+  detail (values + position), P06 page 404s and project scoping,
+  P07 page sort DESC with matching prev/next.
 
 Note: every request goes through `with self.client:` so Flask's
 teardown_appcontext closes the per-request SQLite connection — required
@@ -190,6 +194,128 @@ class DashboardApiTests(Base):
         d = self.get("/api/dashboard/projects?search=DataProj").get_json()
         self.assertIn("created_at", d["projects"][0])
         self.assertTrue(d["projects"][0]["created_at"])
+
+
+# ── PCM-05: page-by-page browsing (logged in) ───────────────────
+
+class PageBrowsingTests(Base):
+    def setUp(self):
+        super().setUp()
+        self.login()
+        self.pid = self.make_project("PagesProj")
+        self.post(f"/api/projects/{self.pid}/points", json={
+            "tag": "متن", "source": "css", "selector": "p.book-text", "transform": "text",
+        })
+        # 5 pages; pages 2 and 4 carry the extra word "ویژه" so a
+        # filtered list can prove prev/next follow the list, not id±1.
+        for i in range(1, 6):
+            extra = " ویژه" if i in (2, 4) else ""
+            self.post(f"/api/projects/{self.pid}/pages", json={
+                "url": f"https://site.example/book?page={i}",
+                "values": {"متن": f"متن صفحه {i}{extra}"},
+            })
+        # capture ids in ascending id order (default API order is DESC)
+        first = self.get(
+            f"/api/dashboard/projects/{self.pid}/pages?per_page=10&page=1&sort=id&order=ASC"
+        ).get_json()["pages"]
+        self.ids = [p["id"] for p in first]
+
+    def list(self, qs=""):
+        return self.get(f"/api/dashboard/projects/{self.pid}/pages{qs}").get_json()
+
+    # P01 — pagination math over pages
+    def test_P01_pagination(self):
+        d = self.list("?per_page=2")
+        self.assertEqual(d["total"], 5)
+        self.assertEqual(len(d["pages"]), 2)
+        self.assertEqual(d["total_pages"], 3)
+        self.assertEqual(d["page"], 1)
+        d2 = self.list("?per_page=2&page=2")
+        self.assertEqual(d2["page"], 2)
+        self.assertEqual(len(d2["pages"]), 2)
+        d3 = self.list("?per_page=2&page=3")
+        self.assertEqual(len(d3["pages"]), 1)
+        # list rows expose parsed values, not the raw column
+        for r in d["pages"]:
+            self.assertIn("values", r)
+            self.assertNotIn("values_json", r)
+
+    # P02 — search hits the URL
+    def test_P02_search_url(self):
+        d = self.list("?search=page%3D3")
+        self.assertEqual(d["total"], 1)
+        self.assertEqual(d["pages"][0]["id"], self.ids[2])
+        self.assertIn("page=3", d["pages"][0]["url"])
+
+    # P03 — search hits the field content (Persian text)
+    def test_P03_search_content(self):
+        d = self.list("?search=" + "متن+صفحه+2".replace("+", "%20"))
+        self.assertEqual(d["total"], 1)
+        self.assertEqual(d["pages"][0]["values"]["متن"], "متن صفحه 2 ویژه")
+        # a broader term matches all five pages
+        d2 = self.list("?search=" + "متن")
+        self.assertEqual(d2["total"], 5)
+
+    # P04 — prev/next follow the *list* order, incl. filtered lists
+    def test_P04_prev_next_list_order(self):
+        d = self.list("?sort=id&order=ASC&per_page=10")
+        rows = d["pages"]
+        self.assertIsNone(rows[0]["prev_id"])
+        self.assertEqual(rows[1]["prev_id"], rows[0]["id"])
+        self.assertEqual(rows[1]["next_id"], rows[2]["id"])
+        self.assertIsNone(rows[-1]["next_id"])
+        # filtered list (only pages 2 and 4): prev/next must be
+        # None→p4 / p2→None, NOT raw id±1 (p4's raw predecessor is p3).
+        d2 = self.list("?search=" + "ویژه" + "&sort=id&order=ASC&per_page=10")
+        f2, f4 = d2["pages"]
+        self.assertEqual([f2["id"], f4["id"]], [self.ids[1], self.ids[3]])
+        self.assertIsNone(f2["prev_id"])
+        self.assertEqual(f2["next_id"], f4["id"])
+        self.assertEqual(f4["prev_id"], f2["id"])
+        self.assertIsNone(f4["next_id"])
+
+    # P05 — page detail: parsed values, position, raw JSON, field_errors
+    def test_P05_detail(self):
+        d = self.get(f"/api/dashboard/projects/{self.pid}/pages/{self.ids[2]}").get_json()
+        self.assertEqual(d["id"], self.ids[2])
+        self.assertEqual(d["values"]["متن"], "متن صفحه 3")
+        self.assertEqual(d["position"], {"index": 3, "total": 5})
+        self.assertIn("متن صفحه 3", d["raw_values_json"])
+        self.assertNotIn("values_json", d)
+        self.assertEqual(d["field_errors"], [])
+
+    # P06 — 404s: unknown project, unknown page, page of another project
+    def test_P06_404s_and_scoping(self):
+        self.assertEqual(self.get("/api/dashboard/projects/9999/pages").status_code, 404)
+        self.assertEqual(
+            self.get(f"/api/dashboard/projects/{self.pid}/pages/99999").status_code, 404
+        )
+        # a page of a *different* project must not leak through
+        other = self.make_project("OtherProj")
+        self.post(f"/api/projects/{other}/pages", json={
+            "url": "https://site.example/other?page=1",
+            "values": {"متن": "دیگر"},
+        })
+        self.assertEqual(
+            self.get(f"/api/dashboard/projects/{other}/pages/{self.ids[0]}").status_code,
+            404,
+        )
+        # and the first project's list is unaffected by the other's page
+        self.assertEqual(self.list("?per_page=10")["total"], 5)
+
+    # P07 — sort DESC reorders the list and prev/next follow it
+    def test_P07_sort_desc(self):
+        d = self.list("?sort=id&order=DESC&per_page=10")
+        rows = d["pages"]
+        self.assertEqual(rows[0]["id"], self.ids[4])
+        self.assertEqual(rows[-1]["id"], self.ids[0])
+        self.assertIsNone(rows[0]["prev_id"])
+        self.assertEqual(rows[0]["next_id"], self.ids[3])
+        self.assertEqual(rows[-1]["prev_id"], self.ids[1])
+        self.assertIsNone(rows[-1]["next_id"])
+        # url sort works and stays inside the whitelist
+        d2 = self.list("?sort=url&order=ASC&per_page=10")
+        self.assertEqual(d2["pages"][0]["id"], self.ids[0])
 
 
 if __name__ == "__main__":

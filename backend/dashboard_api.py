@@ -23,6 +23,13 @@ _SORTABLE = {
     "created_at": "p.created_at",
 }
 
+# PCM-05: sortable columns for the per-project pages list.
+_PAGES_SORTABLE = {
+    "id": "p.id",
+    "captured_at": "p.captured_at",
+    "url": "p.url",
+}
+
 
 def ensure_dashboard_schema(db):
     """Additive migration: add created_at to projects (backfilled once)."""
@@ -143,4 +150,97 @@ def register_dashboard_routes(app, get_db):
             ) if last_page else {}
         except Exception:
             item["values_sample"] = {}
+        return jsonify(item)
+
+    # ── PCM-05: page-by-page browsing (read-only, additive) ───────
+    # prev_id/next_id follow the *list* order (same window ORDER BY as the
+    # list query), not raw id±1, so they stay correct for any sort/filter.
+
+    @app.route("/api/dashboard/projects/<int:project_id>/pages", methods=["GET"])
+    @require_auth
+    def dash_project_pages(project_id):
+        db = get_db()
+        ensure_dashboard_schema(db)
+        if not db.execute("SELECT id FROM projects WHERE id=?", (project_id,)).fetchone():
+            return jsonify({"ok": False, "message": "پروژه پیدا نشد"}), 404
+        search = (request.args.get("search") or "").strip()
+        sort = request.args.get("sort") or "id"
+        order = "ASC" if (request.args.get("order") or "").upper() == "ASC" else "DESC"
+        page = max(1, int(request.args.get("page") or 1))
+        per_page = min(100, max(1, int(request.args.get("per_page") or 10)))
+
+        where = ["p.project_id=?"]
+        params = [project_id]
+        if search:
+            # search in URL or in any field value (values_json holds them all)
+            like = f"%{search}%"
+            where.append("(p.url LIKE ? OR p.values_json LIKE ?)")
+            params.extend([like, like])
+        where_sql = "WHERE " + " AND ".join(where)
+        sort_col = _PAGES_SORTABLE.get(sort, "p.id")
+        list_order = f"{sort_col} {order}, p.id"
+
+        total = db.execute(
+            f"SELECT COUNT(*) AS n FROM project_pages p {where_sql}", params
+        ).fetchone()["n"]
+        rows = db.execute(
+            f"""SELECT p.id, p.url, p.captured_at, p.values_json,
+                       LAG(p.id)  OVER (ORDER BY {list_order}) AS prev_id,
+                       LEAD(p.id) OVER (ORDER BY {list_order}) AS next_id
+                FROM project_pages p
+                {where_sql}
+                ORDER BY {list_order}
+                LIMIT ? OFFSET ?""",
+            (*params, per_page, (page - 1) * per_page),
+        ).fetchall()
+        pages = []
+        for r in rows:
+            item = dict(r)
+            try:
+                item["values"] = json.loads(item["values_json"])
+            except Exception:
+                item["values"] = {}
+            del item["values_json"]
+            pages.append(item)
+        return jsonify({
+            "pages": pages,
+            "total": total,
+            "page": page,
+            "per_page": per_page,
+            "total_pages": (total + per_page - 1) // per_page,
+        })
+
+    @app.route("/api/dashboard/projects/<int:project_id>/pages/<int:page_id>",
+               methods=["GET"])
+    @require_auth
+    def dash_project_page_detail(project_id, page_id):
+        db = get_db()
+        ensure_dashboard_schema(db)
+        row = db.execute(
+            "SELECT id, url, captured_at, values_json, content_hash "
+            "FROM project_pages WHERE project_id=? AND id=?",
+            (project_id, page_id),
+        ).fetchone()
+        if not row:
+            return jsonify({"ok": False, "message": "صفحه پیدا نشد"}), 404
+        item = dict(row)
+        try:
+            item["values"] = json.loads(row["values_json"])
+        except Exception:
+            item["values"] = {}
+        item["raw_values_json"] = row["values_json"]
+        del item["values_json"]
+        total = db.execute(
+            "SELECT COUNT(*) AS n FROM project_pages WHERE project_id=?",
+            (project_id,),
+        ).fetchone()["n"]
+        idx = db.execute(
+            "SELECT COUNT(*) AS n FROM project_pages "
+            "WHERE project_id=? AND id<=?",
+            (project_id, page_id),
+        ).fetchone()["n"]
+        item["position"] = {"index": idx, "total": total}
+        # Per-field extraction errors start being recorded with PCM-07/08;
+        # until then the list is empty — never invented.
+        item["field_errors"] = []
         return jsonify(item)
