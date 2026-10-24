@@ -294,6 +294,26 @@ sqlite3 backend/thesaurus.db "SELECT COUNT(*) FROM project_pages"
 - `corpus/build_project_corpus.py` (خروجی پروژه به txt/jsonl)
 - RAG indexer · CI (unittest + lint) · یکپارچه‌سازی ثابت `BACKEND` در `shared.js`
 
+### نقشه‌ی راه (ترتیب اجرا)
+
+| فاز | وضعیت |
+|-----|-------|
+| PCM-01 رفع «پروژه ساخته نمی‌شود» | ✅ |
+| PCM-02 برنامه و ممیزی | ✅ |
+| PCM-03 deploy + ممیزی production | ✅ |
+| PCM-04 تب پروژه‌ها (فهرست/جزئیات/صفحه‌بندی) + PCM-09 auth | ✅ |
+| PCM-05 مرور صفحه‌به‌صفحه / آیتم‌به‌آیتم | ✅ |
+| PCM-06 نمای آمار واقعی | ⏳ |
+| PCM-07 ناوبری دوسویه + checkpoint/resume + کنترل Start/Pause/Resume/Retry | ⏳ |
+| PCM-08 موتور transform + reprocess | ⏳ |
+| PCM-10 health/metrics + داشبورد Grafana (زیرساخت موجود s52) | ⏳ |
+| PCM-12 ممیزی معماری + بلوپرینت Book Factory → Knowledge → RAG | ✅ (مستندات — بدون کد عملیاتی) |
+| PCM-13+ مسیر V0.1→V1.0: Word → JSON → ES test index → Queue → RAG API → Registries → LiteLLM → SuperRAG → Research شبانه | 📋 طراحی‌شده (فقط طرح؛ **هنوز پیاده‌سازی نشده**) |
+
+جزئیات معماری و نقشه‌ی راه نسخه‌ای (V0.1..V1.0): مستندات PCM-12 در [docs/](docs/) — `PCM-12-AUDIT.md` (وضعیت واقعی)، `PCM-12-ARCHITECTURE.md` (طراحی S2..S9)، `PCM-12-PRD.md` (الزامات)، `PCM-12-ROADMAP.md` (ترتیب اجرا)، `PCM-12-DATA-CONTRACTS.md` (schema/API/Prompt)، `PCM-12-AGENT-HANDOFF.md` (تصمیم‌ها و مرزها).
+
+> ⚠️ قابلیت‌های PCM-13 به بعد (Book Factory، RAG، Registries، SuperRAG) **فقط طراحی‌شده** هستند و در production فعال **نیستند**.
+
 جزئیات بیشتر: [گزارش-وضعیت-پروژه.md](گزارش-وضعیت-پروژه.md) و [گزارش-PCM-02.md](گزارش-PCM-02.md)
 
 ---
