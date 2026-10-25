@@ -2,7 +2,8 @@
 
 - **تاریخ اجرا:** ۱۴۰۵/۰۸/۰۳ (2026-10-25، ۱۵:۲۰ تا ۱۶:۲۰ UTC)
 - **Production:** `https://corpus.ai.ismc.ir` · سرور s52 = `172.20.1.52`
-- **وضعیت کد تحت آزمایش:** commit `81e3191` (HEAD `origin/main`) — همگام با دپلوی s52 (AT-20)
+- **وضعیت کد تحت آزمایش:** commit `81e3191` (HEAD `origin/main` پیش از این مستندات) — همگام با دپلوی s52 (AT-20)
+- **SHA این مستندات:** `271ceba4f903d969f16a6c0aa6938a26d9216a62` — [لینک commit](https://github.com/saber13812002/persian-corpus-toolkit/commit/271ceba4f903d969f16a6c0aa6938a26d9216a62)
 - **قواعد اجرا:** فقط آزمون‌های خواندنی روی production · بدون حذف رکورد عملیاتی · بدون توقف/ری‌استارت karam زنده · آزمون‌های وضعیت‌ساز فقط روی snapshot/محیط جدا · بدون نمایش کلید/رمز در گزارش
 - **اسکریپت‌های آزمون:** [`deploy/pcm12_2_acceptance_test.sh`](../deploy/pcm12_2_acceptance_test.sh) (AT-01..06 + AT-11..14) · [`deploy/pcm12_2_corpus_test.sh`](../deploy/pcm12_2_corpus_test.sh) (AT-15/16) · [`deploy/pcm12_2_infra_test.sh`](../deploy/pcm12_2_infra_test.sh) (AT-17..19)
 
@@ -247,6 +248,7 @@ cd backend && python -m unittest test_dashboard -v
 
 ## ۸. SHA + لینک commit این گزارش
 
-- **SHA:** (در commit دوم تکمیل می‌شود — report-first، سپس backfill)
-- **لینک:** (همان بالا)
-- **commit اولیه:** شامل این فایل + `PCM-12-ACCEPTANCE-CHECKLIST.md` + ۳ اسکریپت `deploy/pcm12_2_*` + یک ردیف در جدول roadmap readme
+- **SHA:** `271ceba4f903d969f16a6c0aa6938a26d9216a62`
+- **لینک:** https://github.com/saber13812002/persian-corpus-toolkit/commit/271ceba4f903d969f16a6c0aa6938a26d9216a62
+- **push:** `81e3191..271ceba  main -> main` (origin = GitHub)
+- **محتویات commit:** این فایل + `PCM-12-ACCEPTANCE-CHECKLIST.md` + ۳ اسکریپت `deploy/pcm12_2_*` + یک ردیف در جدول roadmap readme (فقط ۶ فایل، 643 خط افزودنی؛ هیچ کد عملیاتی تغییر نکرده)
