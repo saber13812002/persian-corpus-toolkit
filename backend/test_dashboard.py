@@ -18,26 +18,22 @@ teardown_appcontext closes the per-request SQLite connection — required
 on Windows, where an open handle blocks os.remove() of the test DB.
 """
 import os
-import tempfile
 import unittest
 
-_fd, _DB = tempfile.mkstemp(suffix=".db")
-os.close(_fd)
-os.environ["PCT_DB"] = _DB
-# Set BEFORE server.init_db() so the password gets hashed + seeded.
-os.environ["PCT_DASHBOARD_PASSWORD"] = "test-secret-123"
-
+# PCM-12.3: shared isolated test DB. pct_test_support sets PCT_DB +
+# PCT_DASHBOARD_PASSWORD BEFORE `server` is imported, so server.DB_PATH
+# binds to the temp file (never the deployed thesaurus.db) and the
+# password gets hashed + seeded on the first init_db().
+import pct_test_support  # noqa: F401
 import server  # noqa: E402
 
-PW = "test-secret-123"
+PW = os.environ["PCT_DASHBOARD_PASSWORD"]
 N_PROJ = 15
 
 
 class Base(unittest.TestCase):
     def setUp(self):
-        if os.path.exists(_DB):
-            os.remove(_DB)
-        server.init_db()
+        pct_test_support.reset_db()
         self.client = server.app.test_client()
 
     def req(self, method, path, **kw):

@@ -1,21 +1,16 @@
 """API tests for date normalization and one khamenei save."""
-import os
 import sqlite3
-import tempfile
 import unittest
 
-_fd, _DB = tempfile.mkstemp(suffix=".db")
-os.close(_fd)
-os.environ["PCT_DB"] = _DB
-
+# PCM-12.3: shared isolated test DB (MUST precede `import server` so
+# server.DB_PATH binds to the temp file, not the deployed thesaurus.db).
+import pct_test_support  # noqa: F401
 import server  # noqa: E402
 
 
 class ApiTests(unittest.TestCase):
     def setUp(self):
-        if os.path.exists(_DB):
-            os.remove(_DB)
-        server.init_db()
+        pct_test_support.reset_db()
         db = sqlite3.connect(server.DB_PATH)
         server.ensure_khamenei_schema(db)
         db.close()

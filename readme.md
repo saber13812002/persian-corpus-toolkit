@@ -310,8 +310,9 @@ sqlite3 backend/thesaurus.db "SELECT COUNT(*) FROM project_pages"
 | PCM-12 ممیزی معماری + بلوپرینت Book Factory → Knowledge → RAG | ✅ (مستندات — بدون کد عملیاتی) |
 | PCM-13+ مسیر V0.1→V1.0: Word → JSON → ES test index → Queue → RAG API → Registries → LiteLLM → SuperRAG → Research شبانه | 📋 طراحی‌شده (فقط طرح؛ **هنوز پیاده‌سازی نشده**) |
 | PCM-12.2 آزمون پذیرش قابلیت‌ها + ممیزی دسترسی پس از مهاجرت s52 | ✅ (مستندات + آزمون خواندنی — بدون کد عملیاتی) |
+| PCM-12.3 اصلاح ریشه‌ای test isolation (F-01) + ممیزی امنیتی Grafana | ✅ (test-harness + docs — بدون تغییر production، بدون deploy) |
 
-جزئیات معماری و نقشه‌ی راه نسخه‌ای (V0.1..V1.0): مستندات PCM-12 در [docs/](docs/) — `PCM-12-AUDIT.md` (وضعیت واقعی)، `PCM-12-ARCHITECTURE.md` (طراحی S2..S9)، `PCM-12-PRD.md` (الزامات)، `PCM-12-ROADMAP.md` (ترتیب اجرا)، `PCM-12-DATA-CONTRACTS.md` (schema/API/Prompt)، `PCM-12-AGENT-HANDOFF.md` (تصمیم‌ها و مرزها)، `PCM-12-ACCEPTANCE-REPORT.md` (گزارش آزمون پذیرش ۲۰ سناریو + ممیزی دسترسی s52) و `PCM-12-ACCEPTANCE-CHECKLIST.md` (چک‌لیست تأیید کاربری با Chrome).
+جزئیات معماری و نقشه‌ی راه نسخه‌ای (V0.1..V1.0): مستندات PCM-12 در [docs/](docs/) — `PCM-12-AUDIT.md` (وضعیت واقعی)، `PCM-12-ARCHITECTURE.md` (طراحی S2..S9)، `PCM-12-PRD.md` (الزامات)، `PCM-12-ROADMAP.md` (ترتیب اجرا)، `PCM-12-DATA-CONTRACTS.md` (schema/API/Prompt)، `PCM-12-AGENT-HANDOFF.md` (تصمیم‌ها و مرزها)، `PCM-12-ACCEPTANCE-REPORT.md` (گزارش آزمون پذیرش ۲۰ سناریو + ممیزی دسترسی s52)، `PCM-12-ACCEPTANCE-CHECKLIST.md` (چک‌لیست تأیید کاربری با Chrome) و `PCM-12.3-TEST-ISOLATION.md` (رفع ریشه‌ای F-01 + ممیزی امنیتی Grafana).
 
 > ⚠️ قابلیت‌های PCM-13 به بعد (Book Factory، RAG، Registries، SuperRAG) **فقط طراحی‌شده** هستند و در production فعال **نیستند**.
 

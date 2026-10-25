@@ -51,10 +51,21 @@ BACKUP:  /home/saber/backups/  (thesaurus-<TS>.db + pct-deploy-<TS>.tar.gz)
 cd backend && python -m unittest test_api test_projects test_dashboard -v
 ```
 
-- 32 تست: `test_api.py` (فاز۱/۲ + پروژه)، `test_projects.py` (جریان CRUD)،
-  `test_dashboard.py` (auth A01-A08 + داشبورد D01-D07).
-- تست‌ها DB موقتی می‌سازند (`PCT_DB`) و `PCT_DASHBOARD_PASSWORD` را قبل از import server ست می‌کنند.
-- روی Windows: هر connection باید بسته شود (open handle مانع `os.remove` می‌شود).
+- 39 تست: `test_api.py` (8، فاز۱/۲ + پروژه)، `test_projects.py` (9، جریان CRUD)،
+  `test_dashboard.py` (22، auth A01-A08 + داشبورد D01-D07).
+- **PCM-12.3 (رفع F-01):** هر سه ماژول اول `import pct_test_support` می‌کنند که
+  یک DB موقت **مشترک** می‌سازد و `PCT_DB`/`PCT_DASHBOARD_PASSWORD` را **قبل از**
+  `import server` ست می‌کند؛ سپس هر کلاس در `setUp` با
+  `pct_test_support.reset_db()` دیتابیس را از نو می‌سازد. این باعث می‌شود:
+  - `server.DB_PATH` فقط به فایل موقت اشاره کند (هرگز `thesaurus.db` production)؛
+  - rate-limit/session/state بین ماژول‌ها **نشت نکند**؛
+  - ترتیب و ترکیب ماژول‌ها (انفرادی/ترکیبی/معکوس/تکراری/discovery) مهم نباشد.
+- **قاعده:** هیچ ماژول تستی نباید خودش `PCT_DB` بسازد یا `server.init_db()`
+  را مستقیم صدا بزند؛ همه از `pct_test_support.reset_db()` استفاده کنند.
+- روی Windows: هر connection باید بسته شود (open handle مانع `os.remove` می‌شود) —
+  `teardown_appcontext` این کار را برای درخواسته‌های داخل `with client:` انجام می‌دهد.
+- اجرای آزمون روی s52 (بدون دست‌کاری production): `deploy/pcm12_3_s52_test.sh`
+  (کپی backend در /tmp + python از .venv، با guard عدم اتصال به DB زنده).
 
 ## ۵. ساختار فنی
 
@@ -78,6 +89,8 @@ cd backend && python -m unittest test_api test_projects test_dashboard -v
 | **PCM-07** ناوبری دوسویه + checkpoint/resume + کنترل Start/Pause/Resume/Retry | ⏳ |
 | **PCM-08** موتور transform + reprocess | ⏳ |
 | **PCM-10** health/metrics + ۴ داشبورد Grafana (زیرساخت موجود s52) | ⏳ |
+| **PCM-12.2** آزمون پذیرش ۲۰ سناریو + ممیزی دسترسی s52 | ✅ (docs-only) |
+| **PCM-12.3** اصلاح ریشه‌ای test isolation (F-01) + آزمون امنیتی Grafana | ✅ (test-harness + docs؛ بدون deploy) |
 
 گزارش‌ها: `گزارش-PCM-0X.md` (۱۱ بخش: وضعیت قبل، طراحی، مهاجرت، فایل/API، تست،
 نتیجه production، SHA+لینک، git status، بکاپ/rollback، موارد باقی‌مانده، روش تست دستی).

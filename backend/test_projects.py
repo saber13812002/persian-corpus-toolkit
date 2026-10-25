@@ -9,23 +9,18 @@ Covers the API side of the scenarios T01-T12 that the extension depends on:
 The Chrome/UI side (T03 select, T04 reopen, T05 reload) is covered separately
 in extension/test_popup.js and the Phase-5 Chrome test.
 """
-import os
 import sqlite3
-import tempfile
 import unittest
 
-_fd, _DB = tempfile.mkstemp(suffix=".db")
-os.close(_fd)
-os.environ["PCT_DB"] = _DB
-
+# PCM-12.3: shared isolated test DB (MUST precede `import server` so
+# server.DB_PATH binds to the temp file, not the deployed thesaurus.db).
+import pct_test_support  # noqa: F401
 import server  # noqa: E402
 
 
 class ProjectFlowTests(unittest.TestCase):
     def setUp(self):
-        if os.path.exists(_DB):
-            os.remove(_DB)
-        server.init_db()
+        pct_test_support.reset_db()
         db = sqlite3.connect(server.DB_PATH)
         server.ensure_khamenei_schema(db)
         db.close()
