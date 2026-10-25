@@ -3,6 +3,7 @@
 - **تاریخ اجرا:** ۱۴۰۵/۰۸/۰۳ (2026-10-25، ۱۶:۳۷ تا ۱۷:۳۰ UTC)
 - **Production:** `https://corpus.ai.ismc.ir` · سرور s52 = `172.20.1.52`
 - **مبنای کد:** commit `cab1c06` (HEAD `origin/main` پیش از این تغییرات)
+- **SHA این مستندات:** `eba89f05aa1f4f79192025d8111f1118f1c0694e` — [لینک commit](https://github.com/saber13812002/persian-corpus-toolkit/commit/eba89f05aa1f4f79192025d8111f1118f1c0694e)
 - **ماهیت مأموریت:** test-harness + docs — **بدون تغییر رفتار production**، **بدون deploy**، **بدون اختلال در کراول زنده**
 - **مخاطب اصلی:** رفع یافته‌ی F-01 از [`PCM-12-ACCEPTANCE-REPORT.md`](PCM-12-ACCEPTANCE-REPORT.md) (AT-18)
 
@@ -127,9 +128,11 @@
 - **کراول زنده:** بدون اختلال (S7) — نرخ ۴ صفحه/دقیقه ادامه یافت؛ `integrity_check` پیش/بعد: ok.
 
 ## ۷. SHA + لینک + git status
-- **commit:** (SHA در commit پس از این فایل ثبت می‌شود — همان الگوی report-first)
-- **لینک:** (همان بالا)
-- **git status:** تمیز (فقط تغییرات این مأموریت commit شدند؛ اسکریپت‌های debug موقت/خارج از repo حذف شدند)
+- **SHA:** `eba89f05aa1f4f79192025d8111f1118f1c0694e`
+- **لینک:** https://github.com/saber13812002/persian-corpus-toolkit/commit/eba89f05aa1f4f79192025d8111f1118f1c0694e
+- **push:** `cab1c06..eba89f0  main -> main` (origin = GitHub)
+- **محتویات commit:** 10 فایل — `pct_test_support.py` (جدید) + ۳ ماژول تست اصلاح‌شده + ۲ اسکریپت deploy (جدید) + `AGENTS.md`/`readme.md`/گزارش PCM-12.2 (به‌روزشده) + این گزارش (جدید). **هیچ کد production تغییر نکرده؛ deploy انجام نشده.**
+- **git status:** تمیز (درخت فقط تغییرات این مأموریت دارد؛ اسکریپت/فایل‌های موقت محلی و s52 حذف شدند)
 
 ## ۸. بکاپ / rollback
 - **بکاپ DB لازم نبود** — هیچ دسترسی نوشتاری به `thesaurus.db` رخ نداد (S6/S7).
