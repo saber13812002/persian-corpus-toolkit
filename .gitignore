@@ -26,3 +26,10 @@ Thumbs.db
 backend/.venv/
 backend/thesaurus.db
 *.db
+
+# Word Factory — فضای ایزوله (فایل‌های Word آزمایشی + خروجی‌ها — هرگز commit نشود)
+wf-out/
+backend/wf-out/
+corpus/books/
+*.docx
+*.doc
