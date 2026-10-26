@@ -1,0 +1,718 @@
+<!DOCTYPE html>
+<html lang="fa" dir="rtl">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>📚 استودیوی دانش — Corpus Knowledge Studio</title>
+<style>
+  /* ── Design tokens: same palette as the main dashboard (PCM-14A) ── */
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  :root {
+    --bg: #0f172a; --card: #1e293b; --border: #334155;
+    --text: #e2e8f0; --dim: #94a3b8; --accent: #38bdf8;
+    --green: #4ade80; --red: #f87171; --orange: #fb923c;
+    --panel: #0b1120;
+    --sp-1: 4px; --sp-2: 8px; --sp-3: 12px; --sp-4: 16px; --sp-6: 24px; --sp-8: 32px;
+    --r-sm: 6px; --r-md: 10px;
+  }
+  body { background: var(--bg); color: var(--text); font: 14px/1.6 'Segoe UI', Tahoma, sans-serif; }
+  button { font-family: inherit; }
+  :focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: var(--r-sm); }
+  .sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+
+  /* ── 3-pane layout (RTL: list right, workspace middle, structure left) ── */
+  .studio { display: flex; height: 100vh; overflow: hidden; }
+  .pane { overflow-y: auto; padding: var(--sp-6); }
+  .pane-list { width: 320px; min-width: 280px; background: var(--panel); border-left: 1px solid var(--border); }
+  .pane-workspace { flex: 1; }
+  .pane-structure { width: 340px; min-width: 300px; border-right: 1px solid var(--border); background: var(--panel); }
+
+  .pane-title { display: flex; align-items: center; justify-content: space-between; gap: var(--sp-2); margin-bottom: var(--sp-4); }
+  .pane-title h1 { font-size: 16px; display: flex; align-items: center; gap: var(--sp-2); }
+  .count-chip { background: var(--card); border: 1px solid var(--border); color: var(--dim); border-radius: 10px; padding: 0 8px; font-size: 11px; }
+
+  .back-link { display: inline-flex; align-items: center; gap: 6px; color: var(--dim); background: none; border: none; cursor: pointer; font-size: 12px; padding: 4px 6px; border-radius: var(--r-sm); margin-bottom: var(--sp-3); }
+  .back-link:hover { color: var(--text); background: var(--card); }
+
+  .icon { width: 16px; height: 16px; stroke: currentColor; fill: none; stroke-width: 1.5; stroke-linecap: round; stroke-linejoin: round; flex: none; }
+  .icon-lg { width: 20px; height: 20px; }
+
+  /* ── list tools ── */
+  .list-tools { display: flex; flex-direction: column; gap: var(--sp-2); margin-bottom: var(--sp-4); }
+  .search-wrap { position: relative; }
+  .search-wrap .icon { position: absolute; inset-inline-start: 10px; top: 50%; transform: translateY(-50%); color: var(--dim); width: 14px; height: 14px; }
+  .input { width: 100%; padding: 8px 12px; border-radius: var(--r-sm); border: 1px solid var(--border); background: var(--bg); color: var(--text); font-family: inherit; font-size: 13px; }
+  .input::placeholder { color: var(--dim); }
+  .input:focus { border-color: var(--accent); outline: none; }
+  select.input { cursor: pointer; }
+
+  .btn { display: inline-flex; align-items: center; justify-content: center; gap: 6px; padding: 8px 14px; border-radius: var(--r-sm); border: 1px solid var(--border); background: var(--card); color: var(--text); cursor: pointer; font-size: 13px; transition: background 0.2s, border-color 0.2s; }
+  .btn:hover { background: #334155; }
+  .btn:disabled { opacity: 0.45; cursor: default; }
+  .btn-primary { background: var(--accent); border-color: var(--accent); color: #0f172a; font-weight: 700; }
+  .btn-primary:hover { background: #7dd3fc; }
+  .btn-ghost { background: transparent; }
+  .btn-sm { padding: 4px 10px; font-size: 12px; }
+
+  /* ── collection list ── */
+  .col-list { list-style: none; display: flex; flex-direction: column; gap: var(--sp-2); }
+  .col-item { display: block; width: 100%; text-align: right; background: var(--card); border: 1px solid var(--border); border-radius: var(--r-md); padding: 10px 12px; cursor: pointer; color: var(--text); transition: border-color 0.2s, background 0.2s; }
+  .col-item:hover { border-color: var(--accent); }
+  .col-item.active { border-color: var(--accent); background: #1e3a5f; }
+  .col-item .c-name { font-size: 13px; font-weight: 600; display: flex; align-items: center; gap: 6px; }
+  .col-item .c-meta { display: flex; align-items: center; gap: 8px; margin-top: 4px; font-size: 11px; color: var(--dim); flex-wrap: wrap; }
+  .c-slug { font-family: Consolas, monospace; direction: ltr; }
+
+  .badge { padding: 1px 8px; border-radius: 12px; font-size: 10px; font-weight: 600; display: inline-flex; align-items: center; gap: 4px; }
+  .badge.ok { background: #064e3b; color: var(--green); }
+  .badge.warn { background: #78350f; color: var(--orange); }
+  .badge.err { background: #450a0a; color: var(--red); }
+  .badge.info { background: #0c4a6e; color: var(--accent); }
+  .badge.dim { background: #1e293b; color: var(--dim); }
+
+  /* ── workspace ── */
+  .ws-head { display: flex; align-items: flex-start; gap: var(--sp-3); margin-bottom: var(--sp-4); flex-wrap: wrap; }
+  .ws-head h2 { font-size: 20px; margin-bottom: 4px; }
+  .ws-sub { display: flex; align-items: center; gap: var(--sp-2); color: var(--dim); font-size: 12px; flex-wrap: wrap; }
+  .ws-sub code { background: var(--panel); border: 1px solid var(--border); border-radius: 4px; padding: 1px 6px; font-size: 11px; direction: ltr; display: inline-block; }
+
+  .card { background: var(--card); border: 1px solid var(--border); border-radius: var(--r-md); padding: var(--sp-4); margin-bottom: var(--sp-4); }
+  .card h3 { font-size: 13px; color: var(--accent); margin-bottom: var(--sp-3); display: flex; align-items: center; gap: 6px; }
+  .kv { display: grid; grid-template-columns: 140px 1fr; gap: 6px 12px; font-size: 13px; }
+  .kv dt { color: var(--dim); }
+  .kv dd { overflow-wrap: anywhere; }
+  .kv dd.ltr { direction: ltr; text-align: left; font-family: Consolas, monospace; font-size: 12px; }
+
+  .stats-row { display: grid; grid-template-columns: repeat(auto-fit, minmax(120px, 1fr)); gap: var(--sp-3); }
+  .stat { background: var(--panel); border: 1px solid var(--border); border-radius: var(--r-md); padding: 12px; }
+  .stat .label { color: var(--dim); font-size: 11px; margin-bottom: 4px; }
+  .stat .value { font-size: 22px; font-weight: 700; }
+  .stat .value.blue { color: var(--accent); }
+
+  .form-row { display: flex; flex-direction: column; gap: 4px; margin-bottom: var(--sp-3); }
+  .form-row label { font-size: 12px; color: var(--dim); }
+  .form-row .hint { font-size: 11px; color: var(--dim); }
+  .form-err { color: var(--red); font-size: 12px; min-height: 16px; }
+  .form-actions { display: flex; gap: var(--sp-2); margin-top: var(--sp-3); }
+
+  /* ── empty / error / loading states ── */
+  .empty { text-align: center; padding: 48px 24px; color: var(--dim); }
+  .empty .icon-lg { width: 40px; height: 40px; margin: 0 auto 12px; display: block; opacity: 0.5; }
+  .empty .t1 { font-size: 14px; color: var(--text); margin-bottom: 4px; }
+  .empty .t2 { font-size: 12px; }
+  .error-box { background: #450a0a; border: 1px solid var(--red); color: var(--red); border-radius: var(--r-md); padding: 12px 16px; font-size: 13px; margin-bottom: var(--sp-4); display: none; }
+  .skeleton { background: linear-gradient(90deg, var(--card) 25%, #263449 50%, var(--card) 75%); background-size: 200% 100%; animation: shimmer 1.2s infinite; border-radius: var(--r-md); height: 64px; margin-bottom: var(--sp-2); }
+  @keyframes shimmer { to { background-position: -200% 0; } }
+  @media (prefers-reduced-motion: reduce) { .skeleton { animation: none; } }
+
+  /* ── modal ── */
+  .modal-overlay { position: fixed; inset: 0; background: rgba(2, 6, 23, 0.88); display: none; align-items: center; justify-content: center; z-index: 100; }
+  .modal-overlay.open { display: flex; }
+  .modal { background: var(--card); border: 1px solid var(--border); border-radius: 12px; padding: var(--sp-6); width: 460px; max-width: calc(100vw - 32px); max-height: 90vh; overflow-y: auto; }
+  .modal h2 { font-size: 16px; margin-bottom: var(--sp-4); display: flex; align-items: center; gap: 8px; }
+  .modal .x-btn { margin-inline-start: auto; background: none; border: none; color: var(--dim); cursor: pointer; padding: 4px; border-radius: var(--r-sm); }
+  .modal .x-btn:hover { color: var(--text); background: var(--border); }
+
+  /* ── login overlay (same model as main dashboard) ── */
+  #loginOverlay { position: fixed; inset: 0; background: rgba(2, 6, 23, .92); z-index: 200; display: none; align-items: center; justify-content: center; }
+  .login-box { background: var(--card); border: 1px solid var(--border); border-radius: 12px; padding: 28px; width: 320px; text-align: center; }
+  .login-box h2 { font-size: 16px; margin-bottom: 8px; color: var(--accent); }
+  .login-box .dim { color: var(--dim); font-size: 12px; margin-bottom: 16px; }
+  .login-box input { width: 100%; padding: 10px 12px; border-radius: 8px; border: 1px solid var(--border); background: var(--bg); color: var(--text); font-family: inherit; margin-bottom: 12px; }
+  .login-box button[type=submit] { width: 100%; padding: 10px; border-radius: 8px; border: none; background: var(--accent); color: #0f172a; font-weight: 700; cursor: pointer; font-family: inherit; }
+  .login-error { color: var(--red); font-size: 12px; margin-top: 10px; min-height: 16px; }
+
+  /* ── toasts ── */
+  #toasts { position: fixed; bottom: 20px; inset-inline-start: 20px; display: flex; flex-direction: column; gap: 8px; z-index: 300; }
+  .toast { background: var(--card); border: 1px solid var(--border); border-radius: var(--r-md); padding: 10px 16px; font-size: 13px; display: flex; align-items: center; gap: 8px; animation: toastIn 0.25s ease; max-width: 360px; }
+  .toast.ok { border-color: var(--green); }
+  .toast.err { border-color: var(--red); }
+  .toast .icon { width: 15px; height: 15px; }
+  @keyframes toastIn { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: none; } }
+  @media (prefers-reduced-motion: reduce) { .toast { animation: none; } }
+
+  .roadmap { display: flex; flex-direction: column; gap: 6px; font-size: 12px; }
+  .roadmap .step { display: flex; gap: 8px; align-items: flex-start; color: var(--dim); }
+  .roadmap .step .dot { width: 8px; height: 8px; border-radius: 50%; margin-top: 6px; flex: none; background: var(--border); }
+  .roadmap .step.done .dot { background: var(--green); }
+  .roadmap .step.todo .dot { background: var(--border); }
+  .roadmap .step b { color: var(--text); font-weight: 600; }
+
+  .docs-table { width: 100%; border-collapse: collapse; font-size: 12px; }
+  .docs-table th, .docs-table td { text-align: right; padding: 6px 8px; border-bottom: 1px solid var(--border); }
+  .docs-table th { color: var(--dim); font-weight: 600; }
+
+  /* ── responsive ── */
+  @media (max-width: 1100px) {
+    .studio { flex-direction: column; overflow-y: auto; height: auto; min-height: 100vh; }
+    .pane { overflow: visible; }
+    .pane-list { width: 100%; border-left: none; border-bottom: 1px solid var(--border); }
+    .pane-structure { width: 100%; border-right: none; border-top: 1px solid var(--border); }
+    .col-list { flex-direction: row; flex-wrap: wrap; }
+    .col-item { width: calc(50% - 8px); }
+  }
+  @media (max-width: 640px) {
+    .pane { padding: var(--sp-4); }
+    .col-item { width: 100%; }
+    .kv { grid-template-columns: 1fr; }
+    .kv dt { margin-top: 6px; }
+  }
+</style>
+</head>
+<body>
+<div class="studio">
+
+  <!-- ══ راست: فهرست کالکشن‌ها ══ -->
+  <aside class="pane pane-list" aria-label="فهرست کالکشن‌ها">
+    <div class="pane-title">
+      <h1><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2Z"/></svg> استودیوی دانش</h1>
+      <span class="count-chip" id="colCount">۰</span>
+    </div>
+    <div class="list-tools">
+      <div class="search-wrap">
+        <label class="sr-only" for="colSearch">جستجوی کالکشن</label>
+        <svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>
+        <input type="search" class="input" id="colSearch" placeholder="جستجو در نام یا slug…" autocomplete="off">
+      </div>
+      <label class="sr-only" for="subjectFilter">فیلتر موضوع</label>
+      <select id="subjectFilter" class="input">
+        <option value="">همه موضوعات</option>
+      </select>
+      <button type="button" class="btn btn-primary" id="createBtn">
+        <svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>
+        کالکشن جدید
+      </button>
+    </div>
+    <div id="listLoading" aria-hidden="true"></div>
+    <ul class="col-list" id="colList" role="listbox" aria-label="کالکشن‌ها"></ul>
+    <div id="listEmpty" class="empty" style="display:none">
+      <svg class="icon icon-lg" viewBox="0 0 24 24" aria-hidden="true"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2Z"/></svg>
+      <div class="t1">هنوز کالکشنی ندارید</div>
+      <div class="t2">برای شروع، یک کالکشن بسازید و کتاب‌های Word را به آن اضافه کنید.</div>
+    </div>
+    <div class="list-tools" style="margin-top:12px">
+      <div style="display:flex; align-items:center; gap:10px; font-size:12px; color:var(--dim)">
+        <button type="button" class="btn btn-sm btn-ghost" id="prevPage" disabled>قبلی</button>
+        <span id="pageLabel">صفحه ۱ از ۱</span>
+        <button type="button" class="btn btn-sm btn-ghost" id="nextPage" disabled>بعدی</button>
+      </div>
+    </div>
+  </aside>
+
+  <!-- ══ وسط: فضای کاری ══ -->
+  <main class="pane pane-workspace" id="workspace" aria-label="فضای کاری کالکشن" tabindex="-1">
+    <div class="empty" id="wsEmpty">
+      <svg class="icon icon-lg" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 19V5a2 2 0 0 1 2-2h13v18H6a2 2 0 0 1-2-2Zm0 0a2 2 0 0 1 2-2h13"/></svg>
+      <div class="t1">کالکشنی انتخاب نشده</div>
+      <div class="t2">از فهرست سمت راست یک کالکشن انتخاب کنید یا کالکشن جدید بسازید.</div>
+    </div>
+    <div id="wsContent" style="display:none">
+      <button type="button" class="back-link" id="backToTop" style="display:none">
+        <svg class="icon" viewBox="0 0 24 24" style="width:14px;height:14px" aria-hidden="true"><path d="m9 6 6 6-6 6"/></svg> بازگشت به فهرست
+      </button>
+      <div class="error-box" id="wsError" role="alert"></div>
+      <div class="ws-head">
+        <div style="flex:1; min-width:220px">
+          <h2 id="wsName">—</h2>
+          <div class="ws-sub">
+            <code id="wsSlug"></code>
+            <span class="badge dim" id="wsStatus">—</span>
+            <span class="badge dim" id="wsValid">—</span>
+          </div>
+        </div>
+      </div>
+
+      <div class="stats-row" style="margin-bottom:16px">
+        <div class="stat"><div class="label">کتاب‌ها</div><div class="value blue" id="statBooks">۰</div></div>
+        <div class="stat"><div class="label">Chunkها</div><div class="value" id="statChunks">۰</div></div>
+        <div class="stat"><div class="label">نسخه کالکشن</div><div class="value" id="statVersion">—</div></div>
+        <div class="stat"><div class="label">Index Buildها</div><div class="value" id="statBuilds">۰</div></div>
+      </div>
+
+      <div class="card">
+        <h3><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 6h16M4 12h16M4 18h10"/></svg> مشخصات</h3>
+        <dl class="kv" id="wsMeta"></dl>
+      </div>
+
+      <div class="card">
+        <h3><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 20h9M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4Z"/></svg> ویرایش مشخصات</h3>
+        <form id="editForm">
+          <div class="form-row">
+            <label for="fName">نام نمایشی (فارسی)</label>
+            <input type="text" class="input" id="fName" maxlength="200">
+          </div>
+          <div class="form-row">
+            <label for="fSlug">نام فنی (slug) — ثابت و یکتا</label>
+            <input type="text" class="input" id="fSlug" direction="ltr" style="text-align:left; font-family:Consolas,monospace" disabled>
+            <span class="hint">تغییر نام نمایشی روی شناسه و alias Elasticsearch اثر نمی‌گذارد.</span>
+          </div>
+          <div class="form-row">
+            <label for="fDesc">توضیحات</label>
+            <textarea class="input" id="fDesc" rows="3" maxlength="2000"></textarea>
+          </div>
+          <div class="form-row">
+            <label for="fSubject">موضوع / حوزه</label>
+            <input type="text" class="input" id="fSubject" maxlength="120">
+          </div>
+          <div class="form-err" id="editErr" role="alert"></div>
+          <div class="form-actions">
+            <button type="submit" class="btn btn-primary" id="editSave">ذخیره تغییرات</button>
+            <button type="button" class="btn btn-ghost" id="editReset">انصراف</button>
+          </div>
+        </form>
+      </div>
+    </div>
+  </main>
+
+  <!-- ══ چپ: ساختار و ایندکس ══ -->
+  <aside class="pane pane-structure" aria-label="ساختار داده و ایندکس">
+    <div class="pane-title"><h1><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="m12 2 9 5-9 5-9-5 9-5Zm-9 10 9 5 9-5m-18 5 9 5 9-5"/></svg> ساختار و ایندکس</h1></div>
+
+    <div id="stEmpty" class="empty">
+      <div class="t1">جزئیات ساختار</div>
+      <div class="t2">با انتخاب کالکشن، نسخه‌ها و مشخصات Elasticsearch اینجا نمایش داده می‌شود.</div>
+    </div>
+
+    <div id="stContent" style="display:none">
+      <div class="card">
+        <h3><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="m12 2 9 5-9 5-9-5 9-5Zm-9 10 9 5 9-5m-18 5 9 5 9-5"/></svg> نسخه‌ها</h3>
+        <dl class="kv" id="stVersions"></dl>
+      </div>
+      <div class="card">
+        <h3><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><ellipse cx="12" cy="5" rx="8" ry="3"/><path d="M4 5v14c0 1.7 3.6 3 8 3s8-1.3 8-3V5M4 12c0 1.7 3.6 3 8 3s8-1.3 8-3"/></svg> Elasticsearch</h3>
+        <dl class="kv" id="stEs"></dl>
+        <div id="stBuildsBox" style="margin-top:12px"></div>
+      </div>
+      <div class="card">
+        <h3><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 3"/></svg> نقشه‌ی راه استودیو</h3>
+        <div class="roadmap" id="stRoadmap"></div>
+      </div>
+    </div>
+  </aside>
+</div>
+
+<!-- ══ Modal: ساخت کالکشن ══ -->
+<div class="modal-overlay" id="createModal" role="dialog" aria-modal="true" aria-labelledby="createTitle">
+  <div class="modal">
+    <h2 id="createTitle">
+      <svg class="icon icon-lg" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>
+      کالکشن جدید
+      <button type="button" class="x-btn" id="createClose" aria-label="بستن">
+        <svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M18 6 6 18M6 6l12 12"/></svg>
+      </button>
+    </h2>
+    <form id="createForm">
+      <div class="form-row">
+        <label for="cName">نام نمایشی (فارسی)</label>
+        <input type="text" class="input" id="cName" maxlength="200" placeholder="مثلاً: کتابخانه علوم عقلی" required>
+      </div>
+      <div class="form-row">
+        <label for="cSlug">نام فنی (slug)</label>
+        <input type="text" class="input" id="cSlug" direction="ltr" style="text-align:left; font-family:Consolas,monospace" placeholder="oloom-aqli" maxlength="64" required>
+        <span class="hint">فقط حروف کوچک انگلیسی، اعداد و خط تیره. این نام، alias ایندکس Elasticsearch را می‌سازد.</span>
+        <button type="button" class="btn btn-sm btn-ghost" id="cSlugGen" style="align-self:flex-start; margin-top:2px">
+          <svg class="icon" viewBox="0 0 24 24" style="width:13px;height:13px" aria-hidden="true"><path d="M12 3v18M5 10l7-7 7 7"/></svg>
+          تولید از نام فارسی
+        </button>
+      </div>
+      <div class="form-row">
+        <label for="cDesc">توضیحات (اختیاری)</label>
+        <textarea class="input" id="cDesc" rows="3" maxlength="2000" placeholder="محتوای این کالکشن چیست؟"></textarea>
+      </div>
+      <div class="form-row">
+        <label for="cSubject">موضوع / حوزه (اختیاری)</label>
+        <input type="text" class="input" id="cSubject" maxlength="120" placeholder="مثلاً: فلسفه، تفاسیر قرآن…">
+      </div>
+      <div class="form-err" id="createErr" role="alert"></div>
+      <div class="form-actions">
+        <button type="submit" class="btn btn-primary" id="createSubmit">ساخت کالکشن</button>
+        <button type="button" class="btn btn-ghost" id="createCancel">انصراف</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<!-- ══ Login overlay ══ -->
+<div id="loginOverlay">
+  <form class="login-box" id="loginForm">
+    <h2>ورود به استودیوی دانش</h2>
+    <div class="dim">دسترسی به این بخش نیازمند نشست معتبر است</div>
+    <label class="sr-only" for="loginPassword">رمز عبور</label>
+    <input type="password" id="loginPassword" placeholder="رمز عبور" autocomplete="current-password">
+    <button type="submit">ورود</button>
+    <div class="login-error" id="loginError"></div>
+  </form>
+</div>
+
+<div id="toasts" aria-live="polite"></div>
+
+<script>
+'use strict';
+/* ═══════════ Corpus Knowledge Studio — PCM-14A ═══════════
+   Separate page on purpose: the main dashboard (index.html) is
+   NOT rewritten; this file only reuses its palette, auth model
+   and fetch pattern. */
+
+const state = {
+  page: 1, per_page: 50,
+  search: '', subject: '',
+  total: 0, totalPages: 1,
+  activeId: null,          // collection row id
+  collection: null,        // last fetched detail
+};
+
+/* ── helpers ── */
+const $ = (id) => document.getElementById(id);
+function escHtml(s) {
+  // Literal-free entity map: avoids tool-input normalization of entity text
+  // (same technique as dashboard/index.html).
+  const AMPP = [38, 97, 109, 112, 59].map(c => String.fromCharCode(c)).join('');
+  const LT   = [38, 108, 116, 59].map(c => String.fromCharCode(c)).join('');
+  const GT   = [38, 103, 116, 59].map(c => String.fromCharCode(c)).join('');
+  const QT   = [38, 113, 117, 111, 116, 59].map(c => String.fromCharCode(c)).join('');
+  const APOS = [38, 35, 39, 59].map(c => String.fromCharCode(c)).join('');
+  const map = { '&': AMPP, '<': LT, '>': GT, '"': QT, "'": APOS };
+  return String(s == null ? '' : s).replace(/[&<>"']/g, (c) => map[c]);
+}
+function faNum(n) {
+  return String(n == null ? 0 : n).replace(/[0-9]/g, (d) => '۰۱۲۳۴۵۶۷۸۹'[+d]);
+}
+function toast(msg, kind) {
+  const el = document.createElement('div');
+  el.className = 'toast ' + (kind || 'ok');
+  el.setAttribute('role', 'status');
+  const icon = kind === 'err'
+    ? '<svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 8v5m0 3v.01"/></svg>'
+    : '<svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="m8.5 12.5 2.5 2.5 5-5.5"/></svg>';
+  el.innerHTML = icon + '<span>' + escHtml(msg) + '</span>';
+  $('toasts').appendChild(el);
+  setTimeout(() => el.remove(), 4200);
+}
+let authEnabled = false;
+async function fetchAPI(path, opts) {
+  const r = await fetch(path, Object.assign({ credentials: 'same-origin' }, opts));
+  if (r.status === 401) { showLogin('نیازمند ورود — نشست منقضی یا خارج شد'); return null; }
+  let body = null;
+  try { body = await r.json(); } catch (e) { body = {}; }
+  if (!r.ok) { const e = new Error(body.message || ('HTTP ' + r.status)); e.status = r.status; e.field = body.field; throw e; }
+  return body;
+}
+function showLogin(msg) {
+  authEnabled = true;
+  $('loginOverlay').style.display = 'flex';
+  if (msg) $('loginError').textContent = msg;
+  setTimeout(() => $('loginPassword').focus(), 50);
+}
+async function checkAuth() {
+  try {
+    const r = await fetch('/api/auth/status', { credentials: 'same-origin' });
+    if (!r.ok) return;
+    const j = await r.json();
+    authEnabled = !!j.auth_enabled;
+    if (authEnabled && !j.authenticated) showLogin();
+  } catch (e) { /* offline-ish: let 401 handle it */ }
+}
+async function doLogin(ev) {
+  ev.preventDefault();
+  const pw = $('loginPassword').value;
+  const r = await fetch('/api/auth/login', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    credentials: 'same-origin', body: JSON.stringify({ password: pw }),
+  });
+  const j = await r.json().catch(() => ({}));
+  if (r.ok) {
+    $('loginOverlay').style.display = 'none';
+    $('loginError').textContent = '';
+    $('loginPassword').value = '';
+    await refreshAll();
+  } else {
+    $('loginError').textContent = j.message || 'ورود ناموفق';
+  }
+}
+
+/* ── slug transliteration (prefill only; server validates) ── */
+const FA_MAP = { 'آ':'a','ا':'a','أ':'a','إ':'a','ب':'b','پ':'p','ت':'t','ث':'s','ج':'j','چ':'ch','ح':'h','خ':'kh','د':'d','ذ':'z','ر':'r','ز':'z','س':'s','ش':'sh','ص':'s','ط':'t','ع':'a','غ':'gh','ف':'f','ق':'q','ک':'k','گ':'g','ل':'l','م':'m','ن':'n','و':'v','ه':'h','ی':'y','ئ':'y','ء':'e' };
+function slugFromName(name) {
+  const out = [];
+  for (const ch of name.normalize('NFC')) {
+    if (FA_MAP[ch]) out.push(FA_MAP[ch]);
+    else if (/[a-z0-9]/i.test(ch)) out.push(ch.toLowerCase());
+    else out.push('-');
+  }
+  return out.join('').replace(/-{2,}/g, '-').replace(/^-|-$/g, '').slice(0, 64);
+}
+
+/* ── hash routing (survives refresh — KS-30) ── */
+function readHash() {
+  const m = location.hash.match(/^#\/c\/(\d+)$/);
+  return m ? parseInt(m[1], 10) : null;
+}
+function setHash(id) {
+  if (id) history.replaceState(null, '', '#/c/' + id);
+  else if (location.hash) history.replaceState(null, '', location.pathname + location.search);
+}
+
+/* ── list ── */
+async function loadCollections() {
+  $('listLoading').innerHTML = '<div class="skeleton"></div><div class="skeleton"></div><div class="skeleton"></div>';
+  $('colList').innerHTML = '';
+  try {
+    const q = new URLSearchParams({ page: state.page, per_page: state.per_page });
+    if (state.search) q.set('search', state.search);
+    if (state.subject) q.set('subject', state.subject);
+    const j = await fetchAPI('/api/knowledge/collections?' + q);
+    if (!j) return;
+    state.total = j.total; state.totalPages = Math.max(1, j.total_pages);
+    $('colCount').textContent = faNum(j.total);
+    $('pageLabel').textContent = 'صفحه ' + faNum(state.page) + ' از ' + faNum(state.totalPages);
+    $('prevPage').disabled = state.page <= 1;
+    $('nextPage').disabled = state.page >= state.totalPages;
+    const list = $('colList');
+    list.innerHTML = '';
+    if (!j.collections.length) { $('listEmpty').style.display = 'block'; }
+    else {
+      $('listEmpty').style.display = 'none';
+      for (const c of j.collections) {
+        const li = document.createElement('li');
+        const b = document.createElement('button');
+        b.type = 'button';
+        b.className = 'col-item' + (c.id === state.activeId ? ' active' : '');
+        b.setAttribute('role', 'option');
+        b.setAttribute('aria-selected', String(c.id === state.activeId));
+        const statusBadge =
+          c.indexing_status === 'ready' ? '<span class="badge ok">ایندکس‌شده</span>' :
+          c.indexing_status === 'building' ? '<span class="badge warn">در حال ایندکس</span>' :
+          c.indexing_status === 'error' ? '<span class="badge err">خطا در ایندکس</span>' :
+          '<span class="badge dim">ایندکس نشده</span>';
+        b.innerHTML =
+          '<div class="c-name"><svg class="icon" viewBox="0 0 24 24" aria-hidden="true" style="width:14px;height:14px"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2Z"/></svg> ' + escHtml(c.name) + '</div>' +
+          '<div class="c-meta"><span class="c-slug">' + escHtml(c.slug) + '</span>' +
+          (c.subject ? '<span>' + escHtml(c.subject) + '</span>' : '') +
+          '<span>📕 ' + faNum(c.book_count) + ' کتاب</span>' + statusBadge + '</div>';
+        b.addEventListener('click', () => openCollection(c.id));
+        li.appendChild(b);
+        list.appendChild(li);
+      }
+    }
+    // subject filter options (once loaded)
+    if (!state.subjectLoaded) {
+      state.subjectLoaded = true;
+      try {
+        const s = await fetchAPI('/api/knowledge/subjects');
+        if (s) {
+          const sel = $('subjectFilter');
+          for (const row of s.subjects) {
+            const o = document.createElement('option');
+            o.value = row.subject; o.textContent = row.subject + ' (' + row.n + ')';
+            sel.appendChild(o);
+          }
+        }
+      } catch (e) { /* non-fatal */ }
+    }
+  } catch (e) {
+    $('listEmpty').style.display = 'none';
+    toast('بارگذاری فهرست کالکشن‌ها ناموفق بود: ' + e.message, 'err');
+  } finally {
+    $('listLoading').innerHTML = '';
+  }
+}
+
+/* ── detail ── */
+async function openCollection(id) {
+  state.activeId = id;
+  setHash(id);
+  markActive();
+  await renderDetail();
+  if (window.innerWidth <= 1100) $('workspace').scrollIntoView({ behavior: 'smooth' });
+}
+function markActive() {
+  document.querySelectorAll('.col-item').forEach((el) => {
+    el.classList.toggle('active', el.getAttribute('aria-selected') === 'true');
+  });
+}
+async function renderDetail() {
+  const ws = $('wsContent');
+  $('wsEmpty').style.display = 'none';
+  ws.style.display = 'block';
+  $('wsError').style.display = 'none';
+  $('backToTop').style.display = '';
+  try {
+    const j = await fetchAPI('/api/knowledge/collections/' + state.activeId);
+    if (!j) return;
+    const c = j.collection;
+    state.collection = c;
+    $('wsName').textContent = c.name;
+    $('wsSlug').textContent = c.collection_id + ' · ' + c.slug;
+    $('wsStatus').textContent =
+      c.indexing_status === 'ready' ? 'ایندکس: آماده' :
+      c.indexing_status === 'building' ? 'ایندکس: در حال ساخت' :
+      c.indexing_status === 'error' ? 'ایندکس: خطا' : 'ایندکس: نشده';
+    $('wsStatus').className = 'badge ' + (c.indexing_status === 'ready' ? 'ok' : c.indexing_status === 'error' ? 'err' : c.indexing_status === 'building' ? 'warn' : 'dim');
+    $('wsValid').textContent = c.validation_status === 'valid' ? 'ساختار: معتبر' : c.validation_status === 'invalid' ? 'ساختار: نامعتبر' : 'ساختار: در انتظار';
+    $('wsValid').className = 'badge ' + (c.validation_status === 'valid' ? 'ok' : c.validation_status === 'invalid' ? 'err' : 'dim');
+    $('statBooks').textContent = faNum(c.book_count);
+    $('statChunks').textContent = faNum(c.chunk_count);
+    $('statVersion').textContent = 'v' + faNum(c.collection_version);
+    $('statBuilds').textContent = faNum(c.index_builds.length);
+
+    const meta = $('wsMeta');
+    meta.innerHTML =
+      row('توضیحات', c.description || '<span style="color:var(--dim)">—</span>') +
+      row('موضوع', c.subject || '<span style="color:var(--dim)">—</span>') +
+      row('زبان', c.language) +
+      row('سیاست دسترسی', c.access_policy) +
+      row('ایجاد', c.created_at, true) +
+      row('به‌روزرسانی', c.updated_at, true);
+
+    $('fName').value = c.name;
+    $('fSlug').value = c.slug;
+    $('fDesc').value = c.description || '';
+    $('fSubject').value = c.subject || '';
+    $('editErr').textContent = '';
+    $('editSave').disabled = false;
+
+    renderStructure(c);
+  } catch (e) {
+    ws.style.display = 'none';
+    $('wsEmpty').style.display = 'block';
+    const box = $('wsError');
+    box.textContent = e.message;
+    box.style.display = 'block';
+    $('wsEmpty').style.display = 'none';
+  }
+}
+function row(dt, dd, ltr) {
+  return '<dt>' + escHtml(dt) + '</dt><dd' + (ltr ? ' class="ltr"' : '') + '>' + (ltr ? escHtml(dd) : dd) + '</dd>';
+}
+function renderStructure(c) {
+  $('stEmpty').style.display = 'none';
+  $('stContent').style.display = 'block';
+  $('stVersions').innerHTML =
+    row('نسخه کالکشن', 'v' + c.collection_version) +
+    row('نسخه Schema', c.schema_version, true) +
+    row('نسخه نرمال‌سازی', c.normalization_version, true) +
+    row('نسخه Chunking', c.chunking_version, true);
+  $('stEs').innerHTML =
+    row('Alias ایندکس', c.es_alias, true) +
+    row('Index فعلی', c.current_index_build || '<span style="color:var(--dim)">هنوز buildی ندارد</span>');
+  const bb = $('stBuildsBox');
+  if (!c.index_builds.length) {
+    bb.innerHTML = '<div class="empty" style="padding:16px"><div class="t2">هنوز ایندکس آزمایشی ساخته نشده است.<br>این قابلیت در PCM-14D فعال می‌شود.</div></div>';
+  } else {
+    bb.innerHTML = '<table class="docs-table"><thead><tr><th>Build</th><th>Index</th><th>Chunk</th><th>وضعیت</th></tr></thead><tbody>' +
+      c.index_builds.map((b) => '<tr><td class="c-slug">' + escHtml(b.iv_id) + '</td><td class="c-slug">' + escHtml(b.es_index) + '</td><td>' + faNum(b.chunk_count) + '</td><td>' + escHtml(b.status) + '</td></tr>').join('') +
+      '</tbody></table>';
+  }
+  $('stRoadmap').innerHTML =
+    '<div class="step done"><span class="dot"></span><span><b>PCM-14A</b> — مدیریت کالکشن‌ها و ساختار پایه</span></div>' +
+    '<div class="step todo"><span class="dot"></span><span><b>PCM-14B</b> — کتابخانه Word (بارگذاری، نمایش، کیفیت)</span></div>' +
+    '<div class="step todo"><span class="dot"></span><span><b>PCM-14C</b> — طراحی و تطبیق Schema</span></div>' +
+    '<div class="step todo"><span class="dot"></span><span><b>PCM-14D</b> — ایندکس Elasticsearch + نسخه‌بندی</span></div>' +
+    '<div class="step todo"><span class="dot"></span><span><b>PCM-14E</b> — جستجو و نسخه‌های ایندکس</span></div>';
+}
+
+/* ── create ── */
+function openCreateModal() {
+  $('createForm').reset();
+  $('createErr').textContent = '';
+  $('createModal').classList.add('open');
+  setTimeout(() => $('cName').focus(), 50);
+}
+function closeCreateModal() { $('createModal').classList.remove('open'); }
+
+async function doCreate(ev) {
+  ev.preventDefault();
+  const name = $('cName').value.trim();
+  const slug = $('cSlug').value.trim().toLowerCase();
+  const err = $('createErr');
+  err.textContent = '';
+  if (!name) { err.textContent = 'نام نمایشی الزامی است'; return; }
+  if (!/^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(slug) || slug.length < 2 || slug.length > 64) {
+    err.textContent = 'slug باید 2 تا 64 کاراکتر، فقط a-z 0-9 و خط تیره باشد'; return;
+  }
+  $('createSubmit').disabled = true;
+  try {
+    const j = await fetchAPI('/api/knowledge/collections', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        name, slug,
+        description: $('cDesc').value.trim() || null,
+        subject: $('cSubject').value.trim() || null,
+      }),
+    });
+    if (!j) return;
+    closeCreateModal();
+    toast('کالکشن «' + name + '» ساخته شد');
+    await loadCollections();
+    openCollection(j.collection.id);
+  } catch (e) {
+    err.textContent = e.message;
+  } finally {
+    $('createSubmit').disabled = false;
+  }
+}
+
+/* ── edit ── */
+async function doEdit(ev) {
+  ev.preventDefault();
+  if (!state.activeId) return;
+  const err = $('editErr');
+  err.textContent = '';
+  const name = $('fName').value.trim();
+  if (!name) { err.textContent = 'نام نمی‌تواند خالی باشد'; return; }
+  $('editSave').disabled = true;
+  try {
+    await fetchAPI('/api/knowledge/collections/' + state.activeId, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        name,
+        description: $('fDesc').value.trim() || null,
+        subject: $('fSubject').value.trim() || null,
+      }),
+    });
+    toast('تغییرات ذخیره شد');
+    await Promise.all([loadCollections(), renderDetail()]);
+  } catch (e) {
+    err.textContent = e.message;
+  } finally {
+    $('editSave').disabled = false;
+  }
+}
+
+/* ── refresh-all ── */
+async function refreshAll() {
+  await loadCollections();
+  const hid = readHash();
+  if (hid) { state.activeId = hid; markActive(); await renderDetail(); }
+}
+
+/* ── init ── */
+$('createBtn').addEventListener('click', openCreateModal);
+$('createClose').addEventListener('click', closeCreateModal);
+$('createCancel').addEventListener('click', closeCreateModal);
+$('createModal').addEventListener('click', (e) => { if (e.target === $('createModal')) closeCreateModal(); });
+document.addEventListener('keydown', (e) => {
+  if (e.key === 'Escape' && $('createModal').classList.contains('open')) closeCreateModal();
+});
+$('createForm').addEventListener('submit', doCreate);
+$('editForm').addEventListener('submit', doEdit);
+$('editReset').addEventListener('click', () => { if (state.collection) renderDetail(); });
+$('loginForm').addEventListener('submit', doLogin);
+$('cSlugGen').addEventListener('click', () => { $('cSlug').value = slugFromName($('cName').value); });
+$('colSearch').addEventListener('input', (e) => {
+  state.search = e.target.value.trim(); state.page = 1; loadCollections();
+});
+$('subjectFilter').addEventListener('change', (e) => { state.subject = e.target.value; state.page = 1; loadCollections(); });
+$('prevPage').addEventListener('click', () => { if (state.page > 1) { state.page--; loadCollections(); } });
+$('nextPage').addEventListener('click', () => { if (state.page < state.totalPages) { state.page++; loadCollections(); } });
+$('backToTop').addEventListener('click', () => { state.activeId = null; setHash(null); markActive(); $('wsContent').style.display = 'none'; $('wsEmpty').style.display = 'block'; $('stContent').style.display = 'none'; $('stEmpty').style.display = 'block'; });
+
+(async function init() {
+  await checkAuth();
+  await refreshAll();
+})();
+</script>
+</body>
+</html>
