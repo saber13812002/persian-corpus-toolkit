@@ -124,8 +124,8 @@ backend/test_word_factory.py       (24 تست: WF-01..WF-13)
 ## ۷. SHA + لینک
 
 - Base SHA: `87e4137`
-- Commit SHA: *(پس از push — خط این بخش ویرایش می‌شود)*
-- لینک commit: *(پس از push)*
+- Commit SHA: `263dc0d`
+- لینک commit: https://github.com/saber13812002/persian-corpus-toolkit/commit/263dc0d
 
 ## ۸. git status
 
