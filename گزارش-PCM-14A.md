@@ -133,25 +133,30 @@ isolation طبق PCM-12.3 (F-01) حفظ شده.
 
 ## ۶. نتیجه‌ی production (s52)
 
-**هنوز deploy نشده.** این فاز صرفاً local است؛ deploy + smoke test با
-`deploy/pcm14a_deploy.sh` در گام بعد (با بکاپ + integrity + شمارش‌ها) انجام
-خواهد شد. نتیجه‌ی production پس از deploy در همین بخش ثبت می‌شود.
-
+**هنوز deploy نشده.** این فاز local است و 82 تست سبز است؛ deploy + smoke test
+با `bash deploy/pcm14a_deploy.sh` روی s52 انجام می‌شود (بکاپ + integrity +
+`build` + `up -d backend` + smoke 401/200 + مقایسه‌ی شمارش‌ها). نتیجه‌ی
+production پس از deploy در همین بخش ثبت می‌شود.
 ## ۷. SHA + لینک (commit)
 
-— پس از commit/push ثبت می‌شود.
+- commit: `bcd985f` — [PCM-14A: Knowledge Studio collections layer
+  (DB+REST+studio skeleton)](https://github.com/saber13812002/persian-corpus-toolkit/commit/bcd985f)
+- pushed به `origin/main` (GitHub): `b3d9014..bcd985f`
 
 ## ۸. git status (آخرین)
 
 ```
-new file    backend/knowledge_api.py
-new file    backend/test_knowledge_api.py
-new file    dashboard/studio.html
-new file    deploy/pcm14a_deploy.sh
-modified    backend/server.py
-modified    dashboard/index.html
-new file    گزارش-PCM-14A.md
+## main...origin/main          (in sync)
 ```
+
+فایل‌های commit `bcd985f` (7 files, +1760):
+- `backend/knowledge_api.py` (جدید)
+- `backend/test_knowledge_api.py` (جدید)
+- `dashboard/studio.html` (جدید)
+- `deploy/pcm14a_deploy.sh` (جدید)
+- `backend/server.py` (ویرایش)
+- `dashboard/index.html` (ویرایش)
+- `گزارش-PCM-14A.md` (جدید)
 
 ## ۹. بکاپ / rollback
 
