@@ -29,6 +29,9 @@ backend/thesaurus.db
 
 # Word Factory — فضای ایزوله (فایل‌های Word آزمایشی + خروجی‌ها — هرگز commit نشود)
 wf-out/
+
+# PCM-14B — ذخیره‌ی پایدار فایل‌های Word + خروجی‌های Word Factory (ممنوع از Git)
+data/
 backend/wf-out/
 corpus/books/
 *.docx

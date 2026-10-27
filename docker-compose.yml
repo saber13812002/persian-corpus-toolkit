@@ -13,7 +13,11 @@ services:
       # Dashboard password (PCM-09): value comes from the local .env file
       # (gitignored). Never hardcode the password in this file or the repo.
       PCT_DASHBOARD_PASSWORD: ${PCT_DASHBOARD_PASSWORD:-}
+      # PCM-14B: writable store for uploaded DOCX originals + Word Factory
+      # outputs (data/knowledge/{files,out}). Must be a writable volume.
+      PCT_KNOWLEDGE_DATA_DIR: /data-files/knowledge
     volumes:
       - ./backend/thesaurus.db:/data/thesaurus.db
       - ./dashboard:/dashboard:ro
+      - ./data:/data-files
     restart: unless-stopped

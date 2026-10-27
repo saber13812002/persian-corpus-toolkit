@@ -141,6 +141,32 @@
   .docs-table { width: 100%; border-collapse: collapse; font-size: 12px; }
   .docs-table th, .docs-table td { text-align: right; padding: 6px 8px; border-bottom: 1px solid var(--border); }
   .docs-table th { color: var(--dim); font-weight: 600; }
+  .docs-table tr.clickable { cursor: pointer; }
+  .docs-table tr.clickable:hover { background: #1e3a5f; }
+  .sha-cell { font-family: Consolas, monospace; font-size: 10px; direction: ltr; text-align: left; color: var(--dim); }
+  .row-err { color: var(--red); font-size: 11px; max-width: 220px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+  /* ── PCM-14B: document library ── */
+  .doc-toolbar { display: flex; gap: 8px; margin-bottom: 12px; flex-wrap: wrap; align-items: center; }
+  .doc-toolbar .spacer { flex: 1; }
+  .progress { height: 6px; background: var(--bg); border-radius: 3px; overflow: hidden; }
+  .progress > i { display: block; height: 100%; background: var(--accent); transition: width 0.3s; }
+  .job-row { display: flex; flex-direction: column; gap: 4px; padding: 8px 0; border-bottom: 1px solid var(--border); font-size: 12px; }
+  .job-row .j-head { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+  .job-row .j-err { color: var(--red); font-size: 11px; max-width: 420px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .tabs { display: flex; gap: 6px; margin: 14px 0 10px; flex-wrap: wrap; }
+  .tabs button { padding: 4px 12px; font-size: 12px; border-radius: var(--r-sm); border: 1px solid var(--border); background: transparent; color: var(--dim); cursor: pointer; }
+  .tabs button.on { border-color: var(--accent); color: var(--accent); background: #0c4a6e33; }
+  .block-item { background: var(--panel); border: 1px solid var(--border); border-radius: var(--r-sm); padding: 10px 12px; margin-bottom: 8px; }
+  .block-item .b-head { display: flex; gap: 10px; color: var(--dim); font-size: 11px; margin-bottom: 6px; flex-wrap: wrap; }
+  .block-item pre { white-space: pre-wrap; word-break: break-word; font-family: inherit; font-size: 13px; line-height: 1.9; }
+  .block-item pre.raw { font-family: Consolas, 'Courier New', monospace; font-size: 12px; }
+  .warn-line { color: var(--orange); font-size: 11px; margin-top: 4px; }
+  .doc-actions { display: flex; gap: 8px; flex-wrap: wrap; margin: 10px 0; }
+  .meta-row { display: flex; gap: 8px; align-items: center; font-size: 12px; padding: 6px 0; border-bottom: 1px solid var(--border); }
+  .meta-row .m-name { min-width: 130px; }
+  .meta-row input { flex: 1; }
+  .compat-flag { display: inline-flex; align-items: center; gap: 6px; }
 
   /* ── responsive ── */
   @media (max-width: 1100px) {
@@ -261,6 +287,35 @@
           </div>
         </form>
       </div>
+
+      <!-- ═══ PCM-14B: Jobs فعال (نمایش زنده) ═══ -->
+      <div id="jobsPane"></div>
+
+      <!-- ═══ PCM-14B: کتابخانهٔ Word ═══ -->
+      <div class="card" id="docsCard">
+        <h3><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 19V5a2 2 0 0 1 2-2h13v18H6a2 2 0 0 1-2-2Zm0 0a2 2 0 0 1 2-2h13"/></svg> کتابخانهٔ Word</h3>
+        <div class="doc-toolbar">
+          <label class="btn btn-primary" for="docFileInput" style="cursor:pointer">
+            <svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v12M7 8l5-5 5 5M4 21h16"/></svg>
+            بارگذاری DOCX
+          </label>
+          <input type="file" id="docFileInput" accept=".docx,application/vnd.openxmlformats-officedocument.wordprocessingml.document" hidden>
+          <button type="button" class="btn" id="importBtn">
+            <svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2Z"/></svg>
+            واردسازی چندگانه (فهرست فایل‌ها)
+          </button>
+          <span class="spacer"></span>
+          <span class="badge dim" id="docsTotal">۰ سند</span>
+        </div>
+        <div id="docsBody"><div class="empty" style="padding:20px"><div class="t2">هنوز سندی بارگذاری نشده است.</div></div></div>
+      </div>
+
+      <!-- ═══ PCM-14B: جزئیات سند (در فضای کاری) ═══ -->
+      <div class="card" id="docDetailCard" style="display:none">
+        <h3><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 19V5a2 2 0 0 1 2-2h13v18H6a2 2 0 0 1-2-2Zm0 0a2 2 0 0 1 2-2h13"/></svg> <span id="ddTitle">سند</span></h3>
+        <div class="ws-sub" id="ddSub" style="margin-bottom:10px"></div>
+        <div id="ddBody"></div>
+      </div>
     </div>
   </main>
 
@@ -282,6 +337,16 @@
         <h3><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><ellipse cx="12" cy="5" rx="8" ry="3"/><path d="M4 5v14c0 1.7 3.6 3 8 3s8-1.3 8-3V5M4 12c0 1.7 3.6 3 8 3s8-1.3 8-3"/></svg> Elasticsearch</h3>
         <dl class="kv" id="stEs"></dl>
         <div id="stBuildsBox" style="margin-top:12px"></div>
+      </div>
+      <div class="card" id="stMetaCard">
+        <h3><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 6h16M4 12h16M4 18h10"/></svg> متادیتای سفارشی
+          <button type="button" class="btn btn-sm btn-ghost" id="metaFieldBtn" style="margin-inline-start:auto">فیلد جدید</button>
+        </h3>
+        <div id="stMetaBody"><div class="t2" style="color:var(--dim);font-size:12px">فیلدی تعریف نشده است.</div></div>
+      </div>
+      <div class="card">
+        <h3><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><ellipse cx="12" cy="5" rx="8" ry="3"/><path d="M4 5v14c0 1.7 3.6 3 8 3s8-1.3 8-3V5M4 12c0 1.7 3.6 3 8 3s8-1.3 8-3"/></svg> سازگاری Elasticsearch</h3>
+        <div id="stCompat" class="t2" style="color:var(--dim);font-size:12px">در حال بررسی…</div>
       </div>
       <div class="card">
         <h3><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 3"/></svg> نقشه‌ی راه استودیو</h3>
@@ -332,6 +397,74 @@
   </div>
 </div>
 
+<!-- ══ Modal: واردسازی چندگانه (PCM-14B — batch plan) ══ -->
+<div class="modal-overlay" id="importModal" role="dialog" aria-modal="true" aria-labelledby="importTitle">
+  <div class="modal" style="width:560px">
+    <h2 id="importTitle">
+      <svg class="icon icon-lg" viewBox="0 0 24 24" aria-hidden="true"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2Z"/></svg>
+      واردسازی چندگانه
+      <button type="button" class="x-btn" id="importClose" aria-label="بستن">
+        <svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M18 6 6 18M6 6l12 12"/></svg>
+      </button>
+    </h2>
+    <p style="font-size:12px;color:var(--dim);margin-bottom:12px">فایل‌های <b>.docx</b> را انتخاب کنید. فایل‌ها اینجا، روی مرورگر، پردازش می‌شوند و SHA-256 هر فایل محاسبه می‌شود؛ سپس برنامه‌ی واردسازی (با شناسایی تکراری و نامعتبر) به سرور فرستاده می‌شود و برای هر فایل «در انتظار پردازش» ذخیره می‌شود.</p>
+    <div class="form-row">
+      <label for="importFileInput">فایل‌ها (چندتایی)</label>
+      <input type="file" id="importFileInput" accept=".docx" multiple>
+    </div>
+    <div id="importPlan" style="max-height:280px;overflow-y:auto"></div>
+    <div class="form-err" id="importErr" role="alert"></div>
+    <div class="form-actions">
+      <button type="button" class="btn btn-primary" id="importConfirm" disabled>ثبت برنامه‌ی واردسازی</button>
+      <button type="button" class="btn btn-ghost" id="importCancel">انصراف</button>
+    </div>
+  </div>
+</div>
+
+<!-- ══ Modal: فیلد متادیتا جدید (PCM-14B §3) ══ -->
+<div class="modal-overlay" id="metaModal" role="dialog" aria-modal="true" aria-labelledby="metaTitle">
+  <div class="modal">
+    <h2 id="metaTitle">
+      <svg class="icon icon-lg" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 6h16M4 12h16M4 18h10"/></svg>
+      فیلد متادیتا جدید
+      <button type="button" class="x-btn" id="metaClose" aria-label="بستن">
+        <svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M18 6 6 18M6 6l12 12"/></svg>
+      </button>
+    </h2>
+    <form id="metaForm">
+      <div class="form-row">
+        <label for="mKey">کلید (field_key — انگلیسی)</label>
+        <input type="text" class="input" id="mKey" direction="ltr" style="text-align:left;font-family:Consolas,monospace" maxlength="64" placeholder="publisher" required>
+      </div>
+      <div class="form-row">
+        <label for="mName">نام نمایشی (فارسی)</label>
+        <input type="text" class="input" id="mName" maxlength="120" placeholder="ناشر" required>
+      </div>
+      <div class="form-row">
+        <label for="mScope">محدوده (scope)</label>
+        <select class="input" id="mScope">
+          <option value="collection">کالکشن — فقط برای این کالکشن</option>
+          <option value="document">سند — برای همهٔ کالکشن‌ها</option>
+        </select>
+      </div>
+      <div class="form-row">
+        <label for="mType">نوع داده</label>
+        <select class="input" id="mType">
+          <option value="string">متن (string)</option>
+          <option value="number">عدد (number)</option>
+          <option value="date">تاریخ (YYYY-MM-DD)</option>
+          <option value="boolean">بل (true/false)</option>
+        </select>
+      </div>
+      <div class="form-err" id="metaErr" role="alert"></div>
+      <div class="form-actions">
+        <button type="submit" class="btn btn-primary">ذخیره فیلد</button>
+        <button type="button" class="btn btn-ghost" id="metaCancel">انصراف</button>
+      </div>
+    </form>
+  </div>
+</div>
+
 <!-- ══ Login overlay ══ -->
 <div id="loginOverlay">
   <form class="login-box" id="loginForm">
@@ -359,6 +492,13 @@ const state = {
   total: 0, totalPages: 1,
   activeId: null,          // collection row id
   collection: null,        // last fetched detail
+  // PCM-14B
+  activeDocId: null,       // open document_id
+  docDetail: null,
+  docTab: 'overview',
+  docs: [],
+  jobs: [],
+  _jobTimer: null,
 };
 
 /* ── helpers ── */
@@ -442,13 +582,14 @@ function slugFromName(name) {
   return out.join('').replace(/-{2,}/g, '-').replace(/^-|-$/g, '').slice(0, 64);
 }
 
-/* ── hash routing (survives refresh — KS-30) ── */
+/* ── hash routing (survives refresh — KS-30, PCM-14B adds /d/) ── */
 function readHash() {
-  const m = location.hash.match(/^#\/c\/(\d+)$/);
-  return m ? parseInt(m[1], 10) : null;
+  const m = location.hash.match(/^#\/c\/(\d+)(?:\/d\/([a-z0-9-]+))?$/);
+  if (!m) return null;
+  return { id: parseInt(m[1], 10), doc: m[2] || null };
 }
-function setHash(id) {
-  if (id) history.replaceState(null, '', '#/c/' + id);
+function setHash(id, doc) {
+  if (id) history.replaceState(null, '', '#/c/' + id + (doc ? '/d/' + doc : ''));
   else if (location.hash) history.replaceState(null, '', location.pathname + location.search);
 }
 
@@ -520,6 +661,10 @@ async function loadCollections() {
 /* ── detail ── */
 async function openCollection(id) {
   state.activeId = id;
+  state.activeDocId = null;
+  state.docDetail = null;
+  state.docTab = 'overview';
+  $('docDetailCard').style.display = 'none';
   setHash(id);
   markActive();
   await renderDetail();
@@ -572,6 +717,9 @@ async function renderDetail() {
     $('editSave').disabled = false;
 
     renderStructure(c);
+    renderDocs();
+    renderMeta();
+    renderCompat();
   } catch (e) {
     ws.style.display = 'none';
     $('wsEmpty').style.display = 'block';
@@ -605,7 +753,7 @@ function renderStructure(c) {
   }
   $('stRoadmap').innerHTML =
     '<div class="step done"><span class="dot"></span><span><b>PCM-14A</b> — مدیریت کالکشن‌ها و ساختار پایه</span></div>' +
-    '<div class="step todo"><span class="dot"></span><span><b>PCM-14B</b> — کتابخانه Word (بارگذاری، نمایش، کیفیت)</span></div>' +
+    '<div class="step done"><span class="dot"></span><span><b>PCM-14B</b> — کتابخانه Word (بارگذاری، پردازش، کیفیت، متادیتا، Jobs)</span></div>' +
     '<div class="step todo"><span class="dot"></span><span><b>PCM-14C</b> — طراحی و تطبیق Schema</span></div>' +
     '<div class="step todo"><span class="dot"></span><span><b>PCM-14D</b> — ایندکس Elasticsearch + نسخه‌بندی</span></div>' +
     '<div class="step todo"><span class="dot"></span><span><b>PCM-14E</b> — جستجو و نسخه‌های ایندکس</span></div>';
@@ -681,11 +829,454 @@ async function doEdit(ev) {
   }
 }
 
+/* ═══════ PCM-14B: کتابخانه Word — docs, jobs, detail, metadata, compat ═══════ */
+
+const DOC_STATUS_FA = {
+  uploaded: ['بارگذاری‌شده', 'dim'],
+  pending: ['در انتظار پردازش', 'info'],
+  validating: ['در حال اعتبارسنجی', 'info'],
+  parsing: ['در حال پردازش', 'info'],
+  parsed: ['پردازش‌شده', 'ok'],
+  needs_review: ['نیاز به بررسی', 'warn'],
+  approved: ['تأییدشده', 'ok'],
+  failed: ['ناموفق', 'err'],
+  detached: ['جداشده', 'dim'],
+};
+function docStatusBadge(status) {
+  const [fa, cls] = DOC_STATUS_FA[status] || [status, 'dim'];
+  return '<span class="badge ' + cls + '">' + escHtml(fa) + '</span>';
+}
+
+/* ── document list (right side of workspace) ── */
+async function renderDocs() {
+  if (!state.activeId) return;
+  const body = $('docsBody');
+  body.innerHTML = '<div class="skeleton"></div><div class="skeleton"></div>';
+  try {
+    const j = await fetchAPI('/api/knowledge/collections/' + state.activeId + '/documents?per_page=50');
+    if (!j) return;
+    state.docs = j.documents;
+    $('docsTotal').textContent = faNum(j.total) + ' سند';
+    if (!state.docs.length) {
+      body.innerHTML = '<div class="empty" style="padding:20px"><div class="t2">هنوز سندی بارگذاری نشده است.</div></div>';
+      return;
+    }
+    body.innerHTML =
+      '<table class="docs-table"><thead><tr><th>فایل</th><th>وضعیت</th><th>بلوک</th><th>کیفیت</th><th>SHA-256</th></tr></thead><tbody>' +
+      state.docs.map((d) =>
+        '<tr class="clickable" data-docid="' + escHtml(d.document_id) + '" title="برای جزئیات کلیک کنید">' +
+        '<td>' + escHtml(d.file_name) +
+          (d.error ? '<div class="row-err" title="' + escHtml(d.error) + '">⚠ ' + escHtml(d.error) + '</div>' : '') +
+        '</td>' +
+        '<td>' + docStatusBadge(d.status) + '</td>' +
+        '<td>' + (d.blocks_count ? faNum(d.blocks_count) : '—') + '</td>' +
+        '<td>' + (d.quality_status ? '<span class="c-slug">' + escHtml(d.quality_status) + '</span>' : '—') + '</td>' +
+        '<td class="sha-cell">' + escHtml((d.sha256 || '').slice(0, 12)) + '</td></tr>'
+      ).join('') + '</tbody></table>';
+    body.querySelectorAll('tr.clickable').forEach((tr) => {
+      tr.addEventListener('click', () => openDocument(tr.getAttribute('data-docid')));
+    });
+  } catch (e) {
+    body.innerHTML = '<div class="error-box" style="display:block">' + escHtml(e.message) + '</div>';
+  }
+}
+
+async function uploadOne(file) {
+  const fd = new FormData();
+  fd.append('file', file, file.name);
+  const r = await fetch('/api/knowledge/collections/' + state.activeId + '/documents', {
+    method: 'POST', credentials: 'same-origin', body: fd,
+  });
+  if (r.status === 401) { showLogin('نیازمند ورود — نشست منقضی یا خارج شد'); return null; }
+  const j = await r.json().catch(() => ({}));
+  if (!r.ok) { const e = new Error(j.message || ('HTTP ' + r.status)); e.status = r.status; e.code = j.code; throw e; }
+  return j;
+}
+
+async function onDocFile(ev) {
+  const file = ev.target.files && ev.target.files[0];
+  ev.target.value = '';
+  if (!file || !state.activeId) return;
+  try {
+    const j = await uploadOne(file);
+    if (!j) return;
+    toast('«' + file.name + '» بارگذاری شد — حالا «پردازش» بزنید');
+    await Promise.all([renderDocs(), renderDetail()]);
+  } catch (e) {
+    if (e.code === 'duplicate') toast('این فایل قبلا با همین SHA-256 بارگذاری شده بود', 'err');
+    else toast('بارگذاری ناموفق بود: ' + e.message, 'err');
+  }
+}
+
+/* ── multi-file import (client-side SHA-256 → batch plan) ── */
+function sha256Hex(file) {
+  // Read the whole file into memory (uploads ≤ 200 MB — acceptable for the import UX)
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = async () => {
+      try {
+        const digest = await crypto.subtle.digest('SHA-256', reader.result);
+        resolve(Array.from(new Uint8Array(digest)).map((b) => b.toString(16).padStart(2, '0')).join(''));
+      } catch (err) { reject(err); }
+    };
+    reader.onerror = () => reject(reader.error);
+    reader.readAsArrayBuffer(file);
+  });
+}
+
+let importPlan = null;
+function openImportModal() {
+  if (!state.activeId) { toast('اول یک کالکشن انتخاب کنید', 'err'); return; }
+  $('importFileInput').value = '';
+  $('importPlan').innerHTML = '';
+  $('importErr').textContent = '';
+  $('importConfirm').disabled = true;
+  importPlan = null;
+  $('importModal').classList.add('open');
+}
+async function computeImportPlan() {
+  const files = Array.from($('importFileInput').files || []);
+  $('importErr').textContent = '';
+  if (!files.length) { $('importPlan').innerHTML = ''; $('importConfirm').disabled = true; return; }
+  $('importPlan').innerHTML = '<div class="t2" style="color:var(--dim);font-size:12px;padding:8px">در حال محاسبهٔ SHA-256 فایل‌ها (روی مرورگر شما)…</div>';
+  const rows = [];
+  for (const f of files) {
+    let sha = '';
+    try { sha = await sha256Hex(f); } catch (e) { sha = ''; }
+    let status = 'pending', error = null;
+    if (!/\.docx$/i.test(f.name)) { status = 'invalid_extension'; error = 'فقط DOCX مجاز است'; }
+    else if (f.size === 0) { status = 'empty'; error = 'فایل خالی است'; }
+    else if (!/^[0-9a-f]{64}$/.test(sha)) { status = 'invalid_sha'; error = 'SHA-256 محاسبه نشد'; }
+    rows.push({ name: f.name, size: f.size, sha256: sha, status, error });
+  }
+  importPlan = rows;
+  const n = (s) => rows.filter((r) => r.status === s).length;
+  $('importPlan').innerHTML =
+    '<div class="badge dim" style="margin-bottom:8px">جمع: ' + faNum(rows.length) +
+    ' · در انتظار: ' + faNum(n('pending')) +
+    ' · نامعتبر: ' + faNum(rows.length - n('pending')) + '</div>' +
+    '<div class="t2" style="color:var(--dim);font-size:11px;margin-bottom:8px">تکراری‌ها (SHA-256 تکراری) هنگام ثبت روی سرور شناسایی می‌شوند.</div>' +
+    '<table class="docs-table"><thead><tr><th>فایل</th><th>حجم</th><th>وضعیت</th></tr></thead><tbody>' +
+    rows.map((e) =>
+      '<tr><td>' + escHtml(e.name) +
+        (e.error ? '<div class="row-err">' + escHtml(e.error) + '</div>' : '') + '</td>' +
+      '<td>' + faNum(Math.round(e.size / 1024)) + ' KB</td>' +
+      '<td>' + escHtml(e.status) + '</td></tr>'
+    ).join('') + '</tbody></table>';
+  $('importConfirm').disabled = n('pending') === 0;
+}
+async function confirmImport() {
+  if (!importPlan) return;
+  $('importConfirm').disabled = true;
+  try {
+    const j = await fetchAPI('/api/knowledge/import/batches', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        collection_id: state.collection.collection_id,
+        files: importPlan.map((r) => ({ name: r.name, size: r.size, sha256: r.sha256 })),
+      }),
+    });
+    if (!j) return;
+    const s = j.summary;
+    closeImportModal();
+    toast('برنامهٔ ' + j.batch.batch_id + ' ثبت شد: ' + faNum(s.pending) + ' در انتظار' +
+      (s.duplicate ? ' · ' + faNum(s.duplicate) + ' تکراری' : '') +
+      (s.invalid ? ' · ' + faNum(s.invalid) + ' نامعتبر' : ''));
+    await Promise.all([renderDocs(), renderDetail()]);
+  } catch (e) {
+    $('importErr').textContent = e.message;
+  } finally {
+    $('importConfirm').disabled = false;
+  }
+}
+function closeImportModal() { $('importModal').classList.remove('open'); }
+
+/* ── jobs (persistent worker jobs + stuck recovery) ── */
+function refreshJobs() {
+  fetchAPI('/api/knowledge/jobs?per_page=20').then((j) => {
+    if (!j) return;
+    state.jobs = j.jobs;
+    const active = state.jobs.filter((x) => ['pending', 'running', 'validating', 'parsing'].includes(x.status));
+    const el = $('jobsPane');
+    if (el) renderJobsPane(active);
+    if (active.length) {
+      if (!state._jobTimer) state._jobTimer = setTimeout(() => { state._jobTimer = null; refreshJobs(); }, 2500);
+    }
+  }).catch(() => {});
+}
+function renderJobsPane(active) {
+  const el = $('jobsPane');
+  if (!active.length) { el.innerHTML = ''; return; }
+  el.innerHTML = active.map((j) => {
+    const pct = j.total ? Math.round((j.progress / j.total) * 100) : 0;
+    const stageFa = { intake: 'دریافت', validate: 'اعتبارسنجی', parse: 'پردازش', quality: 'کیفیت', done: 'پایان' }[j.stage] || (j.stage || '—');
+    return '<div class="job-row"><div class="j-head">' +
+      '<span class="badge ' + (j.status === 'running' ? 'info' : 'dim') + '">' + escHtml(j.status) + '</span>' +
+      '<span class="c-slug">' + escHtml(j.kind) + '</span>' +
+      '<span style="color:var(--dim)">' + escHtml(stageFa) + '</span>' +
+      (j.error ? '<span class="j-err" title="' + escHtml(j.error) + '">⚠ ' + escHtml(j.error) + '</span>' : '') +
+      '</div><div class="progress"><i style="width:' + pct + '%"></i></div></div>';
+  }).join('');
+}
+
+/* ── trigger process / approve / detach ── */
+async function triggerProcess(docId) {
+  try {
+    await fetchAPI('/api/knowledge/documents/' + docId + '/process', { method: 'POST' });
+    toast('پردازش آغاز شد');
+    refreshJobs();
+    setTimeout(() => Promise.all([renderDocs(), renderDetail()]), 2500);
+  } catch (e) { toast(e.message, 'err'); }
+}
+async function triggerApprove(docId) {
+  try {
+    await fetchAPI('/api/knowledge/documents/' + docId + '/approve', { method: 'POST' });
+    toast('سند تأیید شد');
+    await Promise.all([renderDocs(), renderDetail()]);
+  } catch (e) { toast(e.message, 'err'); }
+}
+async function triggerDetach(docId) {
+  if (!confirm('این سند از کالکشن جدا می‌شود (فایل اصلی حفظ می‌ماند). مطمئن هستید؟')) return;
+  try {
+    await fetchAPI('/api/knowledge/collections/' + state.activeId + '/documents/' + docId, { method: 'DELETE' });
+    toast('سند جدا شد');
+    state.activeDocId = null;
+    $('docDetailCard').style.display = 'none';
+    setHash(state.activeId);
+    await Promise.all([renderDocs(), renderDetail()]);
+  } catch (e) { toast(e.message, 'err'); }
+}
+
+/* ── document detail (tabs: overview / structure / quality / blocks) ── */
+async function openDocument(docId) {
+  if (!state.activeId) return;
+  state.activeDocId = docId;
+  state.docTab = 'overview';
+  setHash(state.activeId, docId);
+  await renderDocDetail();
+  if (window.innerWidth <= 1100) $('docDetailCard').scrollIntoView({ behavior: 'smooth', block: 'start' });
+}
+function setDocTab(tab) {
+  state.docTab = tab;
+  renderDocDetail();
+}
+async function renderDocDetail() {
+  const card = $('docDetailCard');
+  card.style.display = 'block';
+  $('ddBody').innerHTML = '<div class="skeleton"></div><div class="skeleton"></div>';
+  try {
+    const d = await fetchAPI('/api/knowledge/documents/' + state.activeDocId);
+    if (!d) return;
+    state.docDetail = d.document;
+    renderDocDetailBody(state.docDetail);
+  } catch (e) {
+    $('ddBody').innerHTML = '<div class="error-box" style="display:block">' + escHtml(e.message) + '</div>';
+  }
+}
+function renderDocDetailBody(d) {
+  $('ddTitle').textContent = d.file_name;
+  const qFa = { ok: 'معتبر', manual_review: 'نیاز به بررسی', failed: 'ناموفق' }[d.quality_status] || '—';
+  $('ddSub').innerHTML =
+    '<span class="c-slug">' + escHtml(d.document_id) + '</span>' +
+    docStatusBadge(d.status) +
+    (d.quality_status ? '<span class="badge dim">کیفیت: ' + escHtml(qFa) + ' (score=' + faNum(Math.round((d.quality_score || 0) * 100) / 100) + ')</span>' : '') +
+    '<span class="c-slug">' + escHtml((d.sha256 || '').slice(0, 12)) + '</span>';
+  const actions =
+    '<div class="doc-actions">' +
+    (['uploaded', 'failed'].includes(d.status) ? '<button type="button" class="btn btn-primary btn-sm" data-act="process">پردازش / تکرار</button>' : '') +
+    (['parsed', 'needs_review'].includes(d.status) ? '<button type="button" class="btn btn-primary btn-sm" data-act="approve">تأیید سند</button>' : '') +
+    (d.status !== 'detached' ? '<button type="button" class="btn btn-ghost btn-sm" data-act="detach">جدا از کالکشن</button>' : '') +
+    '</div>';
+  const tabs = ['overview', 'structure', 'quality', 'blocks'].map((t) =>
+    '<button type="button" class="' + (state.docTab === t ? 'on' : '') + '" data-tab="' + t + '">' +
+    ({ overview: 'خلاصه', structure: 'ساختار', quality: 'کیفیت', blocks: 'بلوک‌ها' }[t]) + '</button>'
+  ).join('');
+  $('ddBody').innerHTML =
+    actions + '<div class="tabs" id="ddTabs">' + tabs + '</div><div id="ddTabBody"></div>';
+  $('ddTabs').querySelectorAll('button').forEach((b) =>
+    b.addEventListener('click', () => setDocTab(b.getAttribute('data-tab'))));
+  $('ddBody').querySelectorAll('[data-act]').forEach((b) => {
+    const act = b.getAttribute('data-act');
+    b.addEventListener('click', () => {
+      if (act === 'process') triggerProcess(d.document_id);
+      if (act === 'approve') triggerApprove(d.document_id);
+      if (act === 'detach') triggerDetach(d.document_id);
+    });
+  });
+  renderDocTab(d);
+}
+async function renderDocTab(d) {
+  const box = $('ddTabBody');
+  const t = state.docTab;
+  box.innerHTML = '<div class="skeleton"></div>';
+  try {
+    if (t === 'overview') {
+      box.innerHTML =
+        '<dl class="kv">' +
+        row('file_id', d.file_id || '—', true) +
+        row('work_id', d.work_id || '—', true) +
+        row('edition_id', d.edition_id || '—', true) +
+        row('حجم', faNum(d.file_size) + ' بایت') +
+        row('بلوک‌ها', d.blocks_count ? faNum(d.blocks_count) : '—') +
+        row('کاراکترها', d.chars_count ? faNum(d.chars_count) : '—') +
+        row('parser', d.parser_version || '—', true) +
+        row('normalizer', d.norm_version || '—', true) +
+        (d.error ? '<dt style="color:var(--red)">خطا</dt><dd style="color:var(--red)">' + escHtml(d.error) + '</dd>' : '') +
+        '</dl>';
+    } else if (t === 'structure') {
+      const j = await fetchAPI('/api/knowledge/documents/' + d.document_id + '/structure');
+      if (!j) return;
+      const s = j.structure;
+      const headings = s.headings || [];
+      const tree = headings.map((n) =>
+        '<div style="padding-left:' + ((n.level || 1) - 1) * 16 + 'px;font-size:12px;line-height:2">' +
+        '<span class="badge dim" style="margin-inline-end:6px">H' + escHtml(String(n.level || 1)) + '</span>' +
+        escHtml(n.text || '') + '</div>'
+      ).join('') || '<div class="t2" style="color:var(--dim);font-size:12px">تیتری یافت نشد — سند تخت (flat) است.</div>';
+      box.innerHTML =
+        '<dl class="kv" style="margin-bottom:12px">' +
+        row('تیترها', faNum(headings.length)) +
+        row('فصل‌ها (H1)', faNum((s.chapters || []).length)) +
+        row('بلوک‌های فرانت‌متر', faNum(s.front_matter_blocks || 0)) +
+        row('کل بلوک‌ها', faNum(s.total_blocks || 0)) +
+        row('اطمینان', s.confidence != null ? faNum(s.confidence) : '—', true) +
+        '</dl>' + tree +
+        ((s.notes && s.notes.length)
+          ? '<div style="margin-top:8px">' + s.notes.map((w) =>
+              '<div class="warn-line" style="color:var(--dim)">یادداشت: ' + escHtml(w) + '</div>').join('') + '</div>'
+          : '');
+    } else if (t === 'quality') {
+      const j = await fetchAPI('/api/knowledge/documents/' + d.document_id + '/quality');
+      if (!j) return;
+      const q = j.quality;
+      const checks = q.checks || [];
+      const okCount = checks.filter((c) => c.ok).length;
+      box.innerHTML =
+        '<dl class="kv">' +
+        row('وضعیت', q.status, true) +
+        row('امتیاز', q.score != null ? faNum(q.score) : '—', true) +
+        row('چک‌های سبز', faNum(okCount) + ' از ' + faNum(checks.length)) +
+        row('پاس (passed)', q.passed ? 'بله' : 'خیر') +
+        '</dl>' +
+        '<div style="margin-top:10px">' +
+        checks.map((c) =>
+          '<div class="warn-line" style="color:' + (c.ok ? 'var(--green)' : 'var(--red)') + '">' +
+          (c.ok ? '✓' : '✗') + ' ' + escHtml(c.name || c.check || JSON.stringify(c)) + '</div>'
+        ).join('') + '</div>' +
+        (q.warnings && q.warnings.length
+          ? '<div style="margin-top:10px">' + q.warnings.map((w) =>
+              '<div class="warn-line">⚠ ' + escHtml(w) + '</div>').join('') + '</div>'
+          : '');
+    } else if (t === 'blocks') {
+      const j = await fetchAPI('/api/knowledge/documents/' + d.document_id + '/blocks?limit=200');
+      if (!j) return;
+      box.innerHTML =
+        '<div class="t2" style="color:var(--dim);font-size:11px;margin-bottom:8px">' +
+        'نمایش ' + faNum(j.blocks.length) + ' از ' + faNum(j.total) + ' بلوک — RAW دست‌نخورده، NORMALIZED استانداردشده.</div>' +
+        j.blocks.map((b) =>
+          '<div class="block-item">' +
+          '<div class="b-head"><span class="badge dim">' + escHtml(b.type) + '</span>' +
+          (b.style ? '<span>' + escHtml(b.style) + '</span>' : '') +
+          '<span class="c-slug">' + escHtml(b.block_id) + '</span></div>' +
+          '<pre class="raw" style="color:var(--dim)" title="RAW (دست‌نخورده)">' + escHtml(b.raw_text || '(خالی)') + '</pre>' +
+          (b.normalized_text !== b.raw_text
+            ? '<pre title="NORMALIZED (' + escHtml(b.norm_version || 'n-1') + ')">' + escHtml(b.normalized_text || '(خالی)') + '</pre>'
+            : '') +
+          (b.warnings && b.warnings.length
+            ? '<div class="warn-line">' + b.warnings.map(escHtml).join(' · ') + '</div>' : '') +
+          '</div>'
+        ).join('');
+    }
+  } catch (e) {
+    if (e.status === 409) box.innerHTML = '<div class="t2" style="color:var(--dim);font-size:12px">این سند هنوز پردازش نشده — اول «پردازش» را بزنید.</div>';
+    else box.innerHTML = '<div class="error-box" style="display:block">' + escHtml(e.message) + '</div>';
+  }
+}
+
+/* ── custom metadata (fields + values) ── */
+async function renderMeta() {
+  if (!state.activeId) return;
+  const box = $('stMetaBody');
+  try {
+    const j = await fetchAPI('/api/knowledge/metadata/fields?collection_id=' + state.collection.collection_id);
+    if (!j) return;
+    if (!j.fields.length) {
+      box.innerHTML = '<div class="t2" style="color:var(--dim);font-size:12px">فیلدی تعریف نشده است — «فیلد جدید» بزنید.</div>';
+      return;
+    }
+    box.innerHTML = j.fields.map((f) =>
+      '<div class="meta-row">' +
+      '<span class="m-name">' + escHtml(f.display_name) + ' <span class="c-slug" style="color:var(--dim)">' + escHtml(f.field_key) + '</span></span>' +
+      '<span class="badge dim">' + escHtml(f.scope) + '</span>' +
+      '<span class="badge dim">' + escHtml(f.data_type) + '</span>' +
+      (f.required ? '<span class="badge warn">الزامی</span>' : '') +
+      '</div>'
+    ).join('');
+  } catch (e) { box.innerHTML = ''; }
+}
+function openMetaModal() {
+  if (!state.activeId) return;
+  $('metaForm').reset();
+  $('metaErr').textContent = '';
+  $('metaModal').classList.add('open');
+  setTimeout(() => $('mKey').focus(), 50);
+}
+function closeMetaModal() { $('metaModal').classList.remove('open'); }
+async function doMetaField(ev) {
+  ev.preventDefault();
+  const key = $('mKey').value.trim();
+  const name = $('mName').value.trim();
+  const err = $('metaErr');
+  err.textContent = '';
+  if (!key || !name) { err.textContent = 'کلید و نام نمایشی الزامی‌اند'; return; }
+  try {
+    await fetchAPI('/api/knowledge/metadata/fields', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        scope: $('mScope').value,
+        field_key: key, display_name: name, data_type: $('mType').value,
+        collection_id: $('mScope').value === 'collection' ? state.collection.collection_id : null,
+      }),
+    });
+    closeMetaModal();
+    toast('فیلد «' + name + '» ذخیره شد');
+    renderMeta();
+  } catch (e) { err.textContent = e.message; }
+}
+
+/* ── ES compatibility (honest NOT_VERIFIED until PCM-14D) ── */
+async function renderCompat() {
+  const box = $('stCompat');
+  try {
+    const j = await fetchAPI('/api/knowledge/compatibility');
+    if (!j) return;
+    const badge = j.es_available
+      ? '<span class="badge ok">دسترس‌پذیر</span>'
+      : '<span class="badge warn">دسترس‌نیافتنی</span>';
+    box.innerHTML =
+      '<div style="margin-bottom:8px">Elasticsearch: ' + badge +
+      ' · mapping قبلی: <span class="c-slug">' + escHtml(j.previous_mapping) + '</span></div>' +
+      '<table class="docs-table"><thead><tr><th>فیلد</th><th>معماری</th><th>وضعیت</th></tr></thead><tbody>' +
+      j.field_matrix.map((f) =>
+        '<tr><td class="c-slug">' + escHtml(f.field) + '</td><td class="c-slug">' + escHtml(f.mapping) + '</td>' +
+        '<td><span class="compat-flag badge ' + (f.compatibility === 'verified' ? 'ok' : 'warn') + '">' + escHtml(f.compatibility) + '</span></td></tr>'
+      ).join('') + '</tbody></table>';
+  } catch (e) {
+    box.innerHTML = '<span class="t2">بررسی سازگاری ناموفق بود.</span>';
+  }
+}
+
 /* ── refresh-all ── */
 async function refreshAll() {
   await loadCollections();
-  const hid = readHash();
-  if (hid) { state.activeId = hid; markActive(); await renderDetail(); }
+  const h = readHash();
+  if (h) {
+    state.activeId = h.id;
+    markActive();
+    await renderDetail();
+    if (h.doc) await openDocument(h.doc);
+  }
+  refreshJobs();
 }
 
 /* ── init ── */
@@ -694,11 +1285,29 @@ $('createClose').addEventListener('click', closeCreateModal);
 $('createCancel').addEventListener('click', closeCreateModal);
 $('createModal').addEventListener('click', (e) => { if (e.target === $('createModal')) closeCreateModal(); });
 document.addEventListener('keydown', (e) => {
-  if (e.key === 'Escape' && $('createModal').classList.contains('open')) closeCreateModal();
+  if (e.key === 'Escape') {
+    if ($('createModal').classList.contains('open')) closeCreateModal();
+    if ($('importModal').classList.contains('open')) closeImportModal();
+    if ($('metaModal').classList.contains('open')) closeMetaModal();
+  }
 });
 $('createForm').addEventListener('submit', doCreate);
 $('editForm').addEventListener('submit', doEdit);
 $('editReset').addEventListener('click', () => { if (state.collection) renderDetail(); });
+
+/* ── PCM-14B listeners ── */
+$('docFileInput').addEventListener('change', onDocFile);
+$('importBtn').addEventListener('click', openImportModal);
+$('importClose').addEventListener('click', closeImportModal);
+$('importCancel').addEventListener('click', closeImportModal);
+$('importModal').addEventListener('click', (e) => { if (e.target === $('importModal')) closeImportModal(); });
+$('importFileInput').addEventListener('change', computeImportPlan);
+$('importConfirm').addEventListener('click', confirmImport);
+$('metaFieldBtn').addEventListener('click', openMetaModal);
+$('metaClose').addEventListener('click', closeMetaModal);
+$('metaCancel').addEventListener('click', closeMetaModal);
+$('metaModal').addEventListener('click', (e) => { if (e.target === $('metaModal')) closeMetaModal(); });
+$('metaForm').addEventListener('submit', doMetaField);
 $('loginForm').addEventListener('submit', doLogin);
 $('cSlugGen').addEventListener('click', () => { $('cSlug').value = slugFromName($('cName').value); });
 $('colSearch').addEventListener('input', (e) => {
