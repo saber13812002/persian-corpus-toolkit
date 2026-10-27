@@ -1,0 +1,14 @@
+# PCM-14B.3 — line-ending discipline (root fix for Windows autocrlf drift).
+# The repo stores LF; deploys are produced with `git archive` from Windows
+# where core.autocrlf=true would otherwise export CRLF (breaks Dockerfile,
+# blob-identity checks). Force LF export for all text, binary for images.
+* text=auto eol=lf
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.ico binary
+*.db binary
+*.docx binary
+*.pdf binary
+*.woff binary
+*.woff2 binary

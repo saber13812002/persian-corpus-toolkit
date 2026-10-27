@@ -15,8 +15,9 @@
 | 3 | **سیستم پروژه** (v3.5): پروژه برای هر دامنه، نقطه‌های استخراج، کراول قطعه‌قطعه با resume | ✅ فعال (تست واقعی Chrome باقی‌مانده) |
 | 4 | سایت‌های نام‌دار با فیلدهای آماده (`tasnim.hamtaa.org` seed شده) | ✅ فعال |
 | 5 | داشبورد آنلاین `corpus.ai.ismc.ir/dashboard` (تب «پروژه‌ها» + مرور صفحه‌به‌صفحه + جستجو + Previous/Next + احراز هویت رمز) | ✅ فعال (PCM-04/05/09) |
-| 6 | پایپلاین پیکره + دیتaset + آپلود HuggingFace | ✅ در دسترس |
-| 7 | ایندکسر RAG | 🚧 در دست توسعه |
+| 6 | **Word Studio + پایگاه دانش** (PCM-14B): آپلود DOCX ← تبدیل به بلوک/JSON ← ساختار/کیفیت ← job queue با retry + استودیو فارسی `corpus.ai.ismc.ir/dashboard/studio.html` | ✅ فعال (PCM-14B.3) |
+| 7 | پایپلاین پیکره + دیتaset + آپلود HuggingFace | ✅ در دسترس |
+| 8 | ایندکسر RAG | 🚧 در دست توسعه |
 
 ### سیستم پروژه (هسته v3.5)
 
@@ -46,9 +47,12 @@
 │  • projects.py    — پروژه/نقطه/صفحه/گزارش ★          │
 │  • auth.py        — احراز هویت داشبورد (scrypt+cookie) │
 │  • dashboard_api.py — API خواندنی داشبورد ★           │
+│  • knowledge_api.py — ★ Word Studio/پایگاه دانش (PCM-14B)│
 │  • sites.py       — سایت‌های نام‌دار + فیلدها ★      │
 │  • sciences.py    — ۱۳ علم اصطلاح‌نامه               │
-│  • 3 test files (api/projects/dashboard) — 39 تست     │
+│  • factory/       — ★ Word Factory: DOCX→JSON block (CLI)│
+│  • 5 test files — 103 تست (api/projects/dashboard/     │
+│                     knowledge_api/word_factory)         │
 ├────────────────────────────────────────────────────────┤
 │  Corpus Pipeline (corpus/)                             │
 │  • build_corpus.py / build_dataset.py / pipeline.py    │
@@ -68,11 +72,16 @@ persian-corpus-toolkit/
 │   ├── projects.py          # ★ سیستم پروژه (v3.5)
 │   ├── auth.py              # ★ احراز هویت داشبورد (PCM-09)
 │   ├── dashboard_api.py     # ★ API خواندنی داشبورد (PCM-04)
+│   ├── knowledge_api.py     # ★ Word Studio + پایگاه دانش (PCM-14B)
+│   ├── factory/             # ★ Word Factory: DOCX→JSON (CLI + policy n-1)
 │   ├── sites.py             # ★ سایت‌ها و فیلدهای آماده
 │   ├── sciences.py          # ۱۳ علم
+│   ├── pct_test_support.py  # ★ harness ایزوله (DB موقت مشترک)
 │   ├── test_api.py          # ۸ تست
 │   ├── test_projects.py     # ۹ تست جریان پروژه
 │   ├── test_dashboard.py    # ۲۲ تست (auth A01-A08 + D01-D07 + صفحات P01-P07)
+│   ├── test_knowledge_api.py# ★ ۴۰ تست KB-01..KB-14
+│   ├── test_word_factory.py # ★ ۲۴ تست WF-01..WF-13
 │   ├── requirements.txt
 │   ├── Dockerfile
 │   └── thesaurus.db         # (gitignored)
@@ -86,9 +95,11 @@ persian-corpus-toolkit/
 │   ├── test_popup.js        # ۸ تست UI (node)
 │   └── icons/
 ├── corpus/                  # پایپلاین پیکره و دیتاست
-├── dashboard/               # داشبورد (تب‌های اصلی + «پروژه‌ها» + overlay ورود)
+├── dashboard/               # داشبورد (تب‌های اصلی + «پروژه‌ها» + studio.html + overlay ورود)
+├── data/                    # (gitignored) store پایدار: data/knowledge/{files,out} (PCM-14B)
 ├── deploy/                  # nginx vhost + systemd + اسکریپت‌های دپلوی PCM
-├── docs/                    # project-dashboard.md · dashboard-authentication.md
+├── docs/                    # project-dashboard.md · dashboard-authentication.md ·
+│                            #   WORD-FACTORY-USER-GUIDE.md · WORD-STUDIO-KNOWLEDGE-GUIDE.md · PCM-12/13
 ├── docker-compose.yml       # backend محلی روی 127.0.0.1:5055
 ├── AGENTS.md                # قواعد سخت دپلوی/مهاجرت/رمز
 └── گزارش-وضعیت-پروژه.md / گزارش-PCM-0X.md
@@ -166,7 +177,26 @@ python upload_to_hf.py --token hf_... --username ...
 | `/api/dashboard/projects/<id>/pages` | GET | **PCM-05** فهرست صفحات — جستجو (URL/متن فیلدها)، sort، صفحه‌بندی، prev/next |
 | `/api/dashboard/projects/<id>/pages/<page_id>` | GET | **PCM-05** جزئیات صفحه — values، position، JSON خام، field_errors |
 
-سند کامل: [docs/project-dashboard.md](docs/project-dashboard.md) و [docs/dashboard-authentication.md](docs/dashboard-authentication.md)
+### Word Studio / پایگاه دانش (PCM-14B — 🔒 نیاز به ورود)
+
+| Endpoint | Method | توضیح |
+|---|---|---|
+| `/api/knowledge/collections` | GET/POST | فهرست (جستجو/فیلتر موضوع/صفحه‌بندی) / ساخت `{name, slug, subject_id}` |
+| `/api/knowledge/collections/<id>` | GET/PATCH | جزئیات / ویرایش |
+| `/api/knowledge/collections/<id>/documents` | POST/GET | آپلود DOCX (multipart) / فهرست اسناد |
+| `/api/knowledge/collections/<id>/documents/<doc_id>` | DELETE | جداکردن سند |
+| `/api/knowledge/collections/<id>/builds` | GET | buildها (V0.1: ES غیرفعال) |
+| `/api/knowledge/documents/<doc_id>` | GET | جزئیات سند |
+| `/api/knowledge/documents/<doc_id>/process` | POST | (باز)پردازش با Word Factory — idempotent + retry |
+| `/api/knowledge/documents/<doc_id>/approve` | POST | تأیید (فقط parsed/needs_review) |
+| `/api/knowledge/documents/<doc_id>/structure|quality|blocks|file` | GET | ساختار / کیفیت / بلوک‌ها (صفحه‌بندی) / فایل اصلی |
+| `/api/knowledge/subjects` | GET | ۱۳ علم |
+| `/api/knowledge/import/batches(…)` | POST/GET | ثبت/پردازش batch (V0.1: registration) |
+| `/api/knowledge/jobs` | GET | job queue |
+| `/api/knowledge/metadata/fields(…)` / `values(…)` | GET/POST/PATCH/DELETE | متادیتای مجموعه‌ای |
+| `/api/knowledge/compatibility` | GET | وضعیت ES (`NOT VERIFIED` در V0.1) |
+
+سند کامل: [docs/project-dashboard.md](docs/project-dashboard.md) · [docs/dashboard-authentication.md](docs/dashboard-authentication.md) · [docs/WORD-STUDIO-KNOWLEDGE-GUIDE.md](docs/WORD-STUDIO-KNOWLEDGE-GUIDE.md) · [docs/WORD-FACTORY-USER-GUIDE.md](docs/WORD-FACTORY-USER-GUIDE.md)
 
 ### سایت‌ها
 
@@ -200,6 +230,9 @@ python upload_to_hf.py --token hf_... --username ...
 | `sites`, `site_fields` | سایت‌های نام‌دار و فیلدهای آماده |
 | `captures` | captures عمومی |
 | `auth_meta`, `auth_sessions`, `auth_rate` | ★ احراز هویت داشبورد (scrypt-hash، sessionهای ۷روزه، rate-limit) |
+| `knowledge_collections`, `knowledge_collection_documents`, `knowledge_document_metadata_fields/values` | ★ مجموعه‌ها + اسناد + متادیتا (PCM-14B) |
+| `knowledge_jobs`, `knowledge_import_batches`, `knowledge_index_builds` | ★ job queue + batch + build (V0.1) |
+| `knowledge_schema_version` | نسخه اسکیمای knowledge (additive migration) |
 
 جدول‌های جدید **خودکار** و **additive** ساخته می‌شوند (migration امن برای DBهای قدیمی).
 
@@ -220,13 +253,17 @@ cp backups/thesaurus_20260802.db backend/thesaurus.db       # بازیابی
 ## 🧪 تست‌ها
 
 ```bash
-cd backend && python -m unittest test_api test_projects test_dashboard -v   # 39/39
-cd extension && node test_popup.js                            # 8/8
+cd backend && python -m unittest test_api test_projects test_dashboard -v     # 39/39 (هسته)
+cd backend && python -m unittest test_knowledge_api -v                        # 40/40 (PCM-14B)
+cd backend && python -m unittest test_word_factory -v                         # 24/24 (PCM-14B)
+cd backend && python -m unittest discover -s . -p "test_*.py"                 # 103/103 (کل)
+cd extension && node test_popup.js                                            # 8/8
 node --check extension/popup.js extension/background.js extension/content_picker.js
 node -e "JSON.parse(require('fs').readFileSync('extension/manifest.json'))"
 ```
 
-قبل از هر commit، هر دو مجموعه تست باید سبز باشند.
+قبل از هر commit، همه‌ی مجموعه‌ها باید سبز باشند. همه‌ی ماژول‌ها از `pct_test_support`
+(DB موقت مشترک) استفاده می‌کنند — ترتیب/ترکیب ماژول‌ها مهم نیست (PCM-12.3).
 
 ---
 
@@ -247,6 +284,9 @@ node -e "JSON.parse(require('fs').readFileSync('extension/manifest.json'))"
 - داشبورد: `https://corpus.ai.ismc.ir/dashboard/` — tab «📁 پروژه‌ها» (فهرست + صفحه‌بندی + جزئیات)
 - **PCM-05:** کارت «📄 صفحات» در جزئیات هر پروژه — مرور صفحه‌به‌صفحه، جستجو در URL/متن فیلدها،
   sort/صفحه‌بندی، Previous/Next هم‌راستای ترتیب لیست، JSON خام هر صفحه + کپی (فقط خواندنی، بدون مهاجرت schema)
+- **Word Studio (PCM-14B.3):** `https://corpus.ai.ismc.ir/dashboard/studio.html` —
+  مجموعه‌ها/کتاب‌ها/جزئیات (ساختار، کیفیت، بلوک‌ها) + job queue؛ آپلود DOCX ←
+  پردازش با Word Factory ← approve. راهنما: [docs/WORD-STUDIO-KNOWLEDGE-GUIDE.md](docs/WORD-STUDIO-KNOWLEDGE-GUIDE.md)
 - ورود: `POST /api/auth/login` با رمز؛ cookie `pct_session` (HttpOnly/Secure/SameSite=Lax)
 - رمز: **فقط** در `.env` سرور (gitignored، chmod 600) — در DB به‌صورت scrypt-hash؛ هرگز در کد/Git/لاگ
 - APIهای نوشتاری اکستنشن (`/api/projects*`) **باز می‌مانند** → کراول زنده هرگز با ورود داشبورد قطع نمی‌شود
@@ -311,6 +351,9 @@ sqlite3 backend/thesaurus.db "SELECT COUNT(*) FROM project_pages"
 | PCM-13+ مسیر V0.1→V1.0: Word → JSON → ES test index → Queue → RAG API → Registries → LiteLLM → SuperRAG → Research شبانه | 📋 طراحی‌شده (فقط طرح؛ **هنوز پیاده‌سازی نشده**) |
 | PCM-12.2 آزمون پذیرش قابلیت‌ها + ممیزی دسترسی پس از مهاجرت s52 | ✅ (مستندات + آزمون خواندنی — بدون کد عملیاتی) |
 | PCM-12.3 اصلاح ریشه‌ای test isolation (F-01) + ممیزی امنیتی Grafana | ✅ (test-harness + docs — بدون تغییر production، بدون deploy) |
+| **PCM-14B Word Factory** DOCX→JSON block (CLI، بدون DB/endpoint) | ✅ (۲۴ تست WF) |
+| **PCM-14B.2** Knowledge Base: schema v1→v2 + store پایدار (data/knowledge) | ✅ (روی s52) |
+| **PCM-14B.3** API Knowledge + Word Studio (studio.html) + job queue + deploy | ✅ (روی s52، ۴۰ تست KB + 103 کل) |
 
 جزئیات معماری و نقشه‌ی راه نسخه‌ای (V0.1..V1.0): مستندات PCM-12 در [docs/](docs/) — `PCM-12-AUDIT.md` (وضعیت واقعی)، `PCM-12-ARCHITECTURE.md` (طراحی S2..S9)، `PCM-12-PRD.md` (الزامات)، `PCM-12-ROADMAP.md` (ترتیب اجرا)، `PCM-12-DATA-CONTRACTS.md` (schema/API/Prompt)، `PCM-12-AGENT-HANDOFF.md` (تصمیم‌ها و مرزها)، `PCM-12-ACCEPTANCE-REPORT.md` (گزارش آزمون پذیرش ۲۰ سناریو + ممیزی دسترسی s52)، `PCM-12-ACCEPTANCE-CHECKLIST.md` (چک‌لیست تأیید کاربری با Chrome) و `PCM-12.3-TEST-ISOLATION.md` (رفع ریشه‌ای F-01 + ممیزی امنیتی Grafana).
 

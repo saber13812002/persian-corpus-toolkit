@@ -91,7 +91,8 @@ python -m factory.cli book.docx --out ../wf-out/run \
 ```bash
 cd backend
 python -m unittest test_word_factory -v                      # 24 تست WF-01..WF-13
-python -m unittest test_api test_projects test_dashboard test_word_factory   # 63 تست
+python -m unittest test_api test_projects test_dashboard test_knowledge_api test_word_factory
+                                                             # 103 تست (کل)
 ```
 
 ## محدودیت‌های V0.1 (صریح)
