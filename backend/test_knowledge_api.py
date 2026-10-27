@@ -918,6 +918,62 @@ class JobAndCompatibilityTests(Base):
         self.assertIn("worker interrupted", jobs["j-stuck001"]["error"])
         self.assertEqual(jobs["j-fresh001"]["status"], "pending")
 
+    def test_kb12b_retry_reexecutes_interrupted_job(self):
+        """PCM-14B acceptance B10 (root fix): /process on a document whose job
+        is 'interrupted' MUST re-execute it (reset to pending + fresh worker
+        + retry_count bump), not return the stale row."""
+        self.login()
+        from factory._smoke_fixtures import make_sample_book
+        self.coll = self.make_collection("کتابخانه", "retry-col")
+        tmp = tempfile.mkdtemp(prefix="pct-kb-retry-")
+        src = make_sample_book(os.path.join(tmp, "retry.docx"))
+        self.upload(self.coll["id"], src)
+        doc = self.client.get(
+            f"/api/knowledge/collections/{self.coll['id']}/documents"
+        ).get_json()["documents"][0]
+        doc_id = doc["document_id"]
+
+        # simulate a crash: the document's job is interrupted (2h old),
+        # document left 'uploaded'
+        conn = sqlite3.connect(server.DB_PATH)
+        conn.row_factory = sqlite3.Row
+        conn.execute(
+            """INSERT INTO knowledge_jobs
+               (job_id, job_key, kind, collection_id, status,
+                created_at, updated_at)
+               VALUES ('j-retry001', 'process_document:%s', 'process_document',
+                       ?, 'interrupted',
+                       datetime('now','-2 hours'), datetime('now','-2 hours'))"""
+            % doc_id, (self.coll["collection_id"],))
+        conn.execute(
+            "UPDATE knowledge_collection_documents SET status='uploaded' "
+            "WHERE document_id=?", (doc_id,))
+        conn.commit()
+        conn.close()
+
+        # /process must RE-RUN (202 + resubmitted=false) and finish succeeded
+        r = self.client.post(f"/api/knowledge/documents/{doc_id}/process")
+        self.assertEqual(r.status_code, 202, r.get_data(as_text=True))
+        self.assertFalse(r.get_json()["resubmitted"])
+        job_id = r.get_json()["job"]["job_id"]
+        self.assertEqual(job_id, "j-retry001")  # same row reused, re-executed
+
+        job = self.wait_job(job_id)
+        self.assertEqual(job["status"], "succeeded", dict(job))
+        self.assertEqual(job["retry_count"], 1)
+        d = self.client.get(
+            f"/api/knowledge/documents/{doc_id}").get_json()["document"]
+        self.assertIn(d["status"], ("parsed", "needs_review"))
+
+        # a SUCCEEDED job with the same key is NOT re-run (idempotency holds)
+        r = self.client.post(f"/api/knowledge/documents/{doc_id}/process")
+        self.assertEqual(r.status_code, 200)
+        self.assertTrue(r.get_json()["resubmitted"])
+        self.assertEqual(r.get_json()["job"]["status"], "succeeded")
+        jobs = {j["job_id"]: j for j in
+                self.client.get("/api/knowledge/jobs").get_json()["jobs"]}
+        self.assertEqual(jobs[job_id]["retry_count"], 1)
+
     def test_kb13_compatibility_not_verified(self):
         self.login()
         r = self.client.get("/api/knowledge/compatibility")

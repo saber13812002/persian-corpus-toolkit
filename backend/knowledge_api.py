@@ -455,14 +455,29 @@ def _submit_job(db, job_key, kind, collection_id, batch_id, total=0,
                 idempotency_key=None):
     """Insert a persistent job row and start its worker thread.
 
-    Idempotency: re-submitting the same job_key returns the existing job
-    (and does NOT start a second worker) — spec §13/§9.
+    Idempotency: re-submitting the same job_key while the job is still
+    pending/running/succeeded returns the existing row and does NOT start
+    a second worker. A job in a terminal-but-retryable state (failed,
+    interrupted — spec §13 "retryable") is RE-EXECUTED: the row is reset
+    to pending and a fresh worker starts; retry_count is bumped.
     """
     now = _now()
     existing = db.execute(
-        "SELECT job_id, status FROM knowledge_jobs WHERE job_key=?",
+        "SELECT job_id, status, retry_count FROM knowledge_jobs WHERE job_key=?",
         (job_key,)).fetchone()
     if existing:
+        if existing["status"] in ("failed", "interrupted"):
+            db.execute(
+                """UPDATE knowledge_jobs
+                     SET status='pending', progress=0, stage=NULL, error=NULL,
+                         retry_count=retry_count+1, updated_at=?,
+                         completed_at=NULL
+                   WHERE job_id=? AND status IN ('failed','interrupted')""",
+                (now, existing["job_id"]))
+            db.commit()
+            _start_worker(existing["job_id"])
+            return {"job_id": existing["job_id"], "job_key": job_key,
+                    "status": "pending"}, True
         db.commit()
         return dict(existing), False
     job_id = "j-" + hashlib.sha256(
@@ -475,11 +490,16 @@ def _submit_job(db, job_key, kind, collection_id, batch_id, total=0,
         (job_id, job_key, kind, collection_id, batch_id, total,
          idempotency_key, now, now))
     db.commit()
+    _start_worker(job_id)
+    return {"job_id": job_id, "job_key": job_key, "status": "pending"}, True
+
+
+def _start_worker(job_id):
+    """Spawn the daemon worker thread for a persisted job row."""
     import server  # lazy: server imports this module at startup
     t = threading.Thread(
         target=_job_worker, args=(server.DB_PATH, job_id), daemon=True)
     t.start()
-    return {"job_id": job_id, "job_key": job_key, "status": "pending"}, True
 
 
 _JOB_KINDS = {}  # kind -> worker fn(conn, job_id); registered below
