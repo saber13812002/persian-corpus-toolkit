@@ -1,7 +1,7 @@
 # گزارش PCM-14B.2 — ممیزی و پذیرش ایزوله: رفع نقص قرارداد retry job + ممیزی انحراف‌های گزارش 14B
 
 **تاریخ:** ۲۰۲۶/۱۰/۲۷
-**SHA:** (پس از `430bfc7` — commit این گزارش)
+**SHA:** `fc8d60e` (پس از `430bfc7`)
 **حوزه:** `backend/knowledge_api.py`، `backend/test_knowledge_api.py`، `deploy/pcm14b_acceptance_local.py`
 **تأثیر روی سرفصل اصلی:** صفر (بدون لمس `thesaurus.db` production، بدون تغییر API سرفصل، بدون تغییر `index.html`)
 
