@@ -186,18 +186,19 @@ python -m unittest test_api test_projects test_dashboard \
 
 ## G. Git: commit و push
 
-- commit کد + مستندات + گزارش: روی `main` (بعد از `855042f`)، push بدون
-  force — SHA نهایی در خطای پایین ثبت می‌شود:
-  **SHA commit: `<SHA>`** (بعد از push با `git rev-parse main` و
-  `git rev-parse origin/main` تأیید می‌شود).
-- GitHub: `https://github.com/saber13812002/persian-corpus-toolkit`.
+- **commit کد:** `1535f455d7e5518eea151f9d1dfeee4663d63ed7`
+  (8 فایل، 2567+ / 25−) — بعد از `855042f`، push بدون force.
+- **GitHub:** `https://github.com/saber13812002/persian-corpus-toolkit` — SHA
+  همان `1535f45` برای commit کد (تأیید با `git ls-remote`).
+- این گزارش (با ثبت SHA نهایی) در **commit دوم بلافاصله بعدی** ثبت می‌شود
+  (`git log --oneline -2` برای مشاهده هر دو) — همان رویه‌ی PCM-14C.3.
 
 ## H. وضعیت Local / GitHub / s52
 
 | محیط | وضعیت |
 |------|-------|
-| Local | `main` = `<SHA>`؛ working tree clean |
-| GitHub | همگام با Local (`origin/main` = `<SHA>`؛ تأیید با `git ls-remote`) |
+| Local | `main` = `1535f45`؛ working tree clean |
+| GitHub | همگام با Local (`origin/main` = `1535f45`؛ تأیید با `git ls-remote`) |
 | s52 | **pre-PCM-14D** — دست‌نخورده (چک خواندنی: `deploy/pcm14d_s52_readonly_check.sh`) |
 
 ## I. تأیید عدم اختلال در production
