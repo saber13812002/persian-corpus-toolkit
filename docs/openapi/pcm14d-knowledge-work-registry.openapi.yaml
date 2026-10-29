@@ -1,0 +1,736 @@
+openapi: 3.0.3
+info:
+  title: Persian Corpus Toolkit — Knowledge Studio: Work/Edition/Volume Registry (PCM-14D)
+  version: 1.0.0
+  description: |
+    PCM-14D additive extension of the Corpus Knowledge Studio API
+    (`/api/knowledge/*`).
+
+    Adds a Work → Edition → Volume entity registry, entity-scoped custom
+    metadata (work/edition/volume scopes on top of the existing
+    collection/batch/document scopes), and a scope-merging resolve endpoint.
+
+    Ids are deterministic (`short_id(prefix, key) = prefix + "-" + sha256(key)[:8]`)
+    and mirror the Word Factory exactly:
+    - work_key   = `title.strip().lower() + "|" + author.strip().lower()`
+      (file sha256 when both are empty)
+    - work_id    = `w-<sha8(work_key)>`
+    - edition_id = `e-<sha8(work_key + "|" + sha256)>`
+    - volume_id  = `v-<sha8(edition_id + "|" + (volume_no or "main"))>`
+      (null when the document has no volume)
+
+    Every endpoint is protected by PCM-09 session auth (cookie).
+    Responses use `{"ok": true, ...}` / `{"ok": false, "message": ..., "field"?: ...}`.
+servers:
+  - url: https://corpus.ai.ismc.ir
+    description: production (s52)
+tags:
+  - name: works
+    description: Work registry
+  - name: editions
+    description: Edition registry
+  - name: volumes
+    description: Volume registry
+  - name: metadata
+    description: Custom metadata (fields/values) + resolve
+security:
+  - cookieAuth: []
+paths:
+  /api/knowledge/works:
+    get:
+      tags: [works]
+      operationId: listWorks
+      summary: List works (search + pagination)
+      parameters:
+        - { name: search, in: query, schema: { type: string }, description: "LIKE match on title/author/work_id" }
+        - { name: page, in: query, schema: { type: integer, default: 1 } }
+        - { name: per_page, in: query, schema: { type: integer, default: 50, maximum: 100 } }
+      responses:
+        "200":
+          description: Paged list
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  works:
+                    type: array
+                    items: { $ref: "#/components/schemas/Work" }
+                  total: { type: integer }
+                  page: { type: integer }
+                  per_page: { type: integer }
+                  total_pages: { type: integer }
+              example:
+                works:
+                  - work_id: w-1a2b3c4d
+                    title: "الموجات"
+                    author: "میرداماد"
+                    language: fa
+                    document_count: 2
+                    source: factory
+                total: 1
+                page: 1
+                per_page: 50
+                total_pages: 1
+        "401": { $ref: "#/components/responses/Unauthorized" }
+    post:
+      tags: [works]
+      operationId: createWork
+      summary: Create a work (idempotent on the deterministic id)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                key: { type: string, description: "Explicit key; wins over title/author/sha256" }
+                title: { type: string }
+                author: { type: string }
+                subject: { type: string }
+                language: { type: string }
+                sha256: { type: string, description: "Fallback key when title/author are empty" }
+              required: []
+              description: At least one of key/title/author/sha256 is required.
+            example: { title: "الموجات", author: "میرداماد", language: fa }
+      responses:
+        "201":
+          description: Created or already present
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  ok: { type: boolean, example: true }
+                  created: { type: boolean, description: false when the id already existed }
+                  work: { $ref: "#/components/schemas/Work" }
+              example:
+                ok: true
+                created: true
+                work:
+                  work_id: w-1a2b3c4d
+                  title: "الموجات"
+                  author: "میرداماد"
+                  subject: null
+                  language: fa
+                  document_count: 0
+                  source: user
+                  created_at: "2026-10-29T12:00:00Z"
+                  updated_at: "2026-10-29T12:00:00Z"
+        "400":
+          description: No key derivable
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+              example: { ok: false, field: key, message: "key (یا title/author/sha256) لازم است" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+  /api/knowledge/works/{work_id}:
+    parameters:
+      - { name: work_id, in: path, required: true, schema: { type: string, example: w-1a2b3c4d } }
+    get:
+      tags: [works]
+      operationId: getWork
+      summary: Work detail (editions + documents)
+      responses:
+        "200":
+          description: Work with hierarchy
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  ok: { type: boolean }
+                  work: { $ref: "#/components/schemas/Work" }
+                  editions:
+                    type: array
+                    items:
+                      allOf:
+                        - { $ref: "#/components/schemas/Edition" }
+                        - type: object
+                          properties: { volume_count: { type: integer } }
+                  documents:
+                    type: array
+                    items: { $ref: "#/components/schemas/DocumentRef" }
+        "404":
+          description: Unknown work
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+              example: { ok: false, message: "اثر پیدا نشد" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+    patch:
+      tags: [works]
+      operationId: updateWork
+      summary: Update biblio fields (title/author/subject/language)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                title: { type: string }
+                author: { type: string }
+                subject: { type: string }
+                language: { type: string }
+            example: { title: "الموجات الوجودی" }
+      responses:
+        "200":
+          description: Updated
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  ok: { type: boolean }
+                  work: { $ref: "#/components/schemas/Work" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+  /api/knowledge/works/{work_id}/editions:
+    post:
+      tags: [editions]
+      operationId: createEdition
+      summary: Create an edition under a work (idempotent)
+      parameters:
+        - { name: work_id, in: path, required: true, schema: { type: string } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                key: { type: string }
+                publisher: { type: string }
+                publish_year: { type: string }
+                edition_label: { type: string }
+                language: { type: string }
+            example: { publisher: "انتشارات قلم", publish_year: "1395" }
+      responses:
+        "201":
+          description: Edition created or already present
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  ok: { type: boolean }
+                  edition: { $ref: "#/components/schemas/Edition" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+  /api/knowledge/editions/{edition_id}:
+    parameters:
+      - { name: edition_id, in: path, required: true, schema: { type: string, example: e-1a2b3c4d } }
+    get:
+      tags: [editions]
+      operationId: getEdition
+      summary: Edition detail (volumes + documents)
+      responses:
+        "200":
+          description: Edition with hierarchy
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  ok: { type: boolean }
+                  edition: { $ref: "#/components/schemas/Edition" }
+                  volumes:
+                    type: array
+                    items:
+                      allOf:
+                        - { $ref: "#/components/schemas/Volume" }
+                        - type: object
+                          properties: { document_count: { type: integer } }
+                  documents:
+                    type: array
+                    items: { $ref: "#/components/schemas/DocumentRef" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+    patch:
+      tags: [editions]
+      operationId: updateEdition
+      summary: Update edition fields (publisher/publish_year/edition_label/language)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                publisher: { type: string }
+                publish_year: { type: string }
+                edition_label: { type: string }
+                language: { type: string }
+      responses:
+        "200":
+          description: Updated
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  ok: { type: boolean }
+                  edition: { $ref: "#/components/schemas/Edition" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+  /api/knowledge/editions/{edition_id}/volumes:
+    post:
+      tags: [volumes]
+      operationId: createVolume
+      summary: Create a volume under an edition (idempotent)
+      parameters:
+        - { name: edition_id, in: path, required: true, schema: { type: string } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                key: { type: string }
+                volume_no: { type: integer, example: 2 }
+                label: { type: string }
+            example: { volume_no: 2, label: "جلد دوم" }
+      responses:
+        "201":
+          description: Volume created or already present
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  ok: { type: boolean }
+                  volume: { $ref: "#/components/schemas/Volume" }
+        "400":
+          description: volume_no not an integer
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+              example: { ok: false, field: volume_no, message: "volume_no باید عدد باشد" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+  /api/knowledge/volumes/{volume_id}:
+    parameters:
+      - { name: volume_id, in: path, required: true, schema: { type: string, example: v-1a2b3c4d } }
+    get:
+      tags: [volumes]
+      operationId: getVolume
+      summary: Volume detail (documents)
+      responses:
+        "200":
+          description: Volume with documents
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  ok: { type: boolean }
+                  volume: { $ref: "#/components/schemas/Volume" }
+                  documents:
+                    type: array
+                    items: { $ref: "#/components/schemas/DocumentRef" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+    patch:
+      tags: [volumes]
+      operationId: updateVolume
+      summary: Update volume fields (volume_no/label)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                volume_no: { type: integer }
+                label: { type: string }
+      responses:
+        "200":
+          description: Updated
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  ok: { type: boolean }
+                  volume: { $ref: "#/components/schemas/Volume" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+  /api/knowledge/metadata/fields:
+    post:
+      tags: [metadata]
+      operationId: createMetaField
+      summary: Define a custom metadata field (PCM-14D adds work/edition/volume scopes)
+      description: |
+        `scope` ∈ collection | batch | document | work | edition | volume.
+        Entity-scoped fields are global (`collection_id=__global__`).
+        Duplicate (scope, collection_id, field_key) → 409.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [field_key, display_name]
+              properties:
+                scope:
+                  type: string
+                  enum: [collection, batch, document, work, edition, volume]
+                  default: collection
+                collection_id: { type: string, description: required for scope=collection }
+                field_key: { type: string, pattern: "^[a-z0-9_]+$" }
+                display_name: { type: string }
+                data_type:
+                  type: string
+                  enum: [string, number, boolean, date, url, json, enum]
+                  default: string
+                required: { type: boolean }
+                default_value: { type: string }
+                searchable: { type: boolean }
+            example: { scope: work, field_key: work_genre, display_name: "ژانر اثر" }
+      responses:
+        "201":
+          description: Field created
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  ok: { type: boolean }
+                  field: { $ref: "#/components/schemas/MetaField" }
+        "400":
+          description: Invalid scope/key/display
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+              example: { ok: false, field: scope, message: "scope باید collection/batch/document/work/edition/volume باشد" }
+        "404":
+          description: scope=collection with unknown collection_id
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+              example: { ok: false, field: collection_id, message: "کالکشن پیدا نشد" }
+        "409":
+          description: Duplicate field
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+              example: { ok: false, field: field_key, message: "این فیلد از قبل تعریف شده" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+  /api/knowledge/metadata/values:
+    get:
+      tags: [metadata]
+      operationId: listMetaValues
+      summary: List metadata values by anchor (scope-strict)
+      description: |
+        Entity filters are scope-strict: `work_id` only matches rows whose
+        field scope is `work` (an edition row carrying the parent work_id is
+        NOT returned). At least one anchor is required.
+      parameters:
+        - { name: collection_id, in: query, schema: { type: string } }
+        - { name: document_id, in: query, schema: { type: string } }
+        - { name: batch_id, in: query, schema: { type: string } }
+        - { name: work_id, in: query, schema: { type: string } }
+        - { name: edition_id, in: query, schema: { type: string } }
+        - { name: volume_id, in: query, schema: { type: string } }
+      responses:
+        "200":
+          description: Value rows
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  ok: { type: boolean }
+                  values:
+                    type: array
+                    items: { $ref: "#/components/schemas/MetaValue" }
+        "400":
+          description: No anchor given
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+              example:
+                ok: false
+                message: "یکی از collection_id/document_id/batch_id/work_id/edition_id/volume_id لازم است"
+        "401": { $ref: "#/components/responses/Unauthorized" }
+    post:
+      tags: [metadata]
+      operationId: setMetaValue
+      summary: Set (insert or bump) a metadata value
+      description: |
+        The field is resolved by `field_key` (+ optional `scope`). The value
+        row carries the FULL parent chain: an edition value stores work_id +
+        edition_id; a volume value stores all three. Entity anchors are
+        validated against the registry (404 when unknown). Existing value →
+        version bump (`source=user`, `affects_index=true` — no re-parse).
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [field_key]
+              properties:
+                field_key: { type: string }
+                scope:
+                  type: string
+                  enum: [collection, batch, document, work, edition, volume]
+                  description: optional disambiguator when the same key exists in several scopes
+                value: { type: [string, number, boolean, "null"] }
+                collection_id: { type: string }
+                document_id: { type: string }
+                batch_id: { type: string }
+                work_id: { type: string }
+                edition_id: { type: string }
+                volume_id: { type: string }
+            example:
+              field_key: genre
+              value: "فلسفه"
+              edition_id: e-1a2b3c4d
+              work_id: w-1a2b3c4d
+      responses:
+        "200":
+          description: Value stored (insert or version bump)
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  ok: { type: boolean }
+                  value: { $ref: "#/components/schemas/MetaValue" }
+                  version: { type: integer }
+                  affects_index: { type: boolean, example: true }
+        "400":
+          description: Invalid value for the field data_type / missing anchor
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+        "404":
+          description: Unknown field or unknown entity anchor
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+              examples:
+                unknownField:
+                  value: { ok: false, field: field_key, message: "فیلد تعریف نشده یا غیرفعال است" }
+                unknownWork:
+                  value: { ok: false, field: work_id, message: "اثر پیدا نشد" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+  /api/knowledge/metadata/resolve:
+    get:
+      tags: [metadata]
+      operationId: resolveMetadata
+      summary: Merge effective metadata across scopes (PCM-14D)
+      description: |
+        Precedence (first non-null value wins per field_key):
+        **document > volume > edition > work > collection > field_default**.
+        Each scope is gated on its anchor id (an empty anchor yields no rows),
+        so resolving by `work_id` alone never leaks other collections' values.
+        `raw` carries every value row of every scope, not only the winners.
+      parameters:
+        - { name: document_id, in: query, schema: { type: string }, description: "Most specific: loads the whole chain from the document row" }
+        - { name: work_id, in: query, schema: { type: string } }
+        - { name: edition_id, in: query, schema: { type: string } }
+        - { name: volume_id, in: query, schema: { type: string } }
+        - { name: collection_id, in: query, schema: { type: string } }
+      responses:
+        "200":
+          description: Resolved metadata
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  ok: { type: boolean }
+                  resolved:
+                    type: object
+                    additionalProperties: { type: [string, "null"] }
+                    description: final value per field_key
+                  sources:
+                    type: object
+                    additionalProperties:
+                      type: string
+                      enum: [document, volume, edition, work, collection, field_default]
+                  raw:
+                    type: object
+                    properties:
+                      document: { type: array, items: { $ref: "#/components/schemas/MetaValue" } }
+                      volume: { type: array, items: { $ref: "#/components/schemas/MetaValue" } }
+                      edition: { type: array, items: { $ref: "#/components/schemas/MetaValue" } }
+                      work: { type: array, items: { $ref: "#/components/schemas/MetaValue" } }
+                      collection: { type: array, items: { $ref: "#/components/schemas/MetaValue" } }
+                  context:
+                    type: object
+                    properties:
+                      document_id: { type: [string, "null"] }
+                      collection_id: { type: [string, "null"] }
+                      work_id: { type: [string, "null"] }
+                      edition_id: { type: [string, "null"] }
+                      volume_id: { type: [string, "null"] }
+              example:
+                ok: true
+                resolved: { genre: "فلسفه سند", license: "CC-BY-4.0" }
+                sources: { genre: document, license: field_default }
+                raw:
+                  document: []
+                  volume: []
+                  edition:
+                    - field_key: genre
+                      value: "فلسفه ویرایش"
+                      scope: edition
+                      work_id: w-1a2b3c4d
+                      edition_id: e-1a2b3c4d
+                      version: 1
+                  work:
+                    - field_key: genre
+                      value: "فلسفه اثر"
+                      scope: work
+                      work_id: w-1a2b3c4d
+                      version: 1
+                  collection:
+                    - field_key: genre
+                      value: "فلسفه کالکشن"
+                      scope: collection
+                      version: 1
+                context:
+                  document_id: d-1a2b3c4d
+                  collection_id: c-1a2b3c4d
+                  work_id: w-1a2b3c4d
+                  edition_id: e-1a2b3c4d
+                  volume_id: null
+        "400":
+          description: No context at all (no document_id and no entity/collection id)
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+              example: { ok: false, message: "document_id یا collection_id لازم است" }
+        "404":
+          description: Unknown document_id
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+              example: { ok: false, message: "سند پیدا نشد" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+
+components:
+  securitySchemes:
+    cookieAuth:
+      type: apiKey
+      in: cookie
+      name: pct_session
+      description: |
+        Session cookie set by `POST /api/auth/login`
+        (`{"password": "..."}` → scrypt-checked, session row + cookie).
+        All `/api/knowledge/*` endpoints return 401 without a live session.
+        Logout: `POST /api/auth/logout`.
+  responses:
+    Unauthorized:
+      description: Missing/expired session
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Error" }
+          example: { ok: false, message: unauthorized }
+    NotFound:
+      description: Unknown entity
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Error" }
+          example: { ok: false, message: "اثر پیدا نشد" }
+    BadRequest:
+      description: Validation failure
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Error" }
+  schemas:
+    Error:
+      type: object
+      properties:
+        ok: { type: boolean, example: false }
+        field: { type: string, description: present when the error is field-specific }
+        message: { type: string }
+    Work:
+      type: object
+      properties:
+        work_id: { type: string, pattern: "^w-[0-9a-f]{8}$" }
+        title: { type: [string, "null"] }
+        author: { type: [string, "null"] }
+        subject: { type: [string, "null"] }
+        language: { type: [string, "null"] }
+        document_count: { type: integer }
+        source: { type: string, enum: [factory, user] }
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+    Edition:
+      type: object
+      properties:
+        edition_id: { type: string, pattern: "^e-[0-9a-f]{8}$" }
+        work_id: { type: string }
+        publisher: { type: [string, "null"] }
+        publish_year: { type: [string, "null"] }
+        edition_label: { type: [string, "null"] }
+        language: { type: [string, "null"] }
+        document_count: { type: integer }
+        source: { type: string, enum: [factory, user] }
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+    Volume:
+      type: object
+      properties:
+        volume_id: { type: string, pattern: "^v-[0-9a-f]{8}$" }
+        edition_id: { type: string }
+        work_id: { type: string }
+        volume_no: { type: [integer, "null"] }
+        label: { type: [string, "null"] }
+        document_count: { type: integer }
+        source: { type: string, enum: [factory, user] }
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+    DocumentRef:
+      type: object
+      properties:
+        document_id: { type: string }
+        collection_id: { type: string }
+        file_name: { type: [string, "null"] }
+        sha256: { type: string }
+        status: { type: string, enum: [uploaded, parsing, parsed, needs_review, approved, indexed, failed] }
+        blocks_count: { type: integer }
+        chars_count: { type: integer }
+        quality_status: { type: [string, "null"] }
+        out_dir: { type: [string, "null"] }
+    MetaField:
+      type: object
+      properties:
+        field_id: { type: string, pattern: "^mf-[0-9a-f]{8}$" }
+        scope: { type: string, enum: [collection, batch, document, work, edition, volume] }
+        collection_id: { type: string, description: '__global__' for entity scopes }
+        field_key: { type: string }
+        display_name: { type: string }
+        data_type: { type: string, enum: [string, number, boolean, date, url, json, enum] }
+        required: { type: integer }
+        default_value: { type: [string, "null"] }
+        searchable: { type: integer }
+        enabled: { type: integer }
+    MetaValue:
+      type: object
+      properties:
+        value_id: { type: integer }
+        field_id: { type: string }
+        scope: { type: string, enum: [collection, batch, document, work, edition, volume] }
+        field_key: { type: string }
+        display_name: { type: string }
+        data_type: { type: string }
+        collection_id: { type: string }
+        batch_id: { type: string }
+        document_id: { type: string }
+        work_id: { type: string, description: "" for non-entity scopes }
+        edition_id: { type: string, description: "" for non-entity scopes }
+        volume_id: { type: string, description: "" for non-entity scopes }
+        value: { type: [string, "null"] }
+        source: { type: string, enum: [user] }
+        version: { type: integer }
+        edited_at: { type: string, format: date-time }

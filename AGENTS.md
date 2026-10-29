@@ -49,13 +49,15 @@ BACKUP:  /home/saber/backups/  (thesaurus-<TS>.db + pct-deploy-<TS>.tar.gz)
 
 ```bash
 cd backend && python -m unittest test_api test_projects test_dashboard \
-  test_knowledge_api test_word_factory test_dump -v    # 129 تست (رگرسیون کامل)
+  test_knowledge_api test_word_factory test_dump test_work_registry -v \
+  # 139 تست (رگرسیون کامل)
 ```
 
-- **129 تست**: `test_api.py` (8، فاز۱/۲ + پروژه)، `test_projects.py` (9، جریان CRUD)،
+- **139 تست**: `test_api.py` (8، فاز۱/۲ + پروژه)، `test_projects.py` (9، جریان CRUD)،
   `test_dashboard.py` (22، auth A01-A08 + داشبورد D01-D07)، `test_knowledge_api.py`
   (40، KB-01..KB-14 — PCM-14B)، `test_word_factory.py` (24، WF-01..WF-13)،
-  `test_dump.py` (26، D01..D15 — قرارداد Dump `d-1`، PCM-14C.3).
+  `test_dump.py` (26، D01..D15 — قرارداد Dump `d-1`، PCM-14C.3)،
+  `test_work_registry.py` (10، RD-01..RD-07 — Work Registry، PCM-14D).
 - **PCM-12.3 (رفع F-01):** هر سه ماژول اول `import pct_test_support` می‌کنند که
   یک DB موقت **مشترک** می‌سازد و `PCT_DB`/`PCT_DASHBOARD_PASSWORD` را **قبل از**
   `import server` ست می‌کند؛ سپس هر کلاس در `setUp` با
@@ -78,6 +80,9 @@ cd backend && python -m unittest test_api test_projects test_dashboard \
   `sites.py` — سایت‌های seed.
 - `backend/factory/` — Word Factory (DOCX→JSONL، CLI، بدون DB/ES) + `dump.py`
   قرارداد رسمی Dump `d-1` (PCM-14C.3، سند: `docs/PCM-14C.3-DUMP-CONTRACT.md`).
+- `knowledge_api.py` — Work Registry (PCM-14D): جدول‌های `knowledge_works`/
+  `knowledge_editions`/`knowledge_volumes` + scopeهای `work/edition/volume` متادیتا
+  + `/api/knowledge/metadata/resolve` (سند: `docs/PCM-14D-WORK-REGISTRY.md`).
 - داشبورد: HTML+JS تک‌صفحه‌ای بدون framework در `dashboard/index.html`؛ همه‌ی
   fetchها `credentials: same-origin` و 401 → overlay ورود.
 
@@ -99,6 +104,7 @@ cd backend && python -m unittest test_api test_projects test_dashboard \
 | **PCM-14B.3** Word Studio + پایگاه دانش + Word Factory (CLI) | ✅ (روی s52؛ 40+24 تست) |
 | **PCM-14C.3** قرارداد رسمی Dump `d-1` + manifest `m-2` (ثبت policy نرمال‌سازی) + CLI dump | ✅ (26 تست D + 129 کامل؛ بدون deploy) |
 | **PCM-14C.4** پذیرش عملی قرارداد Dump روی CLI واقعی (`deploy/pcm14c4_dump_acceptance.py`) | ✅ (ACCEPTANCE PASS؛ بدون deploy) |
+| **PCM-14D** Work Registry: اثر←نسخه←جلد + scopeهای work/edition/volume + resolve + OpenAPI | ✅ (10 تست RD + 139 کامل؛ بدون deploy) |
 
 گزارش‌ها: `گزارش-PCM-0X.md` (۱۱ بخش: وضعیت قبل، طراحی، مهاجرت، فایل/API، تست،
 نتیجه production، SHA+لینک، git status، بکاپ/rollback، موارد باقی‌مانده، روش تست دستی).

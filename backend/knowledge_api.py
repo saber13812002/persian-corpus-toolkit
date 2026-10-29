@@ -1,4 +1,5 @@
-"""Corpus Knowledge Studio — Collections, Word Library & Metadata (PCM-14A/B).
+"""Corpus Knowledge Studio — Collections, Word Library, Metadata & Work
+Registry (PCM-14A/B/D).
 
 The «استودیوی دانش» backend. Everything here is ADDITIVE (AGENTS.md rule 2):
 
@@ -43,6 +44,8 @@ from flask import jsonify, request
 
 from auth import make_require_auth
 
+from factory.models import short_id  # deterministic w-/e-/v- ids (PCM-14D)
+
 SLUG_RE = re.compile(r"^[a-z0-9]+(?:-[a-z0-9]+)*$")
 SLUG_MAX = 64
 NAME_MAX = 200
@@ -58,7 +61,8 @@ DOC_STATUSES = (
     "approved", "indexing", "indexed", "failed",
 )
 FIELD_TYPES = ("string", "number", "boolean", "date", "url", "enum", "json")
-FIELD_SCOPES = ("collection", "batch", "document")
+# PCM-14D — metadata can also be scoped to the Work/Edition/Volume entities.
+FIELD_SCOPES = ("collection", "batch", "document", "work", "edition", "volume")
 
 MAX_UPLOAD_BYTES = 50 * (1 << 20)      # 50 MB per DOCX
 MAX_FILES_PER_BATCH = 100
@@ -241,12 +245,16 @@ def ensure_knowledge_schema(db):
         collection_id TEXT NOT NULL DEFAULT '',
         batch_id      TEXT NOT NULL DEFAULT '',
         document_id   TEXT NOT NULL DEFAULT '',
+        work_id       TEXT NOT NULL DEFAULT '',
+        edition_id    TEXT NOT NULL DEFAULT '',
+        volume_id     TEXT NOT NULL DEFAULT '',
         value         TEXT,
         source        TEXT NOT NULL DEFAULT 'user',
         version       INTEGER NOT NULL DEFAULT 1,
         edited_at     TEXT NOT NULL,
         edited_by     TEXT,
-        UNIQUE (scope, collection_id, batch_id, document_id, field_id)
+        UNIQUE (scope, collection_id, batch_id, document_id, field_id,
+                work_id, edition_id, volume_id)
     );
     CREATE INDEX IF NOT EXISTS idx_kcol_updated
         ON knowledge_collections(updated_at DESC);
@@ -260,9 +268,217 @@ def ensure_knowledge_schema(db):
         ON knowledge_metadata_fields(scope, collection_id, enabled);
     CREATE INDEX IF NOT EXISTS idx_kmv_doc
         ON knowledge_metadata_values(document_id, field_id);
+    -- PCM-14D — Work/Edition/Volume entity registry (see ERD in
+    -- docs/PCM-14D-WORK-REGISTRY.md). Ids reuse the deterministic
+    -- short_id scheme of the Word Factory (w-/e-/v-<sha8>).
+    CREATE TABLE IF NOT EXISTS knowledge_works (
+        work_id          TEXT PRIMARY KEY,
+        title            TEXT,
+        author           TEXT,
+        subject          TEXT,
+        language         TEXT,
+        document_count   INTEGER NOT NULL DEFAULT 0,
+        source           TEXT NOT NULL DEFAULT 'factory',
+        created_at       TEXT NOT NULL,
+        updated_at       TEXT NOT NULL
+    );
+    CREATE TABLE IF NOT EXISTS knowledge_editions (
+        edition_id       TEXT PRIMARY KEY,
+        work_id          TEXT NOT NULL,
+        publisher        TEXT,
+        publish_year     TEXT,
+        edition_label    TEXT,
+        language         TEXT,
+        document_count   INTEGER NOT NULL DEFAULT 0,
+        source           TEXT NOT NULL DEFAULT 'factory',
+        created_at       TEXT NOT NULL,
+        updated_at       TEXT NOT NULL
+    );
+    CREATE TABLE IF NOT EXISTS knowledge_volumes (
+        volume_id        TEXT PRIMARY KEY,
+        edition_id       TEXT NOT NULL,
+        work_id          TEXT NOT NULL,
+        volume_no        INTEGER,
+        label            TEXT,
+        document_count   INTEGER NOT NULL DEFAULT 0,
+        source           TEXT NOT NULL DEFAULT 'factory',
+        created_at       TEXT NOT NULL,
+        updated_at       TEXT NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_ked_work ON knowledge_editions(work_id);
+    CREATE INDEX IF NOT EXISTS idx_kvol_edition ON knowledge_volumes(edition_id);
+    CREATE INDEX IF NOT EXISTS idx_kvol_work ON knowledge_volumes(work_id);
     """)
     db.commit()
     _ensure_document_columns(db)
+    _ensure_registry_columns(db)
+
+
+def _ensure_registry_columns(db):
+    """PCM-14D — additive upgrades for pre-existing DBs (PCM-14B -> PCM-14D).
+
+    Same guarded pattern as _ensure_document_columns: probe
+    PRAGMA table_info, ALTER TABLE ADD COLUMN only what is missing,
+    backfill only where data is absent. Never alters an existing column.
+
+    - knowledge_metadata_fields  += work_id/edition_id/volume_id ('' sentinel)
+    - knowledge_metadata_values  += work_id/edition_id/volume_id ('' sentinel)
+    - knowledge_works/editions/volumes backfilled from the denormalized
+      ids already stored on knowledge_collection_documents (plus the
+      biblio extracted by the factory into document.json, when present).
+    """
+    existing = {r[1] for r in db.execute(
+        "PRAGMA table_info(knowledge_metadata_fields)").fetchall()}
+    for col, decl in (("work_id", "TEXT NOT NULL DEFAULT ''"),
+                      ("edition_id", "TEXT NOT NULL DEFAULT ''"),
+                      ("volume_id", "TEXT NOT NULL DEFAULT ''")):
+        if col not in existing:
+            db.execute(f"ALTER TABLE knowledge_metadata_fields "
+                       f"ADD COLUMN {col} {decl}")
+    existing_v = {r[1] for r in db.execute(
+        "PRAGMA table_info(knowledge_metadata_values)").fetchall()}
+    for col, decl in (("work_id", "TEXT NOT NULL DEFAULT ''"),
+                      ("edition_id", "TEXT NOT NULL DEFAULT ''"),
+                      ("volume_id", "TEXT NOT NULL DEFAULT ''")):
+        if col not in existing_v:
+            db.execute(f"ALTER TABLE knowledge_metadata_values "
+                       f"ADD COLUMN {col} {decl}")
+
+    # Backfill the entity registry from documents that were already
+    # processed (status in parsed/needs_review/approved/indexed carry ids).
+    _backfill_registry(db)
+    db.commit()
+
+
+def _backfill_registry(db):
+    """Idempotent registry backfill (no-op when rows already exist).
+
+    The denormalized work_id/edition_id/volume_id columns on
+    knowledge_collection_documents are the source of truth; biblio text
+    is enriched best-effort from the factory's document.json when the
+    file is still on disk. Never overwrites existing registry rows.
+    """
+    rows = db.execute(
+        """SELECT d.work_id, d.edition_id, d.volume_id, d.out_dir,
+                  d.file_id, COUNT(*) AS n
+           FROM knowledge_collection_documents d
+           WHERE d.work_id IS NOT NULL AND d.work_id != ''
+           GROUP BY d.work_id, d.edition_id, d.volume_id, d.out_dir,
+                    d.file_id""").fetchall()
+    for r in rows:
+        biblio = _read_factory_biblio(r["file_id"]) if r["out_dir"] else {}
+        w = (biblio.get("title"), biblio.get("author"))
+        e = (biblio.get("publisher"), biblio.get("publish_year"))
+        db.execute(
+            """INSERT OR IGNORE INTO knowledge_works
+               (work_id, title, author, document_count, source,
+                created_at, updated_at)
+               VALUES (?, ?, ?, ?, 'factory', ?, ?)""",
+            (r["work_id"], w[0], w[1], r["n"], _now(), _now()))
+        if r["edition_id"]:
+            db.execute(
+                """INSERT OR IGNORE INTO knowledge_editions
+                   (edition_id, work_id, publisher, publish_year,
+                    document_count, source, created_at, updated_at)
+                   VALUES (?, ?, ?, ?, ?, 'factory', ?, ?)""",
+                (r["edition_id"], r["work_id"], e[0], e[1], r["n"],
+                 _now(), _now()))
+        if r["volume_id"]:
+            db.execute(
+                """INSERT OR IGNORE INTO knowledge_volumes
+                   (volume_id, edition_id, work_id, volume_no,
+                    document_count, source, created_at, updated_at)
+                   VALUES (?, ?, ?, ?, ?, 'factory', ?, ?)""",
+                (r["volume_id"], r["edition_id"] or "", r["work_id"],
+                 biblio.get("volume"), r["n"], _now(), _now()))
+
+
+def _read_factory_biblio(file_id):
+    """Best-effort biblio read from the factory's document.json (absent -> {})."""
+    if not file_id:
+        return {}
+    try:
+        p = os.path.join(factory_out_dir(file_id), "document.json")
+        with open(p, encoding="utf-8") as fh:
+            d = json.load(fh)
+    except (OSError, ValueError):
+        return {}
+    meta = d.get("metadata") or {}
+    fields = meta.get("fields") or {}
+
+    def _val(key):
+        v = (fields.get(key) or {}).get("value")
+        return str(v).strip() if v is not None else None
+
+    vol = meta.get("volume")
+    return {
+        "title": _val("title"),
+        "author": _val("author"),
+        "publisher": _val("publisher"),
+        "publish_year": _val("publish_year"),
+        "volume": vol if isinstance(vol, int) else None,
+    }
+
+
+def _upsert_registry_rows(conn, doc):
+    """PCM-14D — sync the entity registry after a successful WF run.
+
+    Purely additive: INSERT OR IGNORE on entity ids (the id is the
+    natural key), then a count refresh. Existing rows are never
+    rewritten here — user edits to biblio fields win over re-runs.
+    """
+    biblio = doc.metadata
+    title = (biblio.fields.get("title") or None)
+    author = (biblio.fields.get("author") or None)
+    publisher = (biblio.fields.get("publisher") or None)
+    year = (biblio.fields.get("publish_year") or None)
+
+    def _s(fv):
+        return fv.value.strip() if (fv and fv.value) else None
+
+    conn.execute(
+        """INSERT OR IGNORE INTO knowledge_works
+           (work_id, title, author, document_count, source,
+            created_at, updated_at)
+           VALUES (?, ?, ?, 1, 'factory', ?, ?)""",
+        (doc.work_id, _s(title), _s(author), _now(), _now()))
+    conn.execute(
+        """UPDATE knowledge_works SET document_count =
+               (SELECT COUNT(*) FROM knowledge_collection_documents
+                 WHERE work_id = ?),
+             updated_at = ?
+           WHERE work_id = ?""",
+        (doc.work_id, _now(), doc.work_id))
+    if doc.edition_id:
+        conn.execute(
+            """INSERT OR IGNORE INTO knowledge_editions
+               (edition_id, work_id, publisher, publish_year,
+                document_count, source, created_at, updated_at)
+               VALUES (?, ?, ?, ?, 1, 'factory', ?, ?)""",
+            (doc.edition_id, doc.work_id, _s(publisher), _s(year),
+             _now(), _now()))
+        conn.execute(
+            """UPDATE knowledge_editions SET document_count =
+                   (SELECT COUNT(*) FROM knowledge_collection_documents
+                     WHERE edition_id = ?),
+                 updated_at = ?
+               WHERE edition_id = ?""",
+            (doc.edition_id, _now(), doc.edition_id))
+    if doc.volume_id:
+        conn.execute(
+            """INSERT OR IGNORE INTO knowledge_volumes
+               (volume_id, edition_id, work_id, volume_no,
+                document_count, source, created_at, updated_at)
+               VALUES (?, ?, ?, ?, 1, 'factory', ?, ?)""",
+            (doc.volume_id, doc.edition_id or "", doc.work_id,
+             biblio.volume_no, _now(), _now()))
+        conn.execute(
+            """UPDATE knowledge_volumes SET document_count =
+                   (SELECT COUNT(*) FROM knowledge_collection_documents
+                     WHERE volume_id = ?),
+                 updated_at = ?
+               WHERE volume_id = ?""",
+            (doc.volume_id, _now(), doc.volume_id))
 
 
 def _ensure_document_columns(db):
@@ -370,6 +586,17 @@ def _clean_name(value):
         return None
     value = str(value).strip()
     return value[:NAME_MAX] or None
+
+
+def _work_key_from_biblio(title, author, sha256):
+    """Mirror factory.service work-key derivation so registry-created ids
+    match the ids the Word Factory would assign to the same book."""
+    t = (str(title or "").strip().lower())
+    a = (str(author or "").strip().lower())
+    key = f"{t}|{a}"
+    if not (t or a):
+        key = sha256 or ""
+    return key
 
 
 def _collection_row(db, coll_id):
@@ -564,6 +791,10 @@ def _process_document(conn, collection_id, doc_id):
          len(doc.blocks), doc.total_chars, doc.quality.status,
          doc.quality.score, doc.parser_version, doc.norm_version,
          os.path.relpath(out_dir, knowledge_data_dir()), _now(), row["id"]))
+    # PCM-14D — keep the entity registry in sync (idempotent upsert; the
+    # ids/keys mirror factory.service exactly, so the registry row is the
+    # same one _backfill_registry would create from this document).
+    _upsert_registry_rows(conn, doc)
     _refresh_book_count(conn, collection_id)
     conn.commit()
     return status
@@ -1345,7 +1576,9 @@ def register_knowledge_routes(app, get_db):
                ORDER BY scope, field_key""", (collection_id or "",)).fetchall()
         return [dict(r) for r in rows]
 
-    def _meta_values(db, collection_id=None, document_id=None, batch_id=None):
+    def _meta_values(db, collection_id=None, document_id=None, batch_id=None,
+                     work_id=None, edition_id=None, volume_id=None,
+                     scope=None):
         q = ("SELECT v.*, f.field_key, f.display_name, f.data_type "
              "FROM knowledge_metadata_values v "
              "JOIN knowledge_metadata_fields f ON f.field_id = v.field_id")
@@ -1353,12 +1586,27 @@ def register_knowledge_routes(app, get_db):
         if collection_id:
             where.append("v.collection_id = ?")
             params.append(collection_id)
+        # Entity filters are scope-strict: a work/edition/volume id must not
+        # leak into more-specific rows (an edition value row carries its
+        # parent work_id, so matching on work_id alone would over-select).
         if document_id:
-            where.append("v.document_id = ?")
+            where.append("f.scope='document' AND v.document_id = ?")
             params.append(document_id)
         if batch_id:
             where.append("v.batch_id = ?")
             params.append(batch_id)
+        if work_id:
+            where.append("f.scope='work' AND v.work_id = ?")
+            params.append(work_id)
+        if edition_id:
+            where.append("f.scope='edition' AND v.edition_id = ?")
+            params.append(edition_id)
+        if volume_id:
+            where.append("f.scope='volume' AND v.volume_id = ?")
+            params.append(volume_id)
+        if scope:
+            where.append("f.scope = ?")
+            params.append(scope)
         rows = db.execute(
             q + " WHERE " + " AND ".join(where) + " ORDER BY v.value_id",
             params).fetchall()
@@ -1429,8 +1677,11 @@ def register_knowledge_routes(app, get_db):
         scope = str(data.get("scope") or "collection").strip()
         if scope not in FIELD_SCOPES:
             return jsonify({"ok": False, "field": "scope",
-                            "message": "scope باید collection/batch/document باشد"}), 400
+                            "message": ("scope باید collection/batch/document/"
+                                        "work/edition/volume باشد")}), 400
         cid = str(data.get("collection_id") or "").strip() or None
+        if scope in ("work", "edition", "volume"):
+            cid = None  # entity-scoped fields are global (all collections)
         coll = None
         if scope == "collection" and cid:
             coll = db.execute(
@@ -1573,11 +1824,17 @@ def register_knowledge_routes(app, get_db):
         cid = request.args.get("collection_id")
         doc_id = request.args.get("document_id")
         batch_id = request.args.get("batch_id")
-        if not (cid or doc_id or batch_id):
+        work_id = request.args.get("work_id")
+        edition_id = request.args.get("edition_id")
+        volume_id = request.args.get("volume_id")
+        if not (cid or doc_id or batch_id or work_id or edition_id or volume_id):
             return jsonify({"ok": False,
-                            "message": "یکی از collection_id/document_id/batch_id لازم است"}), 400
+                            "message": ("یکی از collection_id/document_id/"
+                                        "batch_id/work_id/edition_id/volume_id "
+                                        "لازم است")}), 400
         return jsonify({"ok": True,
-                        "values": _meta_values(db, cid, doc_id, batch_id)})
+                        "values": _meta_values(db, cid, doc_id, batch_id,
+                                                work_id, edition_id, volume_id)})
 
     @app.route("/api/knowledge/metadata/values", methods=["POST"])
     @require_auth
@@ -1590,6 +1847,9 @@ def register_knowledge_routes(app, get_db):
         doc_id = str(data.get("document_id") or "").strip()
         batch_id = str(data.get("batch_id") or "").strip()
         cid = str(data.get("collection_id") or "").strip()
+        work_id = str(data.get("work_id") or "").strip()
+        edition_id = str(data.get("edition_id") or "").strip()
+        volume_id = str(data.get("volume_id") or "").strip()
         want_scope = str(data.get("scope") or "").strip()
 
         q = ("SELECT * FROM knowledge_metadata_fields "
@@ -1606,6 +1866,12 @@ def register_knowledge_routes(app, get_db):
             if c["scope"] == "batch" and not batch_id:
                 continue
             if c["scope"] == "collection" and not cid:
+                continue
+            if c["scope"] == "work" and not work_id:
+                continue
+            if c["scope"] == "edition" and not edition_id:
+                continue
+            if c["scope"] == "volume" and not volume_id:
                 continue
             f = c
             break
@@ -1638,6 +1904,35 @@ def register_knowledge_routes(app, get_db):
                     return jsonify({"ok": False, "field": "batch_id",
                                     "message": "بچ پیدا نشد"}), 404
                 cid = b["collection_id"]
+        elif scope == "work":
+            if not work_id:
+                return jsonify({"ok": False, "field": "work_id",
+                                "message": "برای فیلد اثر، work_id لازم است"}), 400
+            if not db.execute("SELECT 1 FROM knowledge_works WHERE work_id=?",
+                              (work_id,)).fetchone():
+                return jsonify({"ok": False, "field": "work_id",
+                                "message": "اثر پیدا نشد"}), 404
+        elif scope == "edition":
+            if not edition_id:
+                return jsonify({"ok": False, "field": "edition_id",
+                                "message": "برای فیلد ویرایش، edition_id لازم است"}), 400
+            er = db.execute("SELECT work_id FROM knowledge_editions "
+                            "WHERE edition_id=?", (edition_id,)).fetchone()
+            if not er:
+                return jsonify({"ok": False, "field": "edition_id",
+                                "message": "ویرایش پیدا نشد"}), 404
+            work_id = work_id or er["work_id"]
+        elif scope == "volume":
+            if not volume_id:
+                return jsonify({"ok": False, "field": "volume_id",
+                                "message": "برای فیلد جلد، volume_id لازم است"}), 400
+            vr = db.execute("SELECT work_id, edition_id FROM knowledge_volumes "
+                            "WHERE volume_id=?", (volume_id,)).fetchone()
+            if not vr:
+                return jsonify({"ok": False, "field": "volume_id",
+                                "message": "جلد پیدا نشد"}), 404
+            work_id = work_id or vr["work_id"]
+            edition_id = edition_id or (vr["edition_id"] or "")
         else:  # collection
             if not cid:
                 return jsonify({"ok": False, "field": "collection_id",
@@ -1651,8 +1946,10 @@ def register_knowledge_routes(app, get_db):
         existing = db.execute(
             """SELECT value_id, version FROM knowledge_metadata_values
                WHERE field_id=? AND scope=? AND collection_id=?
-                 AND batch_id=? AND document_id=?""",
-            (f["field_id"], scope, cid, batch_id, doc_id)).fetchone()
+                 AND batch_id=? AND document_id=? AND work_id=?
+                 AND edition_id=? AND volume_id=?""",
+            (f["field_id"], scope, cid, batch_id, doc_id,
+             work_id, edition_id, volume_id)).fetchone()
         if existing:
             db.execute(
                 """UPDATE knowledge_metadata_values
@@ -1664,10 +1961,11 @@ def register_knowledge_routes(app, get_db):
             db.execute(
                 """INSERT INTO knowledge_metadata_values
                    (field_id, scope, collection_id, batch_id, document_id,
+                    work_id, edition_id, volume_id,
                     value, source, version, edited_at)
-                   VALUES (?, ?, ?, ?, ?, ?, 'user', 1, ?)""",
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'user', 1, ?)""",
                 (f["field_id"], scope, cid or "", batch_id or "",
-                 doc_id or "", norm, now))
+                 doc_id or "", work_id, edition_id, volume_id, norm, now))
             new_version = 1
         # Metadata edits NEVER re-upload/re-parse the Word file (spec §3);
         # they are flagged index-affecting for later selective reindex.
@@ -1677,15 +1975,22 @@ def register_knowledge_routes(app, get_db):
         if cid:
             db.execute("UPDATE knowledge_collections SET updated_at=? "
                        "WHERE collection_id=?", (now, cid))
+        for ent_table, ent_col, ent_id in (("knowledge_works", "work_id", work_id),
+                                           ("knowledge_editions", "edition_id", edition_id),
+                                           ("knowledge_volumes", "volume_id", volume_id)):
+            if ent_id:
+                db.execute(f"UPDATE {ent_table} SET updated_at=? WHERE {ent_col}=?",
+                           (now, ent_id))
         db.commit()
         row = db.execute(
             """SELECT v.*, f.field_key, f.display_name, f.data_type
                FROM knowledge_metadata_values v
                JOIN knowledge_metadata_fields f ON f.field_id=v.field_id
                WHERE v.field_id=? AND v.scope=? AND v.collection_id=?
-                 AND v.batch_id=? AND v.document_id=?""",
+                 AND v.batch_id=? AND v.document_id=? AND v.work_id=?
+                 AND v.edition_id=? AND v.volume_id=?""",
             (f["field_id"], scope, cid or "", batch_id or "",
-             doc_id or "")).fetchone()
+             doc_id or "", work_id, edition_id, volume_id)).fetchone()
         return jsonify({"ok": True, "value": dict(row),
                         "version": new_version,
                         "affects_index": True})
@@ -1721,6 +2026,374 @@ def register_knowledge_routes(app, get_db):
                 "AND collection_id = ?" if cid else ""),
             (cid,) if cid else ()).fetchall()
         return jsonify({"ok": True, "jobs": [dict(r) for r in rows]})
+
+    # ── PCM-14D — Work / Edition / Volume registry ─────────────────────
+
+    def _ent_count(table, col, ent_id):
+        return db.execute(
+            f"SELECT COUNT(*) AS n FROM knowledge_collection_documents "
+            f"WHERE {col} = ?", (ent_id,)).fetchone()["n"]
+
+    @app.route("/api/knowledge/works", methods=["GET"])
+    @require_auth
+    def knowledge_list_works():
+        db = get_db()
+        ensure_knowledge_schema(db)
+        search = (request.args.get("search") or "").strip()
+        page = max(1, int(request.args.get("page") or 1))
+        per_page = min(100, max(1, int(request.args.get("per_page") or 50)))
+        where, params = [], []
+        if search:
+            where.append("(title LIKE ? OR author LIKE ? OR work_id LIKE ?)")
+            like = f"%{search}%"
+            params.extend([like, like, like])
+        where_sql = (" WHERE " + " AND ".join(where)) if where else ""
+        total = db.execute(
+            f"SELECT COUNT(*) AS n FROM knowledge_works{where_sql}",
+            params).fetchone()["n"]
+        rows = db.execute(
+            f"""SELECT w.*,
+                  (SELECT COUNT(*) FROM knowledge_editions e
+                    WHERE e.work_id = w.work_id) AS edition_count,
+                  (SELECT COUNT(*) FROM knowledge_collection_documents d
+                    WHERE d.work_id = w.work_id) AS document_count
+               FROM knowledge_works w
+               {where_sql}
+               ORDER BY w.updated_at DESC
+               LIMIT ? OFFSET ?""",
+            (*params, per_page, (page - 1) * per_page)).fetchall()
+        return jsonify({"works": [dict(r) for r in rows], "total": total,
+                        "page": page, "per_page": per_page,
+                        "total_pages": (total + per_page - 1) // per_page})
+
+    @app.route("/api/knowledge/works", methods=["POST"])
+    @require_auth
+    def knowledge_create_work():
+        db = get_db()
+        ensure_knowledge_schema(db)
+        data = request.get_json(silent=True) or {}
+        key = str(data.get("key") or "").strip()
+        if not key:
+            key = _work_key_from_biblio(
+                data.get("title"), data.get("author"),
+                str(data.get("sha256") or "").strip())
+        if not key:
+            return jsonify({"ok": False, "field": "key",
+                            "message": "key (یا title/author/sha256) لازم است"}), 400
+        work_id = short_id("w", key)
+        now = _now()
+        existed = db.execute("SELECT 1 FROM knowledge_works WHERE work_id=?",
+                             (work_id,)).fetchone()
+        db.execute(
+            """INSERT OR IGNORE INTO knowledge_works
+               (work_id, title, author, subject, language, document_count,
+                source, created_at, updated_at)
+               VALUES (?, ?, ?, ?, ?, 0, 'user', ?, ?)""",
+            (work_id, _clean_name(data.get("title")),
+             _clean_name(data.get("author")), _clean_name(data.get("subject")),
+             (str(data.get("language") or "").strip() or None), now, now))
+        db.commit()
+        row = db.execute("SELECT * FROM knowledge_works WHERE work_id=?",
+                         (work_id,)).fetchone()
+        return jsonify({"ok": True, "work": dict(row),
+                        "created": existed is None}), 201
+
+    @app.route("/api/knowledge/works/<work_id>", methods=["GET"])
+    @require_auth
+    def knowledge_work_detail(work_id):
+        db = get_db()
+        ensure_knowledge_schema(db)
+        w = db.execute("SELECT * FROM knowledge_works WHERE work_id=?",
+                       (work_id,)).fetchone()
+        if not w:
+            return jsonify({"ok": False, "message": "اثر پیدا نشد"}), 404
+        editions = [dict(r) for r in db.execute(
+            """SELECT e.*,
+                 (SELECT COUNT(*) FROM knowledge_volumes v
+                   WHERE v.edition_id = e.edition_id) AS volume_count
+                FROM knowledge_editions e WHERE e.work_id=?
+                ORDER BY e.edition_id""", (work_id,))]
+        documents = [dict(r) for r in db.execute(
+            """SELECT document_id, collection_id, file_name, sha256, status,
+                      blocks_count, chars_count, quality_status, out_dir
+               FROM knowledge_collection_documents WHERE work_id=?
+               ORDER BY id""", (work_id,))]
+        return jsonify({"ok": True, "work": dict(w),
+                        "editions": editions, "documents": documents})
+
+    @app.route("/api/knowledge/works/<work_id>", methods=["PATCH"])
+    @require_auth
+    def knowledge_update_work(work_id):
+        db = get_db()
+        ensure_knowledge_schema(db)
+        if not db.execute("SELECT 1 FROM knowledge_works WHERE work_id=?",
+                          (work_id,)).fetchone():
+            return jsonify({"ok": False, "message": "اثر پیدا نشد"}), 404
+        data = request.get_json(silent=True) or {}
+        sets, params = [], []
+        for col, key in (("title", "title"), ("author", "author"),
+                         ("subject", "subject"), ("language", "language")):
+            if key in data:
+                sets.append(f"{col}=?")
+                params.append(_clean_name(data[key]))
+        if not sets:
+            return jsonify({"ok": False,
+                            "message": "مقداری برای ویرایش فرستاده نشده"}), 400
+        sets.append("updated_at=?")
+        params.extend([_now(), work_id])
+        db.execute(f"UPDATE knowledge_works SET {', '.join(sets)} "
+                   f"WHERE work_id=?", params)
+        db.commit()
+        row = db.execute("SELECT * FROM knowledge_works WHERE work_id=?",
+                         (work_id,)).fetchone()
+        return jsonify({"ok": True, "work": dict(row)})
+
+    @app.route("/api/knowledge/works/<work_id>/editions", methods=["POST"])
+    @require_auth
+    def knowledge_create_edition(work_id):
+        db = get_db()
+        ensure_knowledge_schema(db)
+        if not db.execute("SELECT 1 FROM knowledge_works WHERE work_id=?",
+                          (work_id,)).fetchone():
+            return jsonify({"ok": False, "message": "اثر پیدا نشد"}), 404
+        data = request.get_json(silent=True) or {}
+        key = str(data.get("key") or "").strip()
+        if not key:
+            key = f"{work_id}|{str(data.get('publisher') or '').strip()}|" \
+                  f"{str(data.get('publish_year') or '').strip()}"
+        edition_id = short_id("e", f"{work_id}|{key}")
+        now = _now()
+        db.execute(
+            """INSERT OR IGNORE INTO knowledge_editions
+               (edition_id, work_id, publisher, publish_year, edition_label,
+                language, document_count, source, created_at, updated_at)
+               VALUES (?, ?, ?, ?, ?, ?, 0, 'user', ?, ?)""",
+            (edition_id, work_id, _clean_name(data.get("publisher")),
+             _clean_name(data.get("publish_year")),
+             _clean_name(data.get("edition_label")),
+             (str(data.get("language") or "").strip() or None), now, now))
+        db.commit()
+        row = db.execute("SELECT * FROM knowledge_editions WHERE edition_id=?",
+                         (edition_id,)).fetchone()
+        return jsonify({"ok": True, "edition": dict(row)}), 201
+
+    @app.route("/api/knowledge/editions/<edition_id>", methods=["GET"])
+    @require_auth
+    def knowledge_edition_detail(edition_id):
+        db = get_db()
+        ensure_knowledge_schema(db)
+        e = db.execute("SELECT * FROM knowledge_editions WHERE edition_id=?",
+                       (edition_id,)).fetchone()
+        if not e:
+            return jsonify({"ok": False, "message": "ویرایش پیدا نشد"}), 404
+        volumes = [dict(r) for r in db.execute(
+            """SELECT v.*,
+                 (SELECT COUNT(*) FROM knowledge_collection_documents d
+                   WHERE d.volume_id = v.volume_id) AS document_count
+                FROM knowledge_volumes v WHERE v.edition_id=?
+                ORDER BY v.volume_no, v.volume_id""", (edition_id,))]
+        documents = [dict(r) for r in db.execute(
+            """SELECT document_id, collection_id, file_name, sha256, status,
+                      blocks_count, chars_count, quality_status, out_dir
+               FROM knowledge_collection_documents WHERE edition_id=?
+               ORDER BY id""", (edition_id,))]
+        return jsonify({"ok": True, "edition": dict(e),
+                        "volumes": volumes, "documents": documents})
+
+    @app.route("/api/knowledge/editions/<edition_id>", methods=["PATCH"])
+    @require_auth
+    def knowledge_update_edition(edition_id):
+        db = get_db()
+        ensure_knowledge_schema(db)
+        if not db.execute("SELECT 1 FROM knowledge_editions "
+                          "WHERE edition_id=?", (edition_id,)).fetchone():
+            return jsonify({"ok": False, "message": "ویرایش پیدا نشد"}), 404
+        data = request.get_json(silent=True) or {}
+        sets, params = [], []
+        for col, key in (("publisher", "publisher"),
+                         ("publish_year", "publish_year"),
+                         ("edition_label", "edition_label"),
+                         ("language", "language")):
+            if key in data:
+                sets.append(f"{col}=?")
+                params.append(_clean_name(data[key]))
+        if not sets:
+            return jsonify({"ok": False,
+                            "message": "مقداری برای ویرایش فرستاده نشده"}), 400
+        sets.append("updated_at=?")
+        params.extend([_now(), edition_id])
+        db.execute(f"UPDATE knowledge_editions SET {', '.join(sets)} "
+                   f"WHERE edition_id=?", params)
+        db.commit()
+        row = db.execute("SELECT * FROM knowledge_editions "
+                         "WHERE edition_id=?", (edition_id,)).fetchone()
+        return jsonify({"ok": True, "edition": dict(row)})
+
+    @app.route("/api/knowledge/editions/<edition_id>/volumes", methods=["POST"])
+    @require_auth
+    def knowledge_create_volume(edition_id):
+        db = get_db()
+        ensure_knowledge_schema(db)
+        e = db.execute("SELECT work_id FROM knowledge_editions "
+                       "WHERE edition_id=?", (edition_id,)).fetchone()
+        if not e:
+            return jsonify({"ok": False, "message": "ویرایش پیدا نشد"}), 404
+        data = request.get_json(silent=True) or {}
+        key = str(data.get("key") or "").strip()
+        if not key:
+            key = f"{edition_id}|{data.get('volume_no') or 'main'}"
+        volume_id = short_id("v", f"{edition_id}|{key}")
+        now = _now()
+        vno = data.get("volume_no")
+        try:
+            vno = int(vno) if vno is not None and str(vno).strip() != "" else None
+        except (TypeError, ValueError):
+            return jsonify({"ok": False, "field": "volume_no",
+                            "message": "volume_no باید عدد باشد"}), 400
+        db.execute(
+            """INSERT OR IGNORE INTO knowledge_volumes
+               (volume_id, edition_id, work_id, volume_no, label,
+                document_count, source, created_at, updated_at)
+               VALUES (?, ?, ?, ?, ?, 0, 'user', ?, ?)""",
+            (volume_id, edition_id, e["work_id"], vno,
+             _clean_name(data.get("label")), now, now))
+        db.commit()
+        row = db.execute("SELECT * FROM knowledge_volumes WHERE volume_id=?",
+                         (volume_id,)).fetchone()
+        return jsonify({"ok": True, "volume": dict(row)}), 201
+
+    @app.route("/api/knowledge/volumes/<volume_id>", methods=["GET"])
+    @require_auth
+    def knowledge_volume_detail(volume_id):
+        db = get_db()
+        ensure_knowledge_schema(db)
+        v = db.execute("SELECT * FROM knowledge_volumes WHERE volume_id=?",
+                       (volume_id,)).fetchone()
+        if not v:
+            return jsonify({"ok": False, "message": "جلد پیدا نشد"}), 404
+        documents = [dict(r) for r in db.execute(
+            """SELECT document_id, collection_id, file_name, sha256, status,
+                      blocks_count, chars_count, quality_status, out_dir
+               FROM knowledge_collection_documents WHERE volume_id=?
+               ORDER BY id""", (volume_id,))]
+        return jsonify({"ok": True, "volume": dict(v), "documents": documents})
+
+    @app.route("/api/knowledge/volumes/<volume_id>", methods=["PATCH"])
+    @require_auth
+    def knowledge_update_volume(volume_id):
+        db = get_db()
+        ensure_knowledge_schema(db)
+        if not db.execute("SELECT 1 FROM knowledge_volumes "
+                          "WHERE volume_id=?", (volume_id,)).fetchone():
+            return jsonify({"ok": False, "message": "جلد پیدا نشد"}), 404
+        data = request.get_json(silent=True) or {}
+        sets, params = [], []
+        if "volume_no" in data:
+            vno = data["volume_no"]
+            try:
+                vno = int(vno) if vno is not None and str(vno).strip() != "" else None
+            except (TypeError, ValueError):
+                return jsonify({"ok": False, "field": "volume_no",
+                                "message": "volume_no باید عدد باشد"}), 400
+            sets.append("volume_no=?")
+            params.append(vno)
+        if "label" in data:
+            sets.append("label=?")
+            params.append(_clean_name(data["label"]))
+        if not sets:
+            return jsonify({"ok": False,
+                            "message": "مقداری برای ویرایش فرستاده نشده"}), 400
+        sets.append("updated_at=?")
+        params.extend([_now(), volume_id])
+        db.execute(f"UPDATE knowledge_volumes SET {', '.join(sets)} "
+                   f"WHERE volume_id=?", params)
+        db.commit()
+        row = db.execute("SELECT * FROM knowledge_volumes WHERE volume_id=?",
+                         (volume_id,)).fetchone()
+        return jsonify({"ok": True, "volume": dict(row)})
+
+    # ── PCM-14D — metadata resolution (merged scope chain) ─────────────
+
+    @app.route("/api/knowledge/metadata/resolve", methods=["GET"])
+    @require_auth
+    def knowledge_metadata_resolve():
+        """Merge effective metadata for a document across scopes.
+
+        Precedence (highest wins): document > volume > edition > work >
+        collection > global field defaults. Returns the resolved dict,
+        the source of each value, and the raw per-scope value rows.
+        """
+        db = get_db()
+        ensure_knowledge_schema(db)
+        doc_id = request.args.get("document_id")
+        work_id = request.args.get("work_id")
+        edition_id = request.args.get("edition_id")
+        volume_id = request.args.get("volume_id")
+        cid = request.args.get("collection_id")
+        d = None
+        if doc_id:
+            d = db.execute(
+                """SELECT collection_id, work_id, edition_id, volume_id
+                   FROM knowledge_collection_documents WHERE document_id=?""",
+                (doc_id,)).fetchone()
+            if not d:
+                return jsonify({"ok": False, "message": "سند پیدا نشد"}), 404
+            cid = cid or d["collection_id"]
+            work_id = work_id or d["work_id"]
+            edition_id = edition_id or d["edition_id"]
+            volume_id = volume_id or d["volume_id"]
+        if not (cid or work_id or edition_id or volume_id):
+            return jsonify({"ok": False,
+                            "message": ("document_id یا collection_id لازم است")}), 400
+
+        fields = [f for f in _meta_fields(db, cid) if f["enabled"]]
+        scopes = (("document", doc_id), ("volume", volume_id),
+                  ("edition", edition_id), ("work", work_id),
+                  ("collection", None))
+
+        def _rows(scope):
+            # Each scope is gated on its anchor id: an empty ('' sentinel)
+            # id must NOT produce an unfiltered query (that would leak
+            # value rows from every other collection).
+            if scope == "document":
+                return _meta_values(db, document_id=doc_id) if doc_id else []
+            if scope == "volume":
+                return _meta_values(db, volume_id=volume_id) if volume_id else []
+            if scope == "edition":
+                return _meta_values(db, edition_id=edition_id) if edition_id else []
+            if scope == "work":
+                return _meta_values(db, work_id=work_id) if work_id else []
+            if not cid:
+                return []
+            return _meta_values(db, collection_id=cid, scope="collection")
+
+        resolved = {}
+        sources = {}
+        raw = {}
+        # Merge most-specific-first (document > volume > edition > work >
+        # collection): the first non-null value written wins. raw carries
+        # ALL value rows of every scope, not only the winners.
+        for scope, _anchor in scopes:
+            rows = _rows(scope)
+            raw[scope] = rows
+            for v in rows:
+                fk = v["field_key"]
+                if fk in resolved:
+                    continue
+                if v["value"] is not None:
+                    resolved[fk] = v["value"]
+                    sources[fk] = scope
+        # field defaults (global layer)
+        for f in fields:
+            if f["field_key"] not in resolved and f["default_value"] is not None:
+                resolved[f["field_key"]] = f["default_value"]
+                sources[f["field_key"]] = "field_default"
+        return jsonify({"ok": True, "resolved": resolved, "sources": sources,
+                        "raw": {k: [dict(v) for v in vs]
+                                for k, vs in raw.items()},
+                        "context": {"document_id": doc_id, "collection_id": cid,
+                                    "work_id": work_id, "edition_id": edition_id,
+                                    "volume_id": volume_id}})
 
     # ── ES compatibility (PCM-14B §5 — honest NOT VERIFIED) ────────────
 

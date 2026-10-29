@@ -17,8 +17,9 @@
 | 5 | داشبورد آنلاین `corpus.ai.ismc.ir/dashboard` (تب «پروژه‌ها» + مرور صفحه‌به‌صفحه + جستجو + Previous/Next + احراز هویت رمز) | ✅ فعال (PCM-04/05/09) |
 | 6 | **Word Studio + پایگاه دانش** (PCM-14B): آپلود DOCX ← تبدیل به بلوک/JSON ← ساختار/کیفیت ← job queue با retry + استودیو فارسی `corpus.ai.ismc.ir/dashboard/studio.html` | ✅ فعال (PCM-14B.3) |
 | 7 | **Word Factory V0.1 + قرارداد Dump `d-1`** (PCM-14C.3/14C.4): خط لوله DOCX→JSONL ایزوله (policy n-1 ثبت‌شده در manifest m-2) + Dump خوداعتبارسنج و قابل حمل (make-dump/validate-dump/dump-summary) + پذیرش عملی روی CLI واقعی — بدون DB/ES/endpoint | ✅ فعال (26 تست D + پذیرش عملی) |
-| 8 | پایپلاین پیکره + دیتaset + آپلود HuggingFace | ✅ در دسترس |
-| 9 | ایندکسر RAG | 🚧 در دست توسعه |
+| 8 | **Work Registry / سلسله‌مراتب کتاب** (PCM-14D): اثر←نسخه←جلد←سند + scopeهای `work/edition/volume` برای متادیتا + resolve لایه‌ای قفل‌شده به anchor + مهاجرت افزایشی idempotent (rollback فقط حذف 3 جدول/6 ستون) | ✅ (10 تست RD + 139/139 — بدون deploy) |
+| 9 | پایپلاین پیکره + دیتaset + آپلود HuggingFace | ✅ در دسترس |
+| 10 | ایندکسر RAG | 🚧 در دست توسعه |
 
 ### سیستم پروژه (هسته v3.5)
 
@@ -52,8 +53,8 @@
 │  • sites.py       — سایت‌های نام‌دار + فیلدها ★      │
 │  • sciences.py    — ۱۳ علم اصطلاح‌نامه               │
 │  • factory/       — ★ Word Factory: DOCX→JSONL + Dump d-1│
-│  • 6 test files — 129 تست (api/projects/dashboard/     │
-│                     knowledge_api/word_factory/dump)    │
+│  • 7 test files — 139 تست (api/projects/dashboard/     │
+│                     knowledge_api/factory/dump/work)    │
 ├────────────────────────────────────────────────────────┤
 │  Corpus Pipeline (corpus/)                             │
 │  • build_corpus.py / build_dataset.py / pipeline.py    │
@@ -84,6 +85,7 @@ persian-corpus-toolkit/
 │   ├── test_knowledge_api.py# ★ ۴۰ تست KB-01..KB-14
 │   ├── test_word_factory.py # ★ ۲۴ تست WF-01..WF-13
 │   ├── test_dump.py         # ★ ۲۶ تست D01..D15 (Dump d-1 — PCM-14C.3)
+│   ├── test_work_registry.py# ★ ۱۰ تست RD-01..RD-07 (Work Registry — PCM-14D)
 │   ├── requirements.txt
 │   ├── Dockerfile
 │   └── thesaurus.db         # (gitignored)
@@ -196,10 +198,12 @@ python upload_to_hf.py --token hf_... --username ...
 | `/api/knowledge/subjects` | GET | ۱۳ علم |
 | `/api/knowledge/import/batches(…)` | POST/GET | ثبت/پردازش batch (V0.1: registration) |
 | `/api/knowledge/jobs` | GET | job queue |
-| `/api/knowledge/metadata/fields(…)` / `values(…)` | GET/POST/PATCH/DELETE | متادیتای مجموعه‌ای |
+| `/api/knowledge/metadata/fields(…)` / `values(…)` | GET/POST/PATCH/DELETE | متادیتای مجموعه‌ای (scope: collection/batch/document/work/edition/volume) |
+| `/api/knowledge/works(…)` / `editions(…)` / `volumes(…)` | GET/POST/PATCH | ★ Work Registry: سلسله‌مراتب اثر/نسخه/جلد (PCM-14D) |
+| `/api/knowledge/metadata/resolve` | GET | ★ resolve لایه‌ای: document>volume>edition>work>collection>field_default |
 | `/api/knowledge/compatibility` | GET | وضعیت ES (`NOT VERIFIED` در V0.1) |
 
-سند کامل: [docs/project-dashboard.md](docs/project-dashboard.md) · [docs/dashboard-authentication.md](docs/dashboard-authentication.md) · [docs/WORD-STUDIO-KNOWLEDGE-GUIDE.md](docs/WORD-STUDIO-KNOWLEDGE-GUIDE.md) · [docs/WORD-FACTORY-USER-GUIDE.md](docs/WORD-FACTORY-USER-GUIDE.md)
+سند کامل: [docs/project-dashboard.md](docs/project-dashboard.md) · [docs/dashboard-authentication.md](docs/dashboard-authentication.md) · [docs/WORD-STUDIO-KNOWLEDGE-GUIDE.md](docs/WORD-STUDIO-KNOWLEDGE-GUIDE.md) · [docs/WORD-FACTORY-USER-GUIDE.md](docs/WORD-FACTORY-USER-GUIDE.md) · [docs/PCM-14D-WORK-REGISTRY.md](docs/PCM-14D-WORK-REGISTRY.md)
 
 ### سایت‌ها
 
@@ -234,6 +238,7 @@ python upload_to_hf.py --token hf_... --username ...
 | `captures` | captures عمومی |
 | `auth_meta`, `auth_sessions`, `auth_rate` | ★ احراز هویت داشبورد (scrypt-hash، sessionهای ۷روزه، rate-limit) |
 | `knowledge_collections`, `knowledge_collection_documents`, `knowledge_document_metadata_fields/values` | ★ مجموعه‌ها + اسناد + متادیتا (PCM-14B) |
+| `knowledge_works`, `knowledge_editions`, `knowledge_volumes` | ★ Work Registry: اثر/نسخه/جلد (PCM-14D، additive + backfill) |
 | `knowledge_jobs`, `knowledge_import_batches`, `knowledge_index_builds` | ★ job queue + batch + build (V0.1) |
 | `knowledge_schema_version` | نسخه اسکیمای knowledge (additive migration) |
 
@@ -260,7 +265,8 @@ cd backend && python -m unittest test_api test_projects test_dashboard -v     # 
 cd backend && python -m unittest test_knowledge_api -v                        # 40/40 (PCM-14B)
 cd backend && python -m unittest test_word_factory -v                         # 24/24 (PCM-14B)
 cd backend && python -m unittest test_dump -v                                 # 26/26 (Dump d-1 — PCM-14C.3)
-cd backend && python -m unittest discover -s . -p "test_*.py"                 # 129/129 (کل)
+cd backend && python -m unittest test_work_registry -v                       # 10/10 (Work Registry — PCM-14D)
+cd backend && python -m unittest discover -s . -p "test_*.py"                 # 139/139 (کل)
 cd extension && node test_popup.js                                            # 8/8
 node --check extension/popup.js extension/background.js extension/content_picker.js
 node -e "JSON.parse(require('fs').readFileSync('extension/manifest.json'))"
@@ -360,6 +366,7 @@ sqlite3 backend/thesaurus.db "SELECT COUNT(*) FROM project_pages"
 | **PCM-14B.3** API Knowledge + Word Studio (studio.html) + job queue + deploy | ✅ (روی s52، ۴۰ تست KB + 103 کل) |
 | **PCM-14C.3** قرارداد رسمی Dump `d-1` + manifest `m-2` (ثبت policy نرمال‌سازی) + CLI make-dump/validate-dump/dump-summary | ✅ (26 تست D + 129 کل — بدون تغییر production، بدون deploy) |
 | **PCM-14C.4** پذیرش عملی قرارداد Dump روی CLI واقعی (`deploy/pcm14c4_dump_acceptance.py`: WF×2 + make/validate/summary + کپی + خرابی عمدی + سازگاری m-1 + تکرارپذیری 12/12) | ✅ (ACCEPTANCE PASS — بدون تغییر production، بدون deploy) |
+| **PCM-14D** Work Registry: سلسله‌مراتب اثر←نسخه←جلد + scopeهای work/edition/volume متادیتا + resolve لایه‌ای + OpenAPI | ✅ (10 تست RD + 139/139 — بدون deploy؛ سند: docs/PCM-14D-WORK-REGISTRY.md) |
 
 جزئیات معماری و نقشه‌ی راه نسخه‌ای (V0.1..V1.0): مستندات PCM-12 در [docs/](docs/) — `PCM-12-AUDIT.md` (وضعیت واقعی)، `PCM-12-ARCHITECTURE.md` (طراحی S2..S9)، `PCM-12-PRD.md` (الزامات)، `PCM-12-ROADMAP.md` (ترتیب اجرا)، `PCM-12-DATA-CONTRACTS.md` (schema/API/Prompt)، `PCM-12-AGENT-HANDOFF.md` (تصمیم‌ها و مرزها)، `PCM-12-ACCEPTANCE-REPORT.md` (گزارش آزمون پذیرش ۲۰ سناریو + ممیزی دسترسی s52)، `PCM-12-ACCEPTANCE-CHECKLIST.md` (چک‌لیست تأیید کاربری با Chrome) و `PCM-12.3-TEST-ISOLATION.md` (رفع ریشه‌ای F-01 + ممیزی امنیتی Grafana).
 
