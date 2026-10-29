@@ -10,12 +10,15 @@
 from .errors import (FactoryError, FormatDetectionError,
                      IntakeError, ParseError, QualityCheckFailed,
                      UnsupportedFormatError, ValidationFailedError)
+from .dump import (DUMP_VERSION, DumpError, dump_summary, generate_dump,
+                   validate_dump)
 from .export import JsonlExporter, ProcessingManifest
 from .intake import DocumentIntakeService, detect_format, sha256_file
 from .metadata import MetadataExtractor
 from .models import (Block, DocumentMetadata, FileRecord,
-                     NORM_VERSION, PARSER_VERSION, ProcessedDocument,
-                     QualityReport, StructureTree, content_hash, short_id)
+                     FACTORY_VERSION, MANIFEST_VERSION, NORM_VERSION,
+                     PARSER_VERSION, ProcessedDocument, QualityReport,
+                     StructureTree, content_hash, short_id)
 from .normalize import (NormalizationPolicy, PersianNormalizer,
                         verify_no_semantic_change)
 from .parser import (DocParserAdapter, DocxParser, DocumentParser,
@@ -28,6 +31,8 @@ from .validator import FileValidator, ValidationOutcome
 __all__ = [
     "DocumentProcessingService", "DocumentIntakeService", "detect_format",
     "sha256_file", "FileValidator", "ValidationOutcome",
+    "DUMP_VERSION", "DumpError", "generate_dump", "validate_dump",
+    "dump_summary",
     "DocumentParser", "DocxParser", "DocParserAdapter", "ParseOutcome",
     "make_parser", "extract_structure", "MetadataExtractor",
     "PersianNormalizer", "NormalizationPolicy", "verify_no_semantic_change",
@@ -37,7 +42,7 @@ __all__ = [
     "FactoryError", "IntakeError", "FormatDetectionError",
     "UnsupportedFormatError", "ValidationFailedError", "ParseError",
     "QualityCheckFailed",
-    "PARSER_VERSION", "NORM_VERSION",
+    "PARSER_VERSION", "NORM_VERSION", "MANIFEST_VERSION", "FACTORY_VERSION",
 ]
 
 __version__ = "0.1.0"

@@ -20,8 +20,8 @@ from .export import JsonlExporter
 from .errors import FactoryError
 from .intake import DocumentIntakeService
 from .metadata import MetadataExtractor
-from .models import (Block, ProcessedDocument, StructureTree,
-                     short_id, utc_now_iso)
+from .models import (Block, MANIFEST_VERSION, ProcessedDocument,
+                     StructureTree, short_id, utc_now_iso)
 from .normalize import (NormalizationPolicy, PersianNormalizer,
                         verify_no_semantic_change)
 from .parser import DocumentParser, make_parser
@@ -95,6 +95,7 @@ class DocumentProcessingService:
             volume_id = short_id("v", f"{edition_id}|{metadata.volume_no or 'main'}") \
                 if metadata.volume_no else None
 
+            policy_dict = self.normalizer.policy.policy_dict()
             doc_out = ProcessedDocument(
                 file=file_rec,
                 blocks=outcome.blocks,
@@ -104,6 +105,7 @@ class DocumentProcessingService:
                 work_id=work_id,
                 edition_id=edition_id,
                 volume_id=volume_id,
+                normalizer_policy=policy_dict,
                 started_at=started,
                 finished_at=utc_now_iso(),
                 duration_ms=int((time.time() - t0) * 1000),
@@ -128,7 +130,7 @@ class DocumentProcessingService:
         try:
             import json
             m = {
-                "manifest_version": "m-1",
+                "manifest_version": MANIFEST_VERSION,
                 "processing": {
                     "status": "failed",
                     "error": err.to_dict(),

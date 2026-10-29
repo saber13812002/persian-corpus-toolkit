@@ -18,8 +18,9 @@ from typing import Any, Optional
 
 PARSER_VERSION = "p-1"
 NORM_VERSION = "n-1"
-MANIFEST_VERSION = "m-1"
+MANIFEST_VERSION = "m-2"      # m-2 (PCM-14C.3): norm_policy کامل + blocks_hash + factory_version
 SCHEMA_VERSION = "wf-schema-1"
+FACTORY_VERSION = "0.1"       # نسخهٔ خط لولهٔ Word Factory (CLI/manifest)
 
 BLOCK_TYPES = (
     "heading", "paragraph", "table", "footnote", "endnote",
@@ -206,6 +207,7 @@ class ProcessedDocument:
     volume_id: Optional[str]
     parser_version: str = PARSER_VERSION
     norm_version: str = NORM_VERSION
+    normalizer_policy: Optional[dict] = None  # m-2: نگاشت کامل سیاست نرمال‌سازی
     started_at: str = ""
     finished_at: str = ""
     duration_ms: int = 0

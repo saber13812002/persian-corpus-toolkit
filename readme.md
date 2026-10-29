@@ -16,8 +16,9 @@
 | 4 | سایت‌های نام‌دار با فیلدهای آماده (`tasnim.hamtaa.org` seed شده) | ✅ فعال |
 | 5 | داشبورد آنلاین `corpus.ai.ismc.ir/dashboard` (تب «پروژه‌ها» + مرور صفحه‌به‌صفحه + جستجو + Previous/Next + احراز هویت رمز) | ✅ فعال (PCM-04/05/09) |
 | 6 | **Word Studio + پایگاه دانش** (PCM-14B): آپلود DOCX ← تبدیل به بلوک/JSON ← ساختار/کیفیت ← job queue با retry + استودیو فارسی `corpus.ai.ismc.ir/dashboard/studio.html` | ✅ فعال (PCM-14B.3) |
-| 7 | پایپلاین پیکره + دیتaset + آپلود HuggingFace | ✅ در دسترس |
-| 8 | ایندکسر RAG | 🚧 در دست توسعه |
+| 7 | **Word Factory V0.1 + قرارداد Dump `d-1`** (PCM-14C.3): خط لوله DOCX→JSONL ایزوله (policy n-1 ثبت‌شده در manifest m-2) + Dump خوداعتبارسنج و قابل حمل (make-dump/validate-dump/dump-summary) — بدون DB/ES/endpoint | ✅ فعال (26 تست D) |
+| 8 | پایپلاین پیکره + دیتaset + آپلود HuggingFace | ✅ در دسترس |
+| 9 | ایندکسر RAG | 🚧 در دست توسعه |
 
 ### سیستم پروژه (هسته v3.5)
 
@@ -50,9 +51,9 @@
 │  • knowledge_api.py — ★ Word Studio/پایگاه دانش (PCM-14B)│
 │  • sites.py       — سایت‌های نام‌دار + فیلدها ★      │
 │  • sciences.py    — ۱۳ علم اصطلاح‌نامه               │
-│  • factory/       — ★ Word Factory: DOCX→JSON block (CLI)│
-│  • 5 test files — 103 تست (api/projects/dashboard/     │
-│                     knowledge_api/word_factory)         │
+│  • factory/       — ★ Word Factory: DOCX→JSONL + Dump d-1│
+│  • 6 test files — 129 تست (api/projects/dashboard/     │
+│                     knowledge_api/word_factory/dump)    │
 ├────────────────────────────────────────────────────────┤
 │  Corpus Pipeline (corpus/)                             │
 │  • build_corpus.py / build_dataset.py / pipeline.py    │
@@ -73,7 +74,7 @@ persian-corpus-toolkit/
 │   ├── auth.py              # ★ احراز هویت داشبورد (PCM-09)
 │   ├── dashboard_api.py     # ★ API خواندنی داشبورد (PCM-04)
 │   ├── knowledge_api.py     # ★ Word Studio + پایگاه دانش (PCM-14B)
-│   ├── factory/             # ★ Word Factory: DOCX→JSON (CLI + policy n-1)
+│   ├── factory/             # ★ Word Factory: DOCX→JSONL (CLI + policy n-1 + dump.py)
 │   ├── sites.py             # ★ سایت‌ها و فیلدهای آماده
 │   ├── sciences.py          # ۱۳ علم
 │   ├── pct_test_support.py  # ★ harness ایزوله (DB موقت مشترک)
@@ -82,6 +83,7 @@ persian-corpus-toolkit/
 │   ├── test_dashboard.py    # ۲۲ تست (auth A01-A08 + D01-D07 + صفحات P01-P07)
 │   ├── test_knowledge_api.py# ★ ۴۰ تست KB-01..KB-14
 │   ├── test_word_factory.py # ★ ۲۴ تست WF-01..WF-13
+│   ├── test_dump.py         # ★ ۲۶ تست D01..D15 (Dump d-1 — PCM-14C.3)
 │   ├── requirements.txt
 │   ├── Dockerfile
 │   └── thesaurus.db         # (gitignored)
@@ -99,7 +101,8 @@ persian-corpus-toolkit/
 ├── data/                    # (gitignored) store پایدار: data/knowledge/{files,out} (PCM-14B)
 ├── deploy/                  # nginx vhost + systemd + اسکریپت‌های دپلوی PCM
 ├── docs/                    # project-dashboard.md · dashboard-authentication.md ·
-│                            #   WORD-FACTORY-USER-GUIDE.md · WORD-STUDIO-KNOWLEDGE-GUIDE.md · PCM-12/13
+│                            #   WORD-FACTORY-USER-GUIDE.md · WORD-STUDIO-KNOWLEDGE-GUIDE.md ·
+│                            #   PCM-14C.3-DUMP-CONTRACT.md · PCM-12/13
 ├── docker-compose.yml       # backend محلی روی 127.0.0.1:5055
 ├── AGENTS.md                # قواعد سخت دپلوی/مهاجرت/رمز
 └── گزارش-وضعیت-پروژه.md / گزارش-PCM-0X.md
@@ -256,7 +259,8 @@ cp backups/thesaurus_20260802.db backend/thesaurus.db       # بازیابی
 cd backend && python -m unittest test_api test_projects test_dashboard -v     # 39/39 (هسته)
 cd backend && python -m unittest test_knowledge_api -v                        # 40/40 (PCM-14B)
 cd backend && python -m unittest test_word_factory -v                         # 24/24 (PCM-14B)
-cd backend && python -m unittest discover -s . -p "test_*.py"                 # 103/103 (کل)
+cd backend && python -m unittest test_dump -v                                 # 26/26 (Dump d-1 — PCM-14C.3)
+cd backend && python -m unittest discover -s . -p "test_*.py"                 # 129/129 (کل)
 cd extension && node test_popup.js                                            # 8/8
 node --check extension/popup.js extension/background.js extension/content_picker.js
 node -e "JSON.parse(require('fs').readFileSync('extension/manifest.json'))"
@@ -354,6 +358,7 @@ sqlite3 backend/thesaurus.db "SELECT COUNT(*) FROM project_pages"
 | **PCM-14B Word Factory** DOCX→JSON block (CLI، بدون DB/endpoint) | ✅ (۲۴ تست WF) |
 | **PCM-14B.2** Knowledge Base: schema v1→v2 + store پایدار (data/knowledge) | ✅ (روی s52) |
 | **PCM-14B.3** API Knowledge + Word Studio (studio.html) + job queue + deploy | ✅ (روی s52، ۴۰ تست KB + 103 کل) |
+| **PCM-14C.3** قرارداد رسمی Dump `d-1` + manifest `m-2` (ثبت policy نرمال‌سازی) + CLI make-dump/validate-dump/dump-summary | ✅ (26 تست D + 129 کل — بدون تغییر production، بدون deploy) |
 
 جزئیات معماری و نقشه‌ی راه نسخه‌ای (V0.1..V1.0): مستندات PCM-12 در [docs/](docs/) — `PCM-12-AUDIT.md` (وضعیت واقعی)، `PCM-12-ARCHITECTURE.md` (طراحی S2..S9)، `PCM-12-PRD.md` (الزامات)، `PCM-12-ROADMAP.md` (ترتیب اجرا)، `PCM-12-DATA-CONTRACTS.md` (schema/API/Prompt)، `PCM-12-AGENT-HANDOFF.md` (تصمیم‌ها و مرزها)، `PCM-12-ACCEPTANCE-REPORT.md` (گزارش آزمون پذیرش ۲۰ سناریو + ممیزی دسترسی s52)، `PCM-12-ACCEPTANCE-CHECKLIST.md` (چک‌لیست تأیید کاربری با Chrome) و `PCM-12.3-TEST-ISOLATION.md` (رفع ریشه‌ای F-01 + ممیزی امنیتی Grafana).
 

@@ -257,6 +257,15 @@ CREATE UNIQUE INDEX idx_research_delivery
 - `chunk_id` deterministic: `kw_<work>_<edition>_<vol>_<seq6>` → idempotent bulk
 - chunk v1 (c-1): target 500 token، overlap 50 token، شکستن فقط در مرز paragraph/section
 
+### 2.5 Dump packet (د-1 — PCM-14C.3)
+
+قرارداد رسمی، نسخه‌پذیر و مستقل از Elasticsearch برای Export خروجی WF
+(`dump-manifest.json` + 5 فایل WF، SHA-256 ورودی/خروجی، اعتبارسنجی V1–V11
+بدون ES/DB/شبکه، سازگاری m-1/m-2) در
+[PCM-14C.3-DUMP-CONTRACT.md](PCM-14C.3-DUMP-CONTRACT.md) تعریف شده است.
+مصرف‌کننده‌های آینده (ES/RAG/HF) باید chunk و index را از روی **Dump
+اعتبارسنجی‌شده** تولید کنند (بخش 8 آن سند).
+
 ---
 
 ## ۳. ES Mapping (test index — V0.2)

@@ -13,8 +13,9 @@ import json
 import os
 import time
 
-from .models import (MANIFEST_VERSION, NORM_VERSION, PARSER_VERSION,
-                     SCHEMA_VERSION, ProcessedDocument, utc_now_iso)
+from .models import (FACTORY_VERSION, MANIFEST_VERSION, NORM_VERSION,
+                     PARSER_VERSION, SCHEMA_VERSION, ProcessedDocument,
+                     utc_now_iso)
 
 
 def _write_json(path: str, obj) -> None:
@@ -43,7 +44,13 @@ class ProcessingManifest:
             "versions": {
                 "parser": doc.parser_version,
                 "normalizer": doc.norm_version,
+                # PCM-14C.3: سیاست کامل نرمال‌سازی (نه فقط نسخه) — رفع
+                # ابهام ممیزی PCM-14C.2 §1.6 (دو اجرای متفاوتِ همان فایل).
+                "normalizer_policy": doc.normalizer_policy,
+                "factory": FACTORY_VERSION,
             },
+            # hash مجموع بلوک‌ها (idempotency WF-10 — بدون بازخوانی JSONL)
+            "blocks_hash": doc.blocks_hash(),
             "processing": {
                 "status": run_status,
                 "error": run_error,

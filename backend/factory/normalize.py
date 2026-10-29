@@ -78,6 +78,24 @@ class NormalizationPolicy:
         if self.digits != "keep": on.append(f"digits:{self.digits}")
         return on
 
+    def policy_dict(self) -> dict:
+        """نگاشت کامل سیاست (برای ثبت در manifest — PCM-14C.3).
+
+        ثبت کامل policy در manifest باعث می‌شود هر اجرا بدون دسترسی به کد
+        بازمی‌گردد: سیاست دقیق نرمال‌سازی همان اجرا ثبت است.
+        """
+        return {
+            "version": self.version,
+            "nfkc": self.nfkc,
+            "arabic_to_persian": self.arabic_to_persian,
+            "zwnj": self.zwnj,
+            "collapse_spaces": self.collapse_spaces,
+            "strip_zwsp": self.strip_zwsp,
+            "strip_rlm": self.strip_rlm,
+            "digits": self.digits,
+            "rules": self.rules(),
+        }
+
 
 class PersianNormalizer:
     def __init__(self, policy: NormalizationPolicy | None = None):
