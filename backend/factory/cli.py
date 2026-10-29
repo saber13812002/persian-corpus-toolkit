@@ -17,6 +17,11 @@ Dump (PCM-14C.3 — قرارداد d-1، بدون DB/ES/شبکه):
 کد خروجی دامپ: 0=معتبر/ساخت‌شده · 1=نامعتبر/خطا · 3=usage
 
 قاعده: فقط فایل تکیِ داده‌شده؛ هیچ مانیتور/انبارداری خودکار پوشه‌ای نیست.
+
+Corpus (PCM-16 — قرارداد c-1، از Dumpهای معتبر d-1، بدون DB/ES/شبکه):
+    python -m factory.cli build-corpus ./dump1 ./dump2 --out ./corpus \
+        [--require-quality ok] [--json]
+کد خروجی پیکره: 0=ساخت‌شده · 1=خطا/رد دامپ · 3=usage
 """
 from __future__ import annotations
 
@@ -62,12 +67,20 @@ def _dump_main(argv: list[str]) -> int:
                        help="فایل docx اصلی — SHA-256 آن با مانیفست WF راستی‌آزمایی می‌شود")
         p.add_argument("--json", action="store_true", dest="as_json",
                        help="فقط dump-manifest.json را چاپ کند")
+    elif sub == "build-corpus":
+        p.add_argument("dumps", nargs="+", help="دایرکتوری‌های Dump معتبر (d-1)")
+        p.add_argument("--out", required=True, help="مقصد پیکره")
+        p.add_argument("--require-quality", choices=["ok"], default=None,
+                       help="فقط دامپ‌های quality_status=ok")
+        p.add_argument("--json", action="store_true", dest="as_json",
+                       help="فقط corpus-manifest.json را چاپ کند")
     else:
         p.add_argument("dump_dir", help="دایرکتوری Dump")
         p.add_argument("--json", action="store_true", dest="as_json",
                        help="خروجی JSON (machine-readable)")
     args = p.parse_args(argv[1:])
 
+    from .corpus import CorpusError, build_corpus
     from .dump import DumpError, dump_summary, generate_dump, validate_dump
 
     try:
@@ -89,6 +102,27 @@ def _dump_main(argv: list[str]) -> int:
                       f"(score={dm['quality'].get('score')})")
                 print(f"  dump dir     : {os.path.abspath(args.dump_dir)}")
                 print("    - dump-manifest.json + 5 فایل WF (SHA-256 ثبت‌شده)")
+                print("=" * 64)
+            return EXIT_OK
+        if sub == "build-corpus":
+            m = build_corpus(args.dumps, args.out,
+                             require_quality=args.require_quality)
+            if args.as_json:
+                print(json.dumps(m, ensure_ascii=False, indent=2))
+            else:
+                c = m["counts"]
+                print("=" * 64)
+                print(f"Corpus {m['corpus_contract_version']} — "
+                      f"{m['generator']}")
+                print(f"  dumps        : {c['dumps']} (همه تاییدشده d-1)")
+                print(f"  blocks       : {c['blocks_total']} "
+                      f"(raw unique {c['blocks_unique_raw']}, "
+                      f"norm unique {c['blocks_unique_normalized']})")
+                print(f"  chars        : raw {c['raw_chars']:,} · "
+                      f"norm {c['normalized_chars']:,}")
+                print(f"  files        : " + ", ".join(
+                    f['name'] for f in m['files']) + f" + {m['archive']['name']}")
+                print(f"  out dir      : {os.path.abspath(args.out)}")
                 print("=" * 64)
             return EXIT_OK
         if sub == "validate-dump":
@@ -135,8 +169,8 @@ def _dump_main(argv: list[str]) -> int:
                 print(f"  [warn] {w}")
             print("=" * 64)
         return EXIT_OK if s["valid"] else EXIT_FAILED
-    except DumpError as e:
-        print(f"خطای Dump ({e.code}): {e.message}", file=sys.stderr)
+    except (DumpError, CorpusError) as e:
+        print(f"خطای Dump/Corpus ({e.code}): {e.message}", file=sys.stderr)
         return EXIT_FAILED
 
 
@@ -150,7 +184,8 @@ def main(argv: list[str] | None = None) -> int:
                 pass
     if argv is None:
         argv = sys.argv[1:]
-    if argv and argv[0] in ("make-dump", "validate-dump", "dump-summary"):
+    if argv and argv[0] in ("make-dump", "validate-dump", "dump-summary",
+                            "build-corpus"):
         return _dump_main(list(argv))
     args = build_parser().parse_args(argv)
     if not os.path.isfile(args.input):

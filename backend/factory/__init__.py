@@ -10,6 +10,7 @@
 from .errors import (FactoryError, FormatDetectionError,
                      IntakeError, ParseError, QualityCheckFailed,
                      UnsupportedFormatError, ValidationFailedError)
+from .corpus import (CORPUS_VERSION, CorpusError, build_corpus)
 from .dump import (DUMP_VERSION, DumpError, dump_summary, generate_dump,
                    validate_dump)
 from .export import JsonlExporter, ProcessingManifest
@@ -33,6 +34,7 @@ __all__ = [
     "sha256_file", "FileValidator", "ValidationOutcome",
     "DUMP_VERSION", "DumpError", "generate_dump", "validate_dump",
     "dump_summary",
+    "CORPUS_VERSION", "CorpusError", "build_corpus",
     "DocumentParser", "DocxParser", "DocParserAdapter", "ParseOutcome",
     "make_parser", "extract_structure", "MetadataExtractor",
     "PersianNormalizer", "NormalizationPolicy", "verify_no_semantic_change",
