@@ -308,6 +308,39 @@ def ensure_knowledge_schema(db):
     CREATE INDEX IF NOT EXISTS idx_ked_work ON knowledge_editions(work_id);
     CREATE INDEX IF NOT EXISTS idx_kvol_edition ON knowledge_volumes(edition_id);
     CREATE INDEX IF NOT EXISTS idx_kvol_work ON knowledge_volumes(work_id);
+    -- PCM-15 — persistent per-file processing queue (single source of truth
+    -- for file-level stage/attempts/timings/last-error/artifact path).
+    -- One row per (collection, file_key); file_key == the deterministic
+    -- Word Factory file_id (f-<sha8>). Statuses: pending / running /
+    -- succeeded / needs_review / failed. `stage` is the last COMPLETED
+    -- (safe) stage — on failure it is the resume anchor (retry = idempotent
+    -- re-run over the sha-verified unchanged input, see docs).
+    CREATE TABLE IF NOT EXISTS knowledge_file_queue (
+        file_key         TEXT NOT NULL,
+        document_id      TEXT NOT NULL,
+        collection_id    TEXT NOT NULL,
+        file_name        TEXT,
+        sha256           TEXT NOT NULL,
+        status           TEXT NOT NULL DEFAULT 'pending',
+        stage            TEXT,
+        attempts         INTEGER NOT NULL DEFAULT 0,
+        last_error       TEXT,
+        stage_started_at TEXT,
+        finished_at      TEXT,
+        duration_ms      INTEGER,
+        out_dir          TEXT,
+        created_at       TEXT NOT NULL,
+        updated_at       TEXT NOT NULL,
+        PRIMARY KEY (collection_id, file_key)
+    );
+    CREATE INDEX IF NOT EXISTS idx_kfq_status ON knowledge_file_queue(status);
+    CREATE INDEX IF NOT EXISTS idx_kfq_coll ON knowledge_file_queue(collection_id, status);
+    -- PCM-15 — pause/resume control (scope = 'batch:<batch_id>').
+    CREATE TABLE IF NOT EXISTS knowledge_queue_control (
+        scope        TEXT PRIMARY KEY,
+        paused       INTEGER NOT NULL DEFAULT 0,
+        updated_at   TEXT NOT NULL
+    );
     """)
     db.commit()
     _ensure_document_columns(db)
@@ -522,15 +555,18 @@ STUCK_AFTER_MOD = "-10 minutes"  # a live worker always updates within 10 min
 
 
 def _recover_interrupted(db):
-    """PCM-13/14 §13: after a restart, make stuck state resumable.
+    """PCM-13/14 §13 (+PCM-15): after a restart, make stuck state resumable.
 
     Only rows whose updated_at is OLDER than STUCK_AFTER_MOD are considered
     stuck — a live worker updates its row (job stage/progress, document
-    status) well within that window, so in-flight work is never touched.
+    status, queue row) well within that window, so in-flight work is never
+    touched.
 
-    - jobs stuck in pending/running  -> interrupted (retryable)
-    - documents stuck in parsing -> uploaded (reprocessable, file intact)
-    - batches stuck in 'processing' -> planned (re-runnable)
+    - jobs stuck in pending/running   -> interrupted (retryable)
+    - documents stuck in parsing      -> uploaded (reprocessable, file intact)
+    - batches stuck in 'processing'   -> planned (re-runnable)
+    - queue rows stuck in 'running'   -> pending (re-queued; the recorded
+      `stage` = last completed safe stage is kept as the resume anchor)
     Idempotent and cheap (no-op UPDATEs when nothing is stuck).
     """
     db.execute(
@@ -545,6 +581,10 @@ def _recover_interrupted(db):
     db.execute(
         """UPDATE knowledge_import_batches SET status='planned', updated_at=?
            WHERE status='processing' AND updated_at < datetime('now', ?)""",
+        (_now(), STUCK_AFTER_MOD))
+    db.execute(
+        """UPDATE knowledge_file_queue SET status='pending', updated_at=?
+           WHERE status='running' AND updated_at < datetime('now', ?)""",
         (_now(), STUCK_AFTER_MOD))
     db.commit()
 
@@ -665,9 +705,13 @@ def _job_worker(db_path, job_id):
         if fn is None:
             raise RuntimeError(f"unknown job kind {key!r}")
         fn(conn, job_id)
-        conn.execute("UPDATE knowledge_jobs SET status='succeeded', stage='done', "
-                     "updated_at=?, completed_at=? WHERE job_id=?",
-                     (_now(), _now(), job_id))
+        # PCM-15: a batch job that stops early (user pause) sets its own
+        # 'interrupted' state — never overwrite a terminal state set by the
+        # kind fn itself.
+        conn.execute(
+            "UPDATE knowledge_jobs SET status='succeeded', stage='done', "
+            "updated_at=?, completed_at=? WHERE job_id=? AND status='running'",
+            (_now(), _now(), job_id))
         conn.commit()
     except Exception as e:  # noqa: BLE001 — job errors are DATA, not crashes
         conn.execute("UPDATE knowledge_jobs SET status='failed', error=?, "
@@ -741,11 +785,173 @@ def _job_progress(conn, job_id, progress, total=None, stage=None):
 
 
 # ---------------------------------------------------------------------------
+# PCM-15 — persistent per-file queue (stage/attempts/last-error/timings)
+# ---------------------------------------------------------------------------
+
+QUEUE_STATUSES = ("pending", "running", "succeeded", "needs_review", "failed")
+STAGE_NAMES = ("intake", "validate", "parse", "structure", "metadata",
+               "normalize", "quality", "export")
+STAGE_SAFE_ORDER = {name: i for i, name in enumerate(STAGE_NAMES)}
+
+
+def queue_scope(batch_id):
+    """PCM-15 pause/resume control scope for a batch (None = no scope)."""
+    return f"batch:{batch_id}" if batch_id else None
+
+
+def queue_is_paused(conn, scope):
+    """True when the given scope exists and is paused."""
+    if not scope:
+        return False
+    r = conn.execute("SELECT paused FROM knowledge_queue_control WHERE scope=?",
+                     (scope,)).fetchone()
+    return bool(r and r["paused"])
+
+
+def queue_set_paused(conn, scope, paused, now=None):
+    now = now or _now()
+    conn.execute(
+        """INSERT INTO knowledge_queue_control (scope, paused, updated_at)
+           VALUES (?, ?, ?)
+           ON CONFLICT(scope) DO UPDATE SET paused=excluded.paused,
+               updated_at=excluded.updated_at""",
+        (scope, 1 if paused else 0, now))
+    conn.commit()
+
+
+def _queue_row(conn, collection_id, file_key):
+    return conn.execute(
+        "SELECT * FROM knowledge_file_queue WHERE collection_id=? AND file_key=?",
+        (collection_id, file_key)).fetchone()
+
+
+def _queue_stage_writer(conn, collection_id, file_key, t0):
+    """Build the on_stage callback for one queued file.
+
+    The callback records each COMPLETED (safe) stage in the queue row
+    immediately (own commit — survives a later mid-pipeline crash). It also
+    measures the current stage's duration into the row at each transition,
+    so `duration_ms` on failure is the time up to the last safe stage.
+    """
+    state = {"stage": None, "t": t0}
+
+    def on_stage(stage_name):
+        if stage_name not in STAGE_SAFE_ORDER:
+            return
+        now = _now()
+        cur = state["stage"]
+        # duration of the stage that just finished (intake t0 baseline)
+        dur = int((time.time() - state["t"]) * 1000)
+        if cur is None:
+            conn.execute(
+                """UPDATE knowledge_file_queue
+                    SET stage=?, stage_started_at=?, duration_ms=?, updated_at=?
+                  WHERE collection_id=? AND file_key=?""",
+                (stage_name, now, dur, now, collection_id, file_key))
+        else:
+            conn.execute(
+                """UPDATE knowledge_file_queue
+                    SET stage=?, stage_started_at=?,
+                        duration_ms=COALESCE(duration_ms,0)+?, updated_at=?
+                  WHERE collection_id=? AND file_key=?""",
+                (stage_name, now, dur, now, collection_id, file_key))
+        conn.commit()
+        state["stage"] = stage_name
+        state["t"] = time.time()
+
+    return on_stage
+
+
+def _queue_start(conn, collection_id, file_key, t0):
+    """Mark a queue row running for attempt n (first run or retry)."""
+    now = _now()
+    conn.execute(
+        """UPDATE knowledge_file_queue
+            SET status='running', stage=NULL, last_error=NULL,
+                stage_started_at=?, finished_at=NULL, duration_ms=NULL,
+                attempts=attempts+1, updated_at=?
+          WHERE collection_id=? AND file_key=?""",
+        (now, now, collection_id, file_key))
+    conn.commit()
+    return _queue_stage_writer(conn, collection_id, file_key, t0)
+
+
+def _queue_finish(conn, collection_id, file_key, status, error=None,
+                  out_dir=None):
+    """Terminal state for a queue row (succeeded/needs_review/failed)."""
+    now = _now()
+    conn.execute(
+        """UPDATE knowledge_file_queue
+            SET status=?, last_error=?, out_dir=COALESCE(?, out_dir),
+                finished_at=?, updated_at=?
+          WHERE collection_id=? AND file_key=?""",
+        (status, error, out_dir, now, now, collection_id, file_key))
+    conn.commit()
+
+
+def _queue_ensure_rows(conn, collection_id, batch_id):
+    """Ensure one pending queue row per planned file of the batch.
+
+    The queue is keyed by the deterministic Word Factory file_id
+    (f-<sha8> == f-<sha256[:8]>), so re-planning / re-runs converge on the
+    same row (no duplicates).
+    """
+    docs = conn.execute(
+        """SELECT document_id, file_name, sha256 FROM
+             knowledge_collection_documents
+          WHERE collection_id=? AND status IN ('uploaded','failed')
+          ORDER BY id""", (collection_id,)).fetchall()
+    for d in docs:
+        file_key = "f-" + d["sha256"][:8]
+        now = _now()
+        conn.execute(
+            """INSERT INTO knowledge_file_queue
+               (file_key, document_id, collection_id, file_name, sha256,
+                status, attempts, created_at, updated_at)
+               VALUES (?, ?, ?, ?, ?, 'pending', 0, ?, ?)
+               ON CONFLICT(collection_id, file_key) DO NOTHING""",
+            (file_key, d["document_id"], collection_id, d["file_name"],
+             d["sha256"], now, now))
+    conn.commit()
+
+
+def queue_counters(conn, collection_id=None):
+    """Counters computed straight from the queue table (single truth)."""
+    where = "WHERE collection_id=?" if collection_id else ""
+    args = (collection_id,) if collection_id else ()
+    row = conn.execute(
+        f"""SELECT
+              COUNT(*) AS total,
+              SUM(CASE WHEN status='pending' THEN 1 ELSE 0 END) AS pending,
+              SUM(CASE WHEN status='running' THEN 1 ELSE 0 END) AS running,
+              SUM(CASE WHEN status='succeeded' THEN 1 ELSE 0 END) AS succeeded,
+              SUM(CASE WHEN status='needs_review' THEN 1 ELSE 0 END)
+                  AS needs_review,
+              SUM(CASE WHEN status='failed' THEN 1 ELSE 0 END) AS failed,
+              SUM(CASE WHEN stage IS NOT NULL AND status='failed'
+                  THEN 1 ELSE 0 END) AS failed_with_safe_stage,
+              SUM(COALESCE(attempts,0)) AS attempts_total
+            FROM knowledge_file_queue {where}""", args).fetchone()
+    out = dict(row)
+    out["total"] = out["total"] or 0
+    for k in ("pending", "running", "succeeded", "needs_review", "failed",
+              "failed_with_safe_stage", "attempts_total"):
+        out[k] = out[k] or 0
+    return out
+
+
+# ---------------------------------------------------------------------------
 # Word Factory integration (PCM-13, reused)
 # ---------------------------------------------------------------------------
 
-def _process_document(conn, collection_id, doc_id):
-    """Run the Word Factory on one registered document (in-place update)."""
+def _process_document(conn, collection_id, doc_id, on_stage=None):
+    """Run the Word Factory on one registered document (in-place update).
+
+    PCM-15: `on_stage` (optional) is forwarded to the factory — it is called
+    with the name of each stage right after that stage completes (intake ..
+    export). The caller uses it to persist per-stage progress (safe-stage
+    tracking for the queue).
+    """
     row = conn.execute(
         """SELECT * FROM knowledge_collection_documents
            WHERE document_id = ? AND collection_id = ?""",
@@ -753,11 +959,22 @@ def _process_document(conn, collection_id, doc_id):
     if not row:
         raise RuntimeError(f"document {doc_id} not found")
     sha = row["sha256"]
+    file_key = "f-" + sha[:8]
     file_name = row["file_name"] or "book.docx"
     ext = os.path.splitext(file_name)[1]
-    stored = _stored_file_path(sha, "f-" + sha[:8], ext)
+    stored = _stored_file_path(sha, file_key, ext)
     if not os.path.isfile(stored):
         raise RuntimeError("stored original file missing (corrupt store)")
+
+    # PCM-15 — single-document path: when no explicit on_stage is given
+    # (i.e. not the queue-aware batch worker), mirror the outcome into the
+    # per-file queue row IF one exists (the file was part of a batch). This
+    # keeps single-doc retry of a failed queue file consistent: attempts
+    # bump, last safe stage re-recorded, last_error refreshed.
+    if on_stage is None:
+        qrow = _queue_row(conn, collection_id, file_key)
+        if qrow is not None:
+            on_stage = _queue_start(conn, collection_id, file_key, time.time())
 
     conn.execute("UPDATE knowledge_collection_documents SET status='parsing', "
                  "updated_at=? WHERE id=?", (_now(), row["id"]))
@@ -768,13 +985,16 @@ def _process_document(conn, collection_id, doc_id):
     os.makedirs(out_root, exist_ok=True)
     svc = DocumentProcessingService(out_root)
     try:
-        doc = svc.process(stored)  # raises FactoryError on failure
+        doc = svc.process(stored, on_stage=on_stage)  # raises on failure
     except Exception as e:  # noqa: BLE001 — record per-doc failure, keep going
+        err = f"{type(e).__name__}: {e}"
         conn.execute("UPDATE knowledge_collection_documents SET status='failed', "
                      "error=?, updated_at=? WHERE id=?",
-                     (f"{type(e).__name__}: {e}", _now(), row["id"]))
+                     (err, _now(), row["id"]))
         _refresh_book_count(conn, collection_id)
         conn.commit()
+        if on_stage is not None:
+            _queue_finish(conn, collection_id, file_key, "failed", error=err)
         raise
 
     file_id = doc.file.file_id
@@ -797,6 +1017,11 @@ def _process_document(conn, collection_id, doc_id):
     _upsert_registry_rows(conn, doc)
     _refresh_book_count(conn, collection_id)
     conn.commit()
+    if on_stage is not None:
+        _queue_finish(conn, collection_id, file_key,
+                      "succeeded" if status == "parsed" else "needs_review",
+                      out_dir=os.path.relpath(out_dir, knowledge_data_dir())
+                                   .replace(os.sep, "/"))
     return status
 
 
@@ -808,24 +1033,66 @@ def _job_kind_process_document(conn, job_id):
 
 
 def _job_kind_process_batch(conn, job_id):
+    """PCM-15 queue-aware batch worker.
+
+    Per file: ensure its queue row -> mark running (attempts+1) -> run the
+    factory with an on_stage callback persisting the last safe stage ->
+    terminal state (succeeded / needs_review / failed with last_error).
+    Honours the batch pause scope: when paused, the job stops cleanly,
+    leaves the remaining files pending, and marks itself interrupted
+    (retryable — POST /process resumes).
+    """
     r = conn.execute("SELECT job_key, collection_id FROM knowledge_jobs "
                      "WHERE job_id=?", (job_id,)).fetchone()
     _, batch_id = r["job_key"].split(":", 1)
     coll = r["collection_id"]
+    scope = queue_scope(batch_id)
+
+    _queue_ensure_rows(conn, coll, batch_id)
     docs = conn.execute(
-        """SELECT document_id FROM knowledge_collection_documents
+        """SELECT document_id, file_name, sha256 FROM knowledge_collection_documents
            WHERE collection_id = ? AND status IN ('uploaded','failed')
            ORDER BY id""", (coll,)).fetchall()
     total = len(docs)
     done = 0
+    paused_now = _now()
     for d in docs:
-        try:
-            _process_document(conn, coll, d["document_id"])
-        except Exception as e:  # noqa: BLE001 — keep going, record per file
-            conn.execute("UPDATE knowledge_collection_documents SET status='failed', "
-                         "error=?, updated_at=? WHERE document_id=?",
-                         (f"{type(e).__name__}: {e}", _now(), d["document_id"]))
+        if queue_is_paused(conn, scope):
+            # clean stop: remaining files stay pending in the queue
+            conn.execute(
+                "UPDATE knowledge_import_batches SET status='planned', "
+                "updated_at=? WHERE batch_id=?", (paused_now, batch_id))
             conn.commit()
+            _job_progress(conn, job_id, done, total, "paused")
+            conn.execute(
+                """UPDATE knowledge_jobs
+                     SET status='interrupted',
+                         error=COALESCE(error,'') || ' [paused by user]',
+                         updated_at=? WHERE job_id=?""",
+                (paused_now, job_id))
+            conn.commit()
+            return
+        file_key = "f-" + d["sha256"][:8]
+        t0 = time.time()
+        on_stage = _queue_start(conn, coll, file_key, t0)
+        try:
+            # _process_document finishes the queue row itself in every case
+            # (succeeded / needs_review / failed) via the on_stage lifecycle.
+            _process_document(conn, coll, d["document_id"],
+                              on_stage=on_stage)
+        except Exception as e:  # noqa: BLE001 — keep going, record per file
+            err = f"{type(e).__name__}: {e}"
+            conn.execute(
+                "UPDATE knowledge_collection_documents SET status='failed', "
+                "error=?, updated_at=? WHERE document_id=?",
+                (err, _now(), d["document_id"]))
+            conn.commit()
+            # safety net: if the failure happened before the factory ran
+            # (e.g. registry row gone) the queue row is still 'running' —
+            # finalize it so no row is ever left dangling.
+            q = _queue_row(conn, coll, file_key)
+            if q and q["status"] == "running":
+                _queue_finish(conn, coll, file_key, "failed", error=err)
         done += 1
         _job_progress(conn, job_id, done, total,
                       f"document {d['document_id']}")
@@ -1535,8 +1802,21 @@ def register_knowledge_routes(app, get_db):
             "SELECT job_id, kind, status, stage, progress, total, error, "
             "created_at, updated_at, completed_at FROM knowledge_jobs "
             "WHERE batch_id=? ORDER BY created_at DESC", (batch_id,))]
+        # PCM-15 — per-file queue rows (stage/attempts/last-error/timings)
+        queue = [dict(r) for r in db.execute(
+            "SELECT file_key, document_id, file_name, sha256, status, stage, "
+            "attempts, last_error, stage_started_at, finished_at, duration_ms, "
+            "out_dir, created_at, updated_at FROM knowledge_file_queue "
+            "WHERE collection_id=? ORDER BY created_at",
+            (b["collection_id"],))]
+        ctrl = db.execute(
+            "SELECT paused, updated_at FROM knowledge_queue_control WHERE scope=?",
+            (queue_scope(batch_id),)).fetchone()
         return jsonify({"ok": True, "batch": dict(b),
-                        "documents": docs, "jobs": jobs})
+                        "documents": docs, "jobs": jobs,
+                        "queue": queue,
+                        "paused": bool(ctrl and ctrl["paused"]),
+                        "queue_control": dict(ctrl) if ctrl else None})
 
     @app.route("/api/knowledge/import/batches/<batch_id>/process",
                methods=["POST"])
@@ -1563,6 +1843,90 @@ def register_knowledge_routes(app, get_db):
             idempotency_key=f"batch:{batch_id}")
         return jsonify({"ok": True, "job": job, "files_queued": n,
                         "resubmitted": not created}), (202 if created else 200)
+
+    # ── PCM-15 — queue pause/resume + summary ──────────────────────────
+
+    def _batch_or_404(db, batch_id):
+        b = db.execute(
+            "SELECT * FROM knowledge_import_batches WHERE batch_id=?",
+            (batch_id,)).fetchone()
+        if not b:
+            return None
+        return b
+
+    @app.route("/api/knowledge/import/batches/<batch_id>/pause",
+               methods=["POST"])
+    @require_auth
+    def knowledge_pause_batch(batch_id):
+        """PCM-15: pause a batch queue. The running worker checks the flag
+        before every file and stops cleanly (remaining files stay pending)."""
+        db = get_db()
+        ensure_knowledge_schema(db)
+        _recover_interrupted(db)
+        b = _batch_or_404(db, batch_id)
+        if not b:
+            return jsonify({"ok": False, "message": "بچ پیدا نشد"}), 404
+        queue_set_paused(db, queue_scope(batch_id), True)
+        ctrl = db.execute(
+            "SELECT paused, updated_at FROM knowledge_queue_control WHERE scope=?",
+            (queue_scope(batch_id),)).fetchone()
+        return jsonify({"ok": True, "paused": True,
+                        "scope": queue_scope(batch_id),
+                        "queue_control": dict(ctrl)})
+
+    @app.route("/api/knowledge/import/batches/<batch_id>/resume",
+               methods=["POST"])
+    @require_auth
+    def knowledge_resume_batch(batch_id):
+        """PCM-15: clear the pause flag (does NOT auto-start a worker —
+        resume processing by POSTing /process again; an interrupted/paused
+        job is re-executed by the existing job idempotency)."""
+        db = get_db()
+        ensure_knowledge_schema(db)
+        _recover_interrupted(db)
+        b = _batch_or_404(db, batch_id)
+        if not b:
+            return jsonify({"ok": False, "message": "بچ پیدا نشد"}), 404
+        queue_set_paused(db, queue_scope(batch_id), False)
+        ctrl = db.execute(
+            "SELECT paused, updated_at FROM knowledge_queue_control WHERE scope=?",
+            (queue_scope(batch_id),)).fetchone()
+        return jsonify({"ok": True, "paused": False,
+                        "scope": queue_scope(batch_id),
+                        "queue_control": dict(ctrl)})
+
+    @app.route("/api/knowledge/queue/summary", methods=["GET"])
+    @require_auth
+    def knowledge_queue_summary():
+        """PCM-15: live counters for the per-file queue.
+
+        All numbers are computed directly from knowledge_file_queue — the
+        single source of truth (no cached/fabricated statistics, AGENTS §2).
+        Optional ?collection_id= filter.
+        """
+        db = get_db()
+        ensure_knowledge_schema(db)
+        _recover_interrupted(db)
+        coll_id = (request.args.get("collection_id") or "").strip() or None
+        if coll_id:
+            known = db.execute(
+                "SELECT collection_id FROM knowledge_collections "
+                "WHERE collection_id=?", (coll_id,)).fetchone()
+            if not known:
+                return jsonify({"ok": False, "field": "collection_id",
+                                "message": "کالکشن پیدا نشد"}), 404
+        counters = queue_counters(db, coll_id)
+        stages = [
+            dict(r) for r in db.execute(
+                f"""SELECT stage, COUNT(*) AS files FROM knowledge_file_queue
+                   WHERE stage IS NOT NULL
+                     {'AND collection_id=?' if coll_id else ''}
+                   GROUP BY stage""",
+                (coll_id,) if coll_id else ())]
+        return jsonify({"ok": True,
+                        "collection_id": coll_id,
+                        "counters": counters,
+                        "failed_by_stage": stages})
 
     # ── Metadata (custom, versioned, three scopes — PCM-14B §3) ────────
 

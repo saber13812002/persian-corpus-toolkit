@@ -352,5 +352,47 @@ class TestWF13_Regression(WfBase):
         self.assertFalse({"server", "pct_test_support"} & new)
 
 
+class TestOnStageCallback(WfBase):
+    """PCM-15 — callback اختیاری on_stage: ترتیب قطعی stageها + last-safe
+    stage در خطا + خروجی بدون تغییر نسبت به حالت پیش‌فرض (additive)."""
+
+    EXPECTED_ORDER = ["intake", "validate", "parse", "structure",
+                      "metadata", "normalize", "quality", "export"]
+
+    def test_on_stage_order_good_file(self):
+        src = make_sample_book(os.path.join(self.dir, "book.docx"))
+        seen = []
+        doc = self.svc().process(src, on_stage=seen.append)
+        self.assertEqual(seen, self.EXPECTED_ORDER)
+        self.assertGreater(len(doc.blocks), 0)
+        self.assertTrue(doc.quality is not None)
+
+    def test_on_stage_last_safe_on_failure(self):
+        src = make_broken_docx(os.path.join(self.dir, "broken.docx"))
+        seen = []
+        with self.assertRaises(Exception):
+            self.svc().process(src, on_stage=seen.append)
+        # bad-zip در stage خودِ intake رد می‌شود → هیچ stage کامل نشده →
+        # callback اصلا صدا نمی‌خورد (last-safe stage = null)
+        self.assertEqual(seen, [])
+
+    def test_on_stage_invariance_vs_default(self):
+        """خروجی با callback باید با خروجی بدون callback یکسان باشد."""
+        src = make_sample_book(os.path.join(self.dir, "book.docx"))
+        seen = []
+        d1 = self.svc().process(src, on_stage=seen.append)
+        d2 = self.svc().process(src)
+        self.assertEqual(d1.file.sha256, d2.file.sha256)
+        self.assertEqual(len(d1.blocks), len(d2.blocks))
+        for b1, b2 in zip(d1.blocks, d2.blocks):
+            self.assertEqual(b1.raw_text, b2.raw_text)
+            self.assertEqual(b1.normalized_text, b2.normalized_text)
+        self.assertEqual(d1.work_id, d2.work_id)
+        self.assertEqual(d1.edition_id, d2.edition_id)
+        self.assertEqual(d1.quality.score, d2.quality.score)
+        self.assertEqual(d1.quality.passed, d2.quality.passed)
+        self.assertEqual(seen, self.EXPECTED_ORDER)
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

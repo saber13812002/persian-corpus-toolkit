@@ -9,12 +9,17 @@
 - بدون LLM: ENRICHED تولید نمی‌شود (enriched=null در manifest).
 - بدون DB: شناسه‌ها deterministic از metadata + sha256 (registry در فاز بعد).
 - خطا در هر stage → manifest با status=failed + error (فایل ورودی سالم می‌ماند).
+- PCM-15: `process(src, on_stage=...)` — callback اختیاری (additive) که پس از
+  هر stage کامل‌شده با نام stage صدا زده می‌شود (intake, validate, parse,
+  structure, metadata, normalize, quality, export). خروجی و رفتار پیش‌فرض
+  بدون callback دقیقاً مثل قبل است.
 """
 from __future__ import annotations
 
 import hashlib
 import os
 import time
+from typing import Callable
 
 from .export import JsonlExporter
 from .errors import FactoryError
@@ -41,24 +46,37 @@ class DocumentProcessingService:
         self.normalizer = PersianNormalizer(norm_policy)
         self.quality = QualityValidator(threshold=quality_threshold)
 
-    def process(self, src_path: str) -> ProcessedDocument:
+    def process(self, src_path: str,
+                on_stage: Callable[[str], None] | None = None
+                ) -> ProcessedDocument:
         t0 = time.time()
         started = utc_now_iso()
         file_rec = None
+
+        def _notify(stage_name: str) -> None:
+            """PCM-15 — report the last COMPLETED (safe) stage, if asked."""
+            if on_stage is not None:
+                on_stage(stage_name)
+
         try:
             # 1) intake
             file_rec = self.intake.intake(src_path)
+            _notify("intake")
             # 2/3) validate (بازپذیری + sha ثانی)
             vout = self.validator.validate(file_rec)
+            _notify("validate")
             # 4) parse
             parser: DocumentParser = make_parser(file_rec.format)
             outcome = parser.parse(file_rec)
+            _notify("parse")
             # 5) structure
             structure = extract_structure(outcome.blocks)
+            _notify("structure")
             # 6) metadata (extract-only) — نیاز به doc object دارد
             from docx import Document
             doc = Document(file_rec.path)
             metadata = MetadataExtractor().extract(doc, outcome.blocks)
+            _notify("metadata")
             # 7) normalize (RAW دست‌نخورده می‌ماند)
             semantic_issues = []
             for b in outcome.blocks:
@@ -72,6 +90,7 @@ class DocumentProcessingService:
                 if issues:
                     b.warnings.extend(issues)
                     semantic_issues.extend(issues)
+            _notify("normalize")
             # 8) quality
             quality = self.quality.validate(
                 file_rec, outcome.blocks, outcome.losses,
@@ -81,6 +100,7 @@ class DocumentProcessingService:
                 quality.passed = False
                 quality.warnings.append(
                     f"semantic-change guard tripped on {len(semantic_issues)} block(s)")
+            _notify("quality")
 
             # شناسه‌ها (بدون DB — deterministic؛ registry در فاز بعد)
             title = (metadata.fields.get("title") or None)
@@ -114,6 +134,7 @@ class DocumentProcessingService:
             run_status = "done" if quality.passed else "manual_review"
             out_dir = os.path.join(self.out_dir, file_rec.file_id)
             JsonlExporter(out_dir).export(doc_out, run_status)
+            _notify("export")
             return doc_out
 
         except FactoryError as e:

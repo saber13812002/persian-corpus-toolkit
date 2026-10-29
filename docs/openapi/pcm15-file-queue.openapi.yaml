@@ -1,0 +1,238 @@
+openapi: 3.0.3
+info:
+  title: Persian Corpus Toolkit — Knowledge Studio: Per-file Processing Queue (PCM-15)
+  version: 1.0.0
+  description: |
+    PCM-15 additive extension of the Corpus Knowledge Studio API
+    (`/api/knowledge/*`).
+
+    Adds a persistent per-file processing queue
+    (`knowledge_file_queue`, PK (collection_id, file_key)) with
+    per-file stage/attempts/last_error/duration_ms/out_dir, a
+    batch-scoped pause flag (`knowledge_queue_control`,
+    scope = `batch:<batch_id>`), and three endpoints:
+
+    - POST /api/knowledge/import/batches/{batch_id}/pause
+    - POST /api/knowledge/import/batches/{batch_id}/resume
+    - GET  /api/knowledge/queue/summary
+
+    `file_key = "f-" + sha256(file)[:8]` (the same id the upload store
+    uses: files/<sha12>/<file_key>.docx). NOTE: it is NOT the Word
+    Factory `file_id` (which is `short_id("f", sha256)`); the queue row's
+    `out_dir` column points at the factory's real output directory.
+
+    Semantics:
+    - queue row stage = last COMPLETED (safe) stage
+      (intake→validate→parse→structure→metadata→normalize→quality→export);
+      NULL = none completed (a bad-zip file fails inside intake).
+    - attempts = number of started runs (bumped per run).
+    - statuses: pending / running / succeeded / needs_review / failed.
+      `needs_review` = factory quality gate says manual_review (the batch
+      job itself is still `succeeded`).
+    - pause: the batch worker checks the flag before every file; on pause
+      the batch goes back to `planned`, the job becomes `interrupted`
+      with an error containing `[paused by user]`, and remaining files
+      stay `pending`. resume only clears the flag; re-run
+      POST .../process to continue (job idempotency re-executes the
+      interrupted job).
+    - summary counters are computed directly from knowledge_file_queue
+      (single source of truth; no cached/fabricated statistics).
+
+    Crash recovery: stale `running` queue rows (older than the stuck
+    window) are reset to `pending` on the next request, KEEPING the
+    stage column (resume anchor). Fresh rows are untouched.
+
+    Every endpoint is protected by PCM-09 session auth (cookie).
+    Responses use `{"ok": true, ...}` / `{"ok": false, "message": ..., "field"?: ...}`.
+servers:
+  - url: https://corpus.ai.ismc.ir
+    description: production (s52)
+tags:
+  - name: queue
+    description: Per-file processing queue (PCM-15)
+  - name: batches
+    description: Import batches (queue-related extension)
+security:
+  - cookieAuth: []
+paths:
+  /api/knowledge/import/batches/{batch_id}/pause:
+    post:
+      tags: [queue, batches]
+      operationId: pauseBatch
+      summary: Pause a batch queue (worker stops at the next file boundary)
+      parameters:
+        - { name: batch_id, in: path, required: true, schema: { type: string } }
+      responses:
+        "200":
+          description: Pause flag set
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  ok: { type: boolean, example: true }
+                  paused: { type: boolean, example: true }
+                  scope: { type: string, example: "batch:b-1a2b3c4d" }
+                  queue_control: { $ref: "#/components/schemas/QueueControl" }
+              example:
+                ok: true
+                paused: true
+                scope: "batch:b-1a2b3c4d"
+                queue_control: { scope: "batch:b-1a2b3c4d", paused: 1,
+                                  updated_at: "2026-10-29T16:00:00Z" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+  /api/knowledge/import/batches/{batch_id}/resume:
+    post:
+      tags: [queue, batches]
+      operationId: resumeBatch
+      summary: Clear the pause flag (does NOT auto-start; POST .../process to continue)
+      parameters:
+        - { name: batch_id, in: path, required: true, schema: { type: string } }
+      responses:
+        "200":
+          description: Pause flag cleared
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  ok: { type: boolean, example: true }
+                  paused: { type: boolean, example: false }
+                  scope: { type: string, example: "batch:b-1a2b3c4d" }
+                  queue_control: { $ref: "#/components/schemas/QueueControl" }
+              example:
+                ok: true
+                paused: false
+                scope: "batch:b-1a2b3c4d"
+                queue_control: { scope: "batch:b-1a2b3c4d", paused: 0,
+                                  updated_at: "2026-10-29T16:05:00Z" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+  /api/knowledge/queue/summary:
+    get:
+      tags: [queue]
+      operationId: queueSummary
+      summary: Live queue counters (computed straight from the queue table)
+      parameters:
+        - name: collection_id
+          in: query
+          required: false
+          schema: { type: string }
+          description: Optional filter; unknown collection -> 404
+      responses:
+        "200":
+          description: Counters
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  ok: { type: boolean, example: true }
+                  collection_id: { type: [string, "null"], example: null }
+                  counters: { $ref: "#/components/schemas/QueueCounters" }
+                  failed_by_stage:
+                    type: array
+                    description: Failed rows grouped by their last safe stage
+                    items:
+                      type: object
+                      properties:
+                        stage: { type: string, example: parse }
+                        files: { type: integer, example: 1 }
+              example:
+                ok: true
+                collection_id: null
+                counters:
+                  total: 2
+                  pending: 0
+                  running: 0
+                  succeeded: 1
+                  needs_review: 0
+                  failed: 1
+                  failed_with_safe_stage: 0
+                  attempts_total: 2
+                failed_by_stage: []
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+  /api/knowledge/import/batches/{batch_id}:
+    get:
+      tags: [batches]
+      operationId: batchDetail
+      summary: Batch detail (PCM-15 adds queue rows + pause state)
+      parameters:
+        - { name: batch_id, in: path, required: true, schema: { type: string } }
+      responses:
+        "200":
+          description: Batch + documents + jobs + queue
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  ok: { type: boolean, example: true }
+                  batch: { type: object, description: knowledge_import_batches row }
+                  documents: { type: array, items: { type: object } }
+                  jobs: { type: array, items: { type: object } }
+                  queue:
+                    type: array
+                    description: knowledge_file_queue rows of the batch's collection
+                    items: { $ref: "#/components/schemas/QueueRow" }
+                  paused: { type: boolean }
+                  queue_control:
+                    oneOf:
+                      - { $ref: "#/components/schemas/QueueControl" }
+                      - { type: "null" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+components:
+  securitySchemes:
+    cookieAuth:
+      type: apiKey
+      in: cookie
+      name: pct_session
+  schemas:
+    QueueRow:
+      type: object
+      properties:
+        file_key: { type: string, example: "f-0a1b2c3d" }
+        document_id: { type: string, example: "d-0a1b2c3d" }
+        file_name: { type: string, example: "book.docx" }
+        sha256: { type: string, example: "0a1b2c3d…" }
+        status: { type: string, enum: [pending, running, succeeded, needs_review, failed] }
+        stage:
+          type: [string, "null"]
+          enum: [intake, validate, parse, structure, metadata, normalize, quality, export, null]
+          description: Last COMPLETED (safe) stage; null = none completed
+        attempts: { type: integer, example: 1 }
+        last_error: { type: [string, "null"], example: "FormatDetectionError: bad zip" }
+        stage_started_at: { type: [string, "null"] }
+        finished_at: { type: [string, "null"] }
+        duration_ms: { type: [integer, "null"] }
+        out_dir:
+          type: [string, "null"]
+          description: Factory output dir relative to the knowledge data dir (posix)
+          example: "out/f-271a413b"
+        created_at: { type: string }
+        updated_at: { type: string }
+    QueueControl:
+      type: object
+      properties:
+        scope: { type: string, example: "batch:b-1a2b3c4d" }
+        paused: { type: integer, enum: [0, 1] }
+        updated_at: { type: string }
+    QueueCounters:
+      type: object
+      properties:
+        total: { type: integer }
+        pending: { type: integer }
+        running: { type: integer }
+        succeeded: { type: integer }
+        needs_review: { type: integer }
+        failed: { type: integer }
+        failed_with_safe_stage: { type: integer }
+        attempts_total: { type: integer }
+  responses:
+    Unauthorized:
+      description: Missing/invalid session
+    NotFound:
+      description: Unknown batch / collection
