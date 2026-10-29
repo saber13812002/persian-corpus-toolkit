@@ -129,6 +129,34 @@ python -m factory.cli dump-summary ../wf-out/book-dump        # یا با --json
 - مسیر legacy (اجرای مستقیم .docx) بدون تغییر است.
 - قرارداد کامل: [PCM-14C.3-DUMP-CONTRACT.md](PCM-14C.3-DUMP-CONTRACT.md).
 
+### پذیرش عملی (PCM-14C.4)
+
+اسکریپت پذیرش عملی کل زنجیره را روی CLI واقعی اجرا می‌کند (ایزوله، بدون DB):
+
+```bash
+python deploy/pcm14c4_dump_acceptance.py <book.docx> [workdir]
+```
+
+مراحل: WF دو بار روی یک ورودی → `make-dump` (با `--input`) → `validate-dump` →
+`dump-summary` → کپی Dump به مسیر دیگر + اعتبارسنجی دوباره → خراب کردن عمدی
+یک کاراکتر `blocks.jsonl` → اعتبارسنج باید INVALID بدهد (exit 1) → دگرسازی
+مانیفست به m-1 + ساخت Dump (باید VALID با warning سیاست ثبت‌نشده) → مقایسه
+دو اجرا برای `file_id`/`blocks_hash`/hash خروجی‌ها/پایداری بایتی و ساختاری.
+
+نتیجه‌ی اجرا روی `namous.docx` (2026-10-29، روی ویندوز):
+
+- WF run1/run2: exit 0 / exit 0 — `file_id` هر دو `f-4fe7c707`
+- `make-dump`: exit 0 — `sha256_source: rehashed` (فایل اصلی بازخوردگیری شد)
+- `validate-dump`: VALID — 0 خطا، 0 هشدار
+- `dump-summary`: 69 بلوک، کیفیت ok (score 1.0)، manifest m-2، schema wf-schema-1، norm n-1
+- کپی + اعتبارسنجی: VALID (مسیر مستقل)
+- خرابی عمدی: INVALID — `sha256_mismatch:blocks.jsonl` — exit 1
+- سازگاری m-1: VALID + warning `normalizer_policy not recorded`
+- تکرارپذیری: 12/12 فیلد مطابق (file/work/edition/volume/versions/blocks_hash/counts + sha بایتی + ساختاری manifest/document + input sha)
+
+SHA-256 ورودی: `de021889780e0124...` (69 بلوک، 5260 کاراکتر). خروجی‌های
+acceptance در `wf-out/pcm14c4/acceptance_results.json` (gitignored) ثبت شد.
+
 ## محدودیت‌های V0.1 (صریح)
 
 - DOC (Word 97-2003): فقط تشخیص + اعلام عدم پشتیبانی.

@@ -98,6 +98,7 @@ cd backend && python -m unittest test_api test_projects test_dashboard \
 | **PCM-12.3** اصلاح ریشه‌ای test isolation (F-01) + آزمون امنیتی Grafana | ✅ (test-harness + docs؛ بدون deploy) |
 | **PCM-14B.3** Word Studio + پایگاه دانش + Word Factory (CLI) | ✅ (روی s52؛ 40+24 تست) |
 | **PCM-14C.3** قرارداد رسمی Dump `d-1` + manifest `m-2` (ثبت policy نرمال‌سازی) + CLI dump | ✅ (26 تست D + 129 کامل؛ بدون deploy) |
+| **PCM-14C.4** پذیرش عملی قرارداد Dump روی CLI واقعی (`deploy/pcm14c4_dump_acceptance.py`) | ✅ (ACCEPTANCE PASS؛ بدون deploy) |
 
 گزارش‌ها: `گزارش-PCM-0X.md` (۱۱ بخش: وضعیت قبل، طراحی، مهاجرت، فایل/API، تست،
 نتیجه production، SHA+لینک، git status، بکاپ/rollback، موارد باقی‌مانده، روش تست دستی).

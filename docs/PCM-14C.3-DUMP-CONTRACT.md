@@ -356,4 +356,28 @@ python -m unittest test_api test_projects test_dashboard test_knowledge_api test
 
 - `file_id` / `work_id` / `edition_id` / `blocks_hash` بین دو اجرا **دقیقاً یکسان**؛
 - `blocks.jsonl` و `quality-report.json` **بایت‌به‌بایت یکسان**؛
-- `manifest.json`، `document.json` و `dump-manifest.json` **ساختاریا یکسان** (فقط timestamps، مسیرها و hashهای پویای آنها تافاوت دارند)؛
+- `manifest.json`، `document.json` و `dump-manifest.json` **ساختاریا یکسان** (فقط timestamps، مسیرها و hashهای پویای آنها تفاوت دارند)؛
+
+## 12. پذیرش عملی روی CLI واقعی (PCM-14C.4)
+
+علاوه بر آزمون‌های D01–D15، کل زنجیره روی CLI واقعی (نه import مستقیم) با
+اسکریپت پذیرش تکرارپذیر اجرا شده:
+
+```bash
+python deploy/pcm14c4_dump_acceptance.py <book.docx> [workdir]
+# خروجی: <workdir>/acceptance_results.json + ACCEPTANCE PASS/FAIL
+```
+
+سناریوهای عملی (اجرا شده 2026-10-29 روی `namous.docx`، ویندوز):
+
+1. WF دو بار روی یک ورودی → `file_id` هر دو `f-4fe7c707` (exit 0/0)؛
+2. `make-dump --input` → `sha256_source: rehashed` (بازخوردگیری فایل اصلی)؛
+3. `validate-dump` → VALID (0 خطا، 0 هشدار)؛
+4. `dump-summary` → 69 بلوک، کیفیت ok (1.0)، m-2 / wf-schema-1 / n-1؛
+5. کپی Dump به مسیر مستقل → VALID (وابستگی به محل WF/ورودی ندارد)؛
+6. خرابی عمدی یک کاراکتر `blocks.jsonl` → INVALID + `sha256_mismatch:blocks.jsonl` (exit 1)؛
+7. دگرسازی مانیفست به m-1 → Dump VALID با warning `normalizer_policy not recorded` (policy/blocks_hash null)؛
+8. مقایسه run1/run2: 12/12 فیلد مطابق (file/work/edition/volume/versions/`blocks_hash`/counts + hash بایتی `blocks.jsonl`/`quality-report.json` + ساختاری manifest/document + SHA ورودی).
+
+نتیجه: `ACCEPTANCE PASS`. مدارک: `wf-out/pcm14c4/acceptance_results.json` (gitignored).
+این پذیرش هیچ فایل اصلی، خروجی تاریخی یا داده production را لمس نکرده است.

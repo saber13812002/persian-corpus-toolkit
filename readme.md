@@ -16,7 +16,7 @@
 | 4 | سایت‌های نام‌دار با فیلدهای آماده (`tasnim.hamtaa.org` seed شده) | ✅ فعال |
 | 5 | داشبورد آنلاین `corpus.ai.ismc.ir/dashboard` (تب «پروژه‌ها» + مرور صفحه‌به‌صفحه + جستجو + Previous/Next + احراز هویت رمز) | ✅ فعال (PCM-04/05/09) |
 | 6 | **Word Studio + پایگاه دانش** (PCM-14B): آپلود DOCX ← تبدیل به بلوک/JSON ← ساختار/کیفیت ← job queue با retry + استودیو فارسی `corpus.ai.ismc.ir/dashboard/studio.html` | ✅ فعال (PCM-14B.3) |
-| 7 | **Word Factory V0.1 + قرارداد Dump `d-1`** (PCM-14C.3): خط لوله DOCX→JSONL ایزوله (policy n-1 ثبت‌شده در manifest m-2) + Dump خوداعتبارسنج و قابل حمل (make-dump/validate-dump/dump-summary) — بدون DB/ES/endpoint | ✅ فعال (26 تست D) |
+| 7 | **Word Factory V0.1 + قرارداد Dump `d-1`** (PCM-14C.3/14C.4): خط لوله DOCX→JSONL ایزوله (policy n-1 ثبت‌شده در manifest m-2) + Dump خوداعتبارسنج و قابل حمل (make-dump/validate-dump/dump-summary) + پذیرش عملی روی CLI واقعی — بدون DB/ES/endpoint | ✅ فعال (26 تست D + پذیرش عملی) |
 | 8 | پایپلاین پیکره + دیتaset + آپلود HuggingFace | ✅ در دسترس |
 | 9 | ایندکسر RAG | 🚧 در دست توسعه |
 
@@ -359,6 +359,7 @@ sqlite3 backend/thesaurus.db "SELECT COUNT(*) FROM project_pages"
 | **PCM-14B.2** Knowledge Base: schema v1→v2 + store پایدار (data/knowledge) | ✅ (روی s52) |
 | **PCM-14B.3** API Knowledge + Word Studio (studio.html) + job queue + deploy | ✅ (روی s52، ۴۰ تست KB + 103 کل) |
 | **PCM-14C.3** قرارداد رسمی Dump `d-1` + manifest `m-2` (ثبت policy نرمال‌سازی) + CLI make-dump/validate-dump/dump-summary | ✅ (26 تست D + 129 کل — بدون تغییر production، بدون deploy) |
+| **PCM-14C.4** پذیرش عملی قرارداد Dump روی CLI واقعی (`deploy/pcm14c4_dump_acceptance.py`: WF×2 + make/validate/summary + کپی + خرابی عمدی + سازگاری m-1 + تکرارپذیری 12/12) | ✅ (ACCEPTANCE PASS — بدون تغییر production، بدون deploy) |
 
 جزئیات معماری و نقشه‌ی راه نسخه‌ای (V0.1..V1.0): مستندات PCM-12 در [docs/](docs/) — `PCM-12-AUDIT.md` (وضعیت واقعی)، `PCM-12-ARCHITECTURE.md` (طراحی S2..S9)، `PCM-12-PRD.md` (الزامات)، `PCM-12-ROADMAP.md` (ترتیب اجرا)، `PCM-12-DATA-CONTRACTS.md` (schema/API/Prompt)، `PCM-12-AGENT-HANDOFF.md` (تصمیم‌ها و مرزها)، `PCM-12-ACCEPTANCE-REPORT.md` (گزارش آزمون پذیرش ۲۰ سناریو + ممیزی دسترسی s52)، `PCM-12-ACCEPTANCE-CHECKLIST.md` (چک‌لیست تأیید کاربری با Chrome) و `PCM-12.3-TEST-ISOLATION.md` (رفع ریشه‌ای F-01 + ممیزی امنیتی Grafana).
 
