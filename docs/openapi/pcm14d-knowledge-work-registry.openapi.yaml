@@ -1,6 +1,6 @@
 openapi: 3.0.3
 info:
-  title: Persian Corpus Toolkit — Knowledge Studio: Work/Edition/Volume Registry (PCM-14D)
+  title: "Persian Corpus Toolkit — Knowledge Studio: Work/Edition/Volume Registry (PCM-14D)"
   version: 1.0.0
   description: |
     PCM-14D additive extension of the Corpus Knowledge Studio API
@@ -707,7 +707,7 @@ components:
       properties:
         field_id: { type: string, pattern: "^mf-[0-9a-f]{8}$" }
         scope: { type: string, enum: [collection, batch, document, work, edition, volume] }
-        collection_id: { type: string, description: '__global__' for entity scopes }
+        collection_id: { type: string, description: "__global__ for entity scopes" }
         field_key: { type: string }
         display_name: { type: string }
         data_type: { type: string, enum: [string, number, boolean, date, url, json, enum] }
@@ -727,9 +727,9 @@ components:
         collection_id: { type: string }
         batch_id: { type: string }
         document_id: { type: string }
-        work_id: { type: string, description: "" for non-entity scopes }
-        edition_id: { type: string, description: "" for non-entity scopes }
-        volume_id: { type: string, description: "" for non-entity scopes }
+        work_id: { type: string, description: "empty for non-entity scopes" }
+        edition_id: { type: string, description: "empty for non-entity scopes" }
+        volume_id: { type: string, description: "empty for non-entity scopes" }
         value: { type: [string, "null"] }
         source: { type: string, enum: [user] }
         version: { type: integer }

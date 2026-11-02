@@ -50,11 +50,11 @@ BACKUP:  /home/saber/backups/  (thesaurus-<TS>.db + pct-deploy-<TS>.tar.gz)
 ```bash
 cd backend && python -m unittest test_api test_projects test_dashboard \
   test_knowledge_api test_word_factory test_dump test_work_registry test_queue \
-  test_corpus_builder test_studio_api -v \
-  # 182 تست (رگرسیون کامل)
+  test_corpus_builder test_studio_api test_api_contract -v \
+  # 200 تست (رگرسیون کامل)
 ```
 
-- **182 تست**: `test_api.py` (8، فاز۱/۲ + پروژه)، `test_projects.py` (9، جریان CRUD)،
+- **200 تست**: `test_api.py` (8، فاز۱/۲ + پروژه)، `test_projects.py` (9، جریان CRUD)،
   `test_dashboard.py` (22، auth A01-A08 + داشبورد D01-D07)، `test_knowledge_api.py`
   (40، KB-01..KB-14 — PCM-14B)، `test_word_factory.py` (27، WF-01..WF-13 + on_stage
   PCM-15)، `test_dump.py` (26، D01..D15 — قرارداد Dump `d-1`، PCM-14C.3)،
@@ -62,7 +62,8 @@ cd backend && python -m unittest test_api test_projects test_dashboard \
   `test_queue.py` (9، Q-01..Q-08 — صف پایدار فایل، PCM-15)،
   `test_corpus_builder.py` (24، C-01..C-16 — پیکره‌ساز `c-1`، PCM-16)،
   `test_studio_api.py` (7، S-01..S-04 — استودیو: فهرست بچ‌ها + paused +
-  counters + رجیستری اسناد، PCM-17).
+  counters + رجیستری اسناد، PCM-17)، `test_api_contract.py` (18،
+  CT-01..CT-06 — قرارداد OpenAPI spec ↔ app زنده، PCM-19).
 - **PCM-12.3 (رفع F-01):** هر سه ماژول اول `import pct_test_support` می‌کنند که
   یک DB موقت **مشترک** می‌سازد و `PCT_DB`/`PCT_DASHBOARD_PASSWORD` را **قبل از**
   `import server` ست می‌کند؛ سپس هر کلاس در `setUp` با
@@ -88,6 +89,9 @@ cd backend && python -m unittest test_api test_projects test_dashboard \
 - `knowledge_api.py` — Work Registry (PCM-14D): جدول‌های `knowledge_works`/
   `knowledge_editions`/`knowledge_volumes` + scopeهای `work/edition/volume` متادیتا
   + `/api/knowledge/metadata/resolve` (سند: `docs/PCM-14D-WORK-REGISTRY.md`).
+- `docs/openapi/` — مشخصه‌های OpenAPI (PCM-14D + PCM-15؛ 19 operation) + راهنمای
+  اپراتور (PCM-19) · `.gitlab-ci.yml` — CI فقط تست (رگرسیون 200 + چک OpenAPI +
+  نمونه کلاینت؛ **بدون job deploy**؛ `deploy/pcm19_openapi_check.py`).
 - داشبورد: HTML+JS تک‌صفحه‌ای بدون framework در `dashboard/index.html`؛ همه‌ی
   fetchها `credentials: same-origin` و 401 → overlay ورود.
 
@@ -113,6 +117,8 @@ cd backend && python -m unittest test_api test_projects test_dashboard \
 | **PCM-15** صف پایدار پردازش فایل: `knowledge_file_queue`/`knowledge_queue_control` + `on_stage` factory + pause/resume/summary + ریکاوری با حفظ stage + سازگاری Dump d-1 | ✅ (9 تست Q + 151 کامل؛ بدون deploy) |
 | **PCM-16** پیکره‌ساز از Dumpهای معتبر d-1: قرارداد `c-1` — جریان‌های جدا RAW/NORMALIZED + provenance + dedup + آرشیو قطعی + پکیج محلی HF + CLI `build-corpus` (بدون DB/ES/شبکه) | ✅ (24 تست C + 175 کامل؛ بدون deploy؛ سند: docs/PCM-16-CORPUS-BUILDER.md) |
 | **PCM-17** تکمیل UI استودیو: کارت صف/بچ‌ها (شمارنده‌های زنده + process/pause/resume) + کارت رجیستری اثر‌ها + `GET /api/knowledge/import/batches` (افزایشی) + ستون رجیستری اسناد | ✅ (7 تست S + 182 کامل؛ بدون deploy؛ سند: docs/PCM-17-STUDIO-UI.md) |
+| **PCM-18** ممیزی observability روی s52: اسکریپت خواندنی + گزارش (اجرای s52 مسدود — host unreachable) | ✅ (اسکریپت + گزارش؛ بدون deploy؛ اجرای s52 در انتظار دسترسی) |
+| **PCM-19** قرارداد API: تست‌های CT-01..CT-06 (200 کامل) + به‌روزرسانی README/AGENTS/OpenAPI + GitLab CI test-only + نمونه کلاینت REST + چک‌کن OpenAPI | ✅ (18 تست CT؛ بدون deploy؛ سند: docs/openapi/README.md) |
 
 گزارش‌ها: `گزارش-PCM-0X.md` (۱۱ بخش: وضعیت قبل، طراحی، مهاجرت، فایل/API، تست،
 نتیجه production، SHA+لینک، git status، بکاپ/rollback، موارد باقی‌مانده، روش تست دستی).
