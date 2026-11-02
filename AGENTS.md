@@ -50,17 +50,19 @@ BACKUP:  /home/saber/backups/  (thesaurus-<TS>.db + pct-deploy-<TS>.tar.gz)
 ```bash
 cd backend && python -m unittest test_api test_projects test_dashboard \
   test_knowledge_api test_word_factory test_dump test_work_registry test_queue \
-  test_corpus_builder -v \
-  # 175 تست (رگرسیون کامل)
+  test_corpus_builder test_studio_api -v \
+  # 182 تست (رگرسیون کامل)
 ```
 
-- **175 تست**: `test_api.py` (8، فاز۱/۲ + پروژه)، `test_projects.py` (9، جریان CRUD)،
+- **182 تست**: `test_api.py` (8، فاز۱/۲ + پروژه)، `test_projects.py` (9، جریان CRUD)،
   `test_dashboard.py` (22، auth A01-A08 + داشبورد D01-D07)، `test_knowledge_api.py`
   (40، KB-01..KB-14 — PCM-14B)، `test_word_factory.py` (27، WF-01..WF-13 + on_stage
   PCM-15)، `test_dump.py` (26، D01..D15 — قرارداد Dump `d-1`، PCM-14C.3)،
   `test_work_registry.py` (10، RD-01..RD-07 — Work Registry، PCM-14D)،
   `test_queue.py` (9، Q-01..Q-08 — صف پایدار فایل، PCM-15)،
-  `test_corpus_builder.py` (24، C-01..C-16 — پیکره‌ساز `c-1`، PCM-16).
+  `test_corpus_builder.py` (24، C-01..C-16 — پیکره‌ساز `c-1`، PCM-16)،
+  `test_studio_api.py` (7، S-01..S-04 — استودیو: فهرست بچ‌ها + paused +
+  counters + رجیستری اسناد، PCM-17).
 - **PCM-12.3 (رفع F-01):** هر سه ماژول اول `import pct_test_support` می‌کنند که
   یک DB موقت **مشترک** می‌سازد و `PCT_DB`/`PCT_DASHBOARD_PASSWORD` را **قبل از**
   `import server` ست می‌کند؛ سپس هر کلاس در `setUp` با
@@ -110,6 +112,7 @@ cd backend && python -m unittest test_api test_projects test_dashboard \
 | **PCM-14D** Work Registry: اثر←نسخه←جلد + scopeهای work/edition/volume + resolve + OpenAPI | ✅ (10 تست RD + 139 کامل؛ بدون deploy) |
 | **PCM-15** صف پایدار پردازش فایل: `knowledge_file_queue`/`knowledge_queue_control` + `on_stage` factory + pause/resume/summary + ریکاوری با حفظ stage + سازگاری Dump d-1 | ✅ (9 تست Q + 151 کامل؛ بدون deploy) |
 | **PCM-16** پیکره‌ساز از Dumpهای معتبر d-1: قرارداد `c-1` — جریان‌های جدا RAW/NORMALIZED + provenance + dedup + آرشیو قطعی + پکیج محلی HF + CLI `build-corpus` (بدون DB/ES/شبکه) | ✅ (24 تست C + 175 کامل؛ بدون deploy؛ سند: docs/PCM-16-CORPUS-BUILDER.md) |
+| **PCM-17** تکمیل UI استودیو: کارت صف/بچ‌ها (شمارنده‌های زنده + process/pause/resume) + کارت رجیستری اثر‌ها + `GET /api/knowledge/import/batches` (افزایشی) + ستون رجیستری اسناد | ✅ (7 تست S + 182 کامل؛ بدون deploy؛ سند: docs/PCM-17-STUDIO-UI.md) |
 
 گزارش‌ها: `گزارش-PCM-0X.md` (۱۱ بخش: وضعیت قبل، طراحی، مهاجرت، فایل/API، تست،
 نتیجه production، SHA+لینک، git status، بکاپ/rollback، موارد باقی‌مانده، روش تست دستی).

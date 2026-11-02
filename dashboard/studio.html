@@ -168,6 +168,23 @@
   .meta-row input { flex: 1; }
   .compat-flag { display: inline-flex; align-items: center; gap: 6px; }
 
+  /* ── PCM-17: queue (batches + live counters) + work registry ── */
+  .q-strip { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 12px; }
+  .q-chip { background: var(--panel); border: 1px solid var(--border); border-radius: var(--r-sm); padding: 6px 10px; font-size: 11px; color: var(--dim); display: inline-flex; gap: 6px; align-items: center; }
+  .q-chip b { color: var(--text); font-size: 13px; font-weight: 700; }
+  .q-chip.ok b { color: var(--green); }
+  .q-chip.err b { color: var(--red); }
+  .q-chip.warn b { color: var(--orange); }
+  .q-chip.info b { color: var(--accent); }
+  .batch-actions { display: flex; gap: 4px; flex-wrap: wrap; }
+  .reg-list { display: flex; flex-direction: column; gap: 6px; }
+  .reg-item { display: block; width: 100%; text-align: right; background: var(--panel); border: 1px solid var(--border); border-radius: var(--r-sm); padding: 8px 10px; cursor: pointer; color: var(--text); font-size: 12px; }
+  .reg-item:hover { border-color: var(--accent); }
+  .reg-item .r-title { font-weight: 600; font-size: 12px; }
+  .reg-item .r-meta { color: var(--dim); font-size: 11px; margin-top: 3px; display: flex; gap: 8px; flex-wrap: wrap; }
+  .reg-form { display: flex; flex-direction: column; gap: 6px; margin-top: 10px; }
+  .reg-form input { padding: 6px 10px; }
+
   /* ── responsive ── */
   @media (max-width: 1100px) {
     .studio { flex-direction: column; overflow-y: auto; height: auto; min-height: 100vh; }
@@ -291,6 +308,13 @@
       <!-- ═══ PCM-14B: Jobs فعال (نمایش زنده) ═══ -->
       <div id="jobsPane"></div>
 
+      <!-- ═══ PCM-17: صف پردازش (batchها + شمارنده‌های زنده) ═══ -->
+      <div class="card" id="queueCard">
+        <h3><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 6h16M4 12h10M4 18h16"/></svg> صف پردازش</h3>
+        <div id="qStrip" class="q-strip"></div>
+        <div id="qBody"><div class="t2" style="color:var(--dim);font-size:12px">در حال بارگذاری…</div></div>
+      </div>
+
       <!-- ═══ PCM-14B: کتابخانهٔ Word ═══ -->
       <div class="card" id="docsCard">
         <h3><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 19V5a2 2 0 0 1 2-2h13v18H6a2 2 0 0 1-2-2Zm0 0a2 2 0 0 1 2-2h13"/></svg> کتابخانهٔ Word</h3>
@@ -343,6 +367,12 @@
           <button type="button" class="btn btn-sm btn-ghost" id="metaFieldBtn" style="margin-inline-start:auto">فیلد جدید</button>
         </h3>
         <div id="stMetaBody"><div class="t2" style="color:var(--dim);font-size:12px">فیلدی تعریف نشده است.</div></div>
+      </div>
+      <div class="card">
+        <h3><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="m12 2 9 5-9 5-9-5 9-5Zm-9 10 9 5 9-5m-18 5 9 5 9-5"/></svg> رجیستری آثار
+          <button type="button" class="btn btn-sm btn-ghost" id="workNewBtn" style="margin-inline-start:auto">اثر جدید</button>
+        </h3>
+        <div id="stWorksBody"><div class="t2" style="color:var(--dim);font-size:12px">در حال بارگذاری…</div></div>
       </div>
       <div class="card">
         <h3><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><ellipse cx="12" cy="5" rx="8" ry="3"/><path d="M4 5v14c0 1.7 3.6 3 8 3s8-1.3 8-3V5M4 12c0 1.7 3.6 3 8 3s8-1.3 8-3"/></svg> سازگاری Elasticsearch</h3>
@@ -465,6 +495,42 @@
   </div>
 </div>
 
+<!-- ══ Modal: اثر جدید (PCM-17 — رجیستری آثار) ══ -->
+<div class="modal-overlay" id="workModal" role="dialog" aria-modal="true" aria-labelledby="workTitle">
+  <div class="modal">
+    <h2 id="workTitle">
+      <svg class="icon icon-lg" viewBox="0 0 24 24" aria-hidden="true"><path d="m12 2 9 5-9 5-9-5 9-5Zm-9 10 9 5 9-5m-18 5 9 5 9-5"/></svg>
+      اثر جدید
+      <button type="button" class="x-btn" id="workClose" aria-label="بستن">
+        <svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M18 6 6 18M6 6l12 12"/></svg>
+      </button>
+    </h2>
+    <form id="workForm">
+      <div class="form-row">
+        <label for="wTitle">عنوان</label>
+        <input type="text" class="input" id="wTitle" maxlength="200" required>
+      </div>
+      <div class="form-row">
+        <label for="wAuthor">نویسنده (اختیاری)</label>
+        <input type="text" class="input" id="wAuthor" maxlength="200">
+      </div>
+      <div class="form-row">
+        <label for="wSubject">موضوع (اختیاری)</label>
+        <input type="text" class="input" id="wSubject" maxlength="120">
+      </div>
+      <div class="form-row">
+        <label for="wLang">زبان (اختیاری، مثلا fa)</label>
+        <input type="text" class="input" id="wLang" maxlength="16" direction="ltr" style="text-align:left">
+      </div>
+      <div class="form-err" id="workErr" role="alert"></div>
+      <div class="form-actions">
+        <button type="submit" class="btn btn-primary">ذخیره اثر</button>
+        <button type="button" class="btn btn-ghost" id="workCancel">انصراف</button>
+      </div>
+    </form>
+  </div>
+</div>
+
 <!-- ══ Login overlay ══ -->
 <div id="loginOverlay">
   <form class="login-box" id="loginForm">
@@ -499,6 +565,7 @@ const state = {
   docs: [],
   jobs: [],
   _jobTimer: null,
+  queueTimer: null,
 };
 
 /* ── helpers ── */
@@ -666,6 +733,9 @@ async function openCollection(id) {
   state.docTab = 'overview';
   $('docDetailCard').style.display = 'none';
   setHash(id);
+  stopQueuePolling();
+  REG_STATE.workId = null;
+  REG_STATE.editionId = null;
   markActive();
   await renderDetail();
   if (window.innerWidth <= 1100) $('workspace').scrollIntoView({ behavior: 'smooth' });
@@ -720,6 +790,8 @@ async function renderDetail() {
     renderDocs();
     renderMeta();
     renderCompat();
+    loadQueue();
+    loadRegistry();
   } catch (e) {
     ws.style.display = 'none';
     $('wsEmpty').style.display = 'block';
@@ -745,18 +817,19 @@ function renderStructure(c) {
     row('Index فعلی', c.current_index_build || '<span style="color:var(--dim)">هنوز buildی ندارد</span>');
   const bb = $('stBuildsBox');
   if (!c.index_builds.length) {
-    bb.innerHTML = '<div class="empty" style="padding:16px"><div class="t2">هنوز ایندکس آزمایشی ساخته نشده است.<br>این قابلیت در PCM-14D فعال می‌شود.</div></div>';
+    bb.innerHTML = '<div class="empty" style="padding:16px"><div class="t2">هنوز ایندکس آزمایشی ساخته نشده است.</div></div>';
   } else {
     bb.innerHTML = '<table class="docs-table"><thead><tr><th>Build</th><th>Index</th><th>Chunk</th><th>وضعیت</th></tr></thead><tbody>' +
       c.index_builds.map((b) => '<tr><td class="c-slug">' + escHtml(b.iv_id) + '</td><td class="c-slug">' + escHtml(b.es_index) + '</td><td>' + faNum(b.chunk_count) + '</td><td>' + escHtml(b.status) + '</td></tr>').join('') +
       '</tbody></table>';
   }
   $('stRoadmap').innerHTML =
-    '<div class="step done"><span class="dot"></span><span><b>PCM-14A</b> — مدیریت کالکشن‌ها و ساختار پایه</span></div>' +
-    '<div class="step done"><span class="dot"></span><span><b>PCM-14B</b> — کتابخانه Word (بارگذاری، پردازش، کیفیت، متادیتا، Jobs)</span></div>' +
-    '<div class="step todo"><span class="dot"></span><span><b>PCM-14C</b> — طراحی و تطبیق Schema</span></div>' +
-    '<div class="step todo"><span class="dot"></span><span><b>PCM-14D</b> — ایندکس Elasticsearch + نسخه‌بندی</span></div>' +
-    '<div class="step todo"><span class="dot"></span><span><b>PCM-14E</b> — جستجو و نسخه‌های ایندکس</span></div>';
+    '<div class="step done"><span class="dot"></span><span><b>PCM-14A/B</b> — کالکشن‌ها + کتابخانه Word + متادیتا + Jobs</span></div>' +
+    '<div class="step done"><span class="dot"></span><span><b>PCM-14C.3</b> — قرارداد رسمی Dump d-1 (CLI آفلاین)</span></div>' +
+    '<div class="step done"><span class="dot"></span><span><b>PCM-14D</b> — رجیستری اثر/ویرایش/جلد + resolve</span></div>' +
+    '<div class="step done"><span class="dot"></span><span><b>PCM-15</b> — صف ماندگار پردازش (توقف/ادامه/تکرار)</span></div>' +
+    '<div class="step done"><span class="dot"></span><span><b>PCM-16</b> — پیکره‌ساز از Dumpهای d-1 (CLI آفلاین)</span></div>' +
+    '<div class="step done"><span class="dot"></span><span><b>PCM-17</b> — مدیریت صف + رجیستری در استودیو (این فاز)</span></div>';
 }
 
 /* ── create ── */
@@ -862,17 +935,19 @@ async function renderDocs() {
       return;
     }
     body.innerHTML =
-      '<table class="docs-table"><thead><tr><th>فایل</th><th>وضعیت</th><th>بلوک</th><th>کیفیت</th><th>SHA-256</th></tr></thead><tbody>' +
-      state.docs.map((d) =>
-        '<tr class="clickable" data-docid="' + escHtml(d.document_id) + '" title="برای جزئیات کلیک کنید">' +
+      '<table class="docs-table"><thead><tr><th>فایل</th><th>وضعیت</th><th>بلوک</th><th>کیفیت</th><th>رجیستری</th><th>SHA-256</th></tr></thead><tbody>' +
+      state.docs.map((d) => {
+        const reg = [d.work_id, d.edition_id, d.volume_id].filter(Boolean).map(escHtml).join(' / ');
+        return '<tr class="clickable" data-docid="' + escHtml(d.document_id) + '" title="برای جزئیات کلیک کنید">' +
         '<td>' + escHtml(d.file_name) +
           (d.error ? '<div class="row-err" title="' + escHtml(d.error) + '">⚠ ' + escHtml(d.error) + '</div>' : '') +
         '</td>' +
         '<td>' + docStatusBadge(d.status) + '</td>' +
         '<td>' + (d.blocks_count ? faNum(d.blocks_count) : '—') + '</td>' +
         '<td>' + (d.quality_status ? '<span class="c-slug">' + escHtml(d.quality_status) + '</span>' : '—') + '</td>' +
-        '<td class="sha-cell">' + escHtml((d.sha256 || '').slice(0, 12)) + '</td></tr>'
-      ).join('') + '</tbody></table>';
+        '<td class="c-slug" style="font-size:10px">' + (reg || '—') + '</td>' +
+        '<td class="sha-cell">' + escHtml((d.sha256 || '').slice(0, 12)) + '</td></tr>';
+      }).join('') + '</tbody></table>';
     body.querySelectorAll('tr.clickable').forEach((tr) => {
       tr.addEventListener('click', () => openDocument(tr.getAttribute('data-docid')));
     });
@@ -1266,6 +1341,274 @@ async function renderCompat() {
   }
 }
 
+/* ═══════ PCM-17: صف پردازش (batches + شمارنده‌های زنده) ═══════ */
+const BATCH_STATUS_FA = {
+  planned: ['برنامه‌ریز', 'dim'],
+  processing: ['در حال پردازش', 'info'],
+  done: ['انجام‌شده', 'ok'],
+};
+function batchStatusBadge(status) {
+  const [fa, cls] = BATCH_STATUS_FA[status] || [status, 'dim'];
+  return '<span class="badge ' + cls + '">' + escHtml(fa) + '</span>';
+}
+function startQueuePolling() {
+  if (state.queueTimer) return;
+  state.queueTimer = setInterval(() => { loadQueue(); }, 3000);
+}
+function stopQueuePolling() {
+  if (state.queueTimer) { clearInterval(state.queueTimer); state.queueTimer = null; }
+}
+async function loadQueue() {
+  if (!state.collection) return;
+  const strip = $('qStrip'), body = $('qBody');
+  try {
+    const j = await fetchAPI('/api/knowledge/import/batches?collection_id=' +
+      encodeURIComponent(state.collection.collection_id) + '&per_page=20');
+    if (!j) return;
+    const c = j.queue.counters;
+    strip.innerHTML =
+      '<span class="q-chip"><b>' + faNum(c.total) + '</b> کل فایل</span>' +
+      '<span class="q-chip"><b>' + faNum(c.pending) + '</b> در انتظار</span>' +
+      '<span class="q-chip info"><b>' + faNum(c.running) + '</b> در حال اجرا</span>' +
+      '<span class="q-chip ok"><b>' + faNum(c.succeeded) + '</b> موفق</span>' +
+      '<span class="q-chip warn"><b>' + faNum(c.needs_review) + '</b> نیاز به بررسی</span>' +
+      '<span class="q-chip err"><b>' + faNum(c.failed) + '</b> ناموفق</span>';
+    if (!j.batches.length) {
+      body.innerHTML = '<div class="empty" style="padding:16px"><div class="t2">هنوز بچ واردسازی‌ای ثبت نشده است.</div></div>';
+    } else {
+      body.innerHTML =
+        '<table class="docs-table"><thead><tr><th>بچ</th><th>پوشه</th><th>فایل</th><th>پردازش‌شده</th><th>ناموفق</th><th>وضعیت</th><th>عملیات</th></tr></thead><tbody>' +
+        j.batches.map((b) => {
+          const acts =
+            '<div class="batch-actions">' +
+            (b.status !== 'done' ? '<button type="button" class="btn btn-primary btn-sm" data-batch="' + escHtml(b.batch_id) + '" data-act="process">پردازش</button>' : '') +
+            (b.paused ? '<button type="button" class="btn btn-ghost btn-sm" data-batch="' + escHtml(b.batch_id) + '" data-act="resume">ادامه</button>'
+                      : '<button type="button" class="btn btn-ghost btn-sm" data-batch="' + escHtml(b.batch_id) + '" data-act="pause">توقف</button>') +
+            '</div>';
+          return '<tr><td class="c-slug" style="font-size:10px">' + escHtml(b.batch_id) + '</td>' +
+            '<td>' + escHtml(b.folder_name || '—') + '</td>' +
+            '<td>' + faNum(b.file_count) + '</td>' +
+            '<td>' + faNum(b.processed_count) + '</td>' +
+            '<td>' + (b.failed_count ? '<span style="color:var(--red)">' + faNum(b.failed_count) + '</span>' : '—') + '</td>' +
+            '<td>' + batchStatusBadge(b.status) + (b.paused ? ' <span class="badge warn">توقف‌شده</span>' : '') + '</td>' +
+            '<td>' + acts + '</td></tr>';
+        }).join('') + '</tbody></table>';
+      body.querySelectorAll('button[data-act]').forEach((btn) => {
+        btn.addEventListener('click', () => batchAction(btn.getAttribute('data-batch'), btn.getAttribute('data-act')));
+      });
+    }
+    if (c.running > 0) startQueuePolling(); else stopQueuePolling();
+  } catch (e) {
+    body.innerHTML = '<div class="error-box" style="display:block">' + escHtml(e.message) + '</div>';
+    stopQueuePolling();
+  }
+}
+async function batchAction(batchId, act) {
+  try {
+    const j = await fetchAPI('/api/knowledge/import/batches/' + batchId + '/' + act, { method: 'POST' });
+    if (!j) return;
+    if (act === 'process') toast('شروع پردازش: ' + faNum(j.files_queued) + ' فایل در صف');
+    else if (act === 'pause') toast('صف متوقف شد — فایل جاری تا پایان می‌رسد و بقیه در انتظار می‌مانند');
+    else if (act === 'resume') toast('توقف لغو شد — برای ادامهٔ پردازش دوباره «پردازش» بزنید');
+    refreshJobs();
+    await loadQueue();
+  } catch (e) { toast(e.message, 'err'); }
+}
+
+/* ═══════ PCM-17: رجیستری آثار (work / edition / volume) ═══════ */
+const REG_STATE = { page: 1, totalPages: 1, search: '', workId: null, editionId: null };
+function openWorkModal() {
+  $('workForm').reset();
+  $('workErr').textContent = '';
+  $('workModal').classList.add('open');
+  setTimeout(() => $('wTitle').focus(), 50);
+}
+function closeWorkModal() { $('workModal').classList.remove('open'); }
+async function doWorkForm(ev) {
+  ev.preventDefault();
+  const title = $('wTitle').value.trim();
+  const err = $('workErr');
+  err.textContent = '';
+  if (!title) { err.textContent = 'عنوان اثر الزامی است'; return; }
+  try {
+    const j = await fetchAPI('/api/knowledge/works', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        title,
+        author: $('wAuthor').value.trim() || null,
+        subject: $('wSubject').value.trim() || null,
+        language: $('wLang').value.trim() || null,
+      }),
+    });
+    if (!j) return;
+    closeWorkModal();
+    toast(j.created ? 'اثر ثبت شد: ' + j.work.work_id : 'این اثر قبلا ثبت شده بود: ' + j.work.work_id);
+    REG_STATE.workId = j.work.work_id;
+    REG_STATE.editionId = null;
+    loadRegistry();
+  } catch (e) { err.textContent = e.message; }
+}
+async function loadRegistry() {
+  const box = $('stWorksBody');
+  if (REG_STATE.workId) { renderWorkDetail(); return; }
+  try {
+    const q = new URLSearchParams({ page: REG_STATE.page, per_page: 8 });
+    if (REG_STATE.search) q.set('search', REG_STATE.search);
+    const j = await fetchAPI('/api/knowledge/works?' + q);
+    if (!j) return;
+    let html =
+      '<div class="search-wrap" style="margin-bottom:8px">' +
+      '<svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>' +
+      '<input type="search" class="input" id="workSearch" placeholder="جستجو در آثار…" value="' + escHtml(REG_STATE.search) + '">' +
+      '</div>';
+    if (!j.works.length) {
+      html += '<div class="t2" style="color:var(--dim);font-size:12px">اثری ثبت نشده است — «اثر جدید» بزنید یا سندها را پردازش کنید.</div>';
+    } else {
+      html += '<div class="reg-list">' + j.works.map((w) =>
+        '<button type="button" class="reg-item" data-work="' + escHtml(w.work_id) + '">' +
+        '<div class="r-title">' + escHtml(w.title || w.work_id) + '</div>' +
+        '<div class="r-meta"><span class="c-slug">' + escHtml(w.work_id) + '</span>' +
+        (w.author ? '<span>' + escHtml(w.author) + '</span>' : '') +
+        '<span>' + faNum(w.edition_count) + ' ویرایش</span>' +
+        '<span>' + faNum(w.document_count) + ' سند</span></div></button>'
+      ).join('') + '</div>' +
+      '<div style="display:flex;gap:6px;justify-content:space-between;margin-top:8px;font-size:11px;color:var(--dim)">' +
+      '<button type="button" class="btn btn-ghost btn-sm" id="workPrev" ' + (REG_STATE.page <= 1 ? 'disabled' : '') + '>قبلی</button>' +
+      '<span>صفحه ' + faNum(REG_STATE.page) + ' از ' + faNum(Math.max(1, j.total_pages)) + '</span>' +
+      '<button type="button" class="btn btn-ghost btn-sm" id="workNext" ' + (REG_STATE.page >= j.total_pages ? 'disabled' : '') + '>بعدی</button>' +
+      '</div>';
+    }
+    box.innerHTML = html;
+    const s = $('workSearch');
+    if (s) s.addEventListener('change', () => { REG_STATE.search = s.value.trim(); REG_STATE.page = 1; loadRegistry(); });
+    const prev = $('workPrev'); if (prev) prev.addEventListener('click', () => { if (REG_STATE.page > 1) { REG_STATE.page--; loadRegistry(); } });
+    const next = $('workNext'); if (next) next.addEventListener('click', () => { if (REG_STATE.page < Math.max(1, j.total_pages)) { REG_STATE.page++; loadRegistry(); } });
+    box.querySelectorAll('button[data-work]').forEach((b) => {
+      b.addEventListener('click', () => { REG_STATE.workId = b.getAttribute('data-work'); REG_STATE.editionId = null; loadRegistry(); });
+    });
+  } catch (e) {
+    box.innerHTML = '<div class="error-box" style="display:block">' + escHtml(e.message) + '</div>';
+  }
+}
+async function renderWorkDetail() {
+  const box = $('stWorksBody');
+  box.innerHTML = '<div class="skeleton"></div>';
+  try {
+    const j = await fetchAPI('/api/knowledge/works/' + REG_STATE.workId);
+    if (!j) return;
+    const w = j.work;
+    let html = '<button type="button" class="back-link" id="workBack">بازگشت به فهرست آثار</button>';
+    html += '<div style="font-weight:600;font-size:13px;margin-bottom:8px">' + escHtml(w.title || w.work_id) + '</div>';
+    html += '<dl class="kv">' +
+      row('work_id', w.work_id, true) +
+      row('نویسنده', w.author || '—') +
+      row('موضوع', w.subject || '—') +
+      row('زبان', w.language || '—', true) +
+      row('منبع', w.source, true) +
+      '</dl>';
+    html += '<div style="margin:10px 0 6px;font-size:11px;color:var(--dim)">ویرایش‌ها</div>';
+    if (!j.editions.length) {
+      html += '<div class="t2" style="color:var(--dim);font-size:12px">ویرایشی ندارد.</div>';
+    } else {
+      html += '<div class="reg-list">' + j.editions.map((e) =>
+        '<button type="button" class="reg-item" data-edition="' + escHtml(e.edition_id) + '">' +
+        '<div class="r-title">' + escHtml(e.publisher || 'ناشر نامشخص') + (e.publish_year ? ' · ' + escHtml(String(e.publish_year)) : '') + '</div>' +
+        '<div class="r-meta"><span class="c-slug">' + escHtml(e.edition_id) + '</span>' +
+        '<span>' + faNum(e.volume_count) + ' جلد</span>' +
+        '<span>' + faNum(e.document_count) + ' سند</span></div></button>'
+      ).join('') + '</div>';
+    }
+    html += '<div class="reg-form"><div style="display:flex;gap:6px;flex-wrap:wrap">' +
+      '<input type="text" class="input" id="edPublisher" placeholder="ناشر (اختیاری)" style="flex:2;min-width:100px">' +
+      '<input type="text" class="input" id="edYear" placeholder="سال (اختیاری)" style="flex:1;min-width:70px">' +
+      '<button type="button" class="btn btn-primary btn-sm" id="edAdd">ثبت ویرایش</button>' +
+      '</div></div>';
+    box.innerHTML = html;
+    $('workBack').addEventListener('click', () => { REG_STATE.workId = null; loadRegistry(); });
+    box.querySelectorAll('button[data-edition]').forEach((b) => {
+      b.addEventListener('click', () => { REG_STATE.editionId = b.getAttribute('data-edition'); renderEditionDetail(); });
+    });
+    $('edAdd').addEventListener('click', () => addEdition(REG_STATE.workId));
+  } catch (e) {
+    box.innerHTML = '<div class="error-box" style="display:block">' + escHtml(e.message) + '</div>';
+  }
+}
+async function addEdition(workId) {
+  const pub = $('edPublisher').value.trim();
+  const year = $('edYear').value.trim();
+  if (!pub && !year) { toast('حداقل یک از ناشر یا سال را وارد کنید', 'err'); return; }
+  try {
+    const j = await fetchAPI('/api/knowledge/works/' + workId + '/editions', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ publisher: pub || null, publish_year: year || null }),
+    });
+    if (!j) return;
+    toast('ویرایش ثبت شد: ' + j.edition.edition_id);
+    renderWorkDetail();
+  } catch (e) { toast(e.message, 'err'); }
+}
+async function renderEditionDetail() {
+  const box = $('stWorksBody');
+  box.innerHTML = '<div class="skeleton"></div>';
+  try {
+    const j = await fetchAPI('/api/knowledge/editions/' + REG_STATE.editionId);
+    if (!j) return;
+    const e = j.edition;
+    let html = '<button type="button" class="back-link" id="edBack">بازگشت به اثر</button>';
+    html += '<div style="font-weight:600;font-size:13px;margin-bottom:8px">' +
+      escHtml(e.publisher || 'ناشر نامشخص') + (e.publish_year ? ' · ' + escHtml(String(e.publish_year)) : '') + '</div>';
+    html += '<dl class="kv">' +
+      row('edition_id', e.edition_id, true) +
+      row('work_id', e.work_id, true) +
+      (e.edition_label ? row('برچسب ویرایش', e.edition_label) : '') +
+      '</dl>';
+    html += '<div style="margin:10px 0 6px;font-size:11px;color:var(--dim)">جلدها</div>';
+    if (!j.volumes.length) {
+      html += '<div class="t2" style="color:var(--dim);font-size:12px">جلدی ندارد.</div>';
+    } else {
+      html += '<div class="reg-list">' + j.volumes.map((v) =>
+        '<div class="reg-item" style="cursor:default">' +
+        '<div class="r-title">' + escHtml(v.label || ('جلد ' + v.volume_no)) + '</div>' +
+        '<div class="r-meta"><span class="c-slug">' + escHtml(v.volume_id) + '</span>' +
+        '<span>' + faNum(v.document_count) + ' سند</span></div></div>'
+      ).join('') + '</div>';
+    }
+    if (j.documents.length) {
+      html += '<div style="margin:10px 0 6px;font-size:11px;color:var(--dim)">سندها</div>' +
+        '<div class="reg-list">' + j.documents.map((d) =>
+          '<div class="reg-item" style="cursor:default">' +
+          '<div class="r-title">' + escHtml(d.file_name || d.document_id) + '</div>' +
+          '<div class="r-meta"><span class="c-slug">' + escHtml(d.document_id) + '</span>' +
+          docStatusBadge(d.status) + '</div></div>'
+        ).join('') + '</div>';
+    }
+    html += '<div class="reg-form"><div style="display:flex;gap:6px;flex-wrap:wrap">' +
+      '<input type="number" class="input" id="volNo" placeholder="شماره جلد (اختیاری)" style="flex:1;min-width:70px">' +
+      '<input type="text" class="input" id="volLabel" placeholder="برچسب جلد (اختیاری)" style="flex:2;min-width:100px">' +
+      '<button type="button" class="btn btn-primary btn-sm" id="volAdd">ثبت جلد</button>' +
+      '</div></div>';
+    box.innerHTML = html;
+    $('edBack').addEventListener('click', () => { REG_STATE.editionId = null; renderWorkDetail(); });
+    $('volAdd').addEventListener('click', () => addVolume(REG_STATE.editionId));
+  } catch (e) {
+    box.innerHTML = '<div class="error-box" style="display:block">' + escHtml(e.message) + '</div>';
+  }
+}
+async function addVolume(editionId) {
+  const vnoRaw = $('volNo').value.trim();
+  const label = $('volLabel').value.trim();
+  if (!vnoRaw && !label) { toast('حداقل یک از شماره یا برچسب جلد را وارد کنید', 'err'); return; }
+  try {
+    const j = await fetchAPI('/api/knowledge/editions/' + editionId + '/volumes', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ volume_no: vnoRaw === '' ? null : Number(vnoRaw), label: label || null }),
+    });
+    if (!j) return;
+    toast('جلد ثبت شد: ' + j.volume.volume_id);
+    renderEditionDetail();
+  } catch (e) { toast(e.message, 'err'); }
+}
+
 /* ── refresh-all ── */
 async function refreshAll() {
   await loadCollections();
@@ -1289,6 +1632,7 @@ document.addEventListener('keydown', (e) => {
     if ($('createModal').classList.contains('open')) closeCreateModal();
     if ($('importModal').classList.contains('open')) closeImportModal();
     if ($('metaModal').classList.contains('open')) closeMetaModal();
+    if ($('workModal').classList.contains('open')) closeWorkModal();
   }
 });
 $('createForm').addEventListener('submit', doCreate);
@@ -1308,6 +1652,12 @@ $('metaClose').addEventListener('click', closeMetaModal);
 $('metaCancel').addEventListener('click', closeMetaModal);
 $('metaModal').addEventListener('click', (e) => { if (e.target === $('metaModal')) closeMetaModal(); });
 $('metaForm').addEventListener('submit', doMetaField);
+/* ── PCM-17 listeners ── */
+$('workNewBtn').addEventListener('click', openWorkModal);
+$('workClose').addEventListener('click', closeWorkModal);
+$('workCancel').addEventListener('click', closeWorkModal);
+$('workModal').addEventListener('click', (e) => { if (e.target === $('workModal')) closeWorkModal(); });
+$('workForm').addEventListener('submit', doWorkForm);
 $('loginForm').addEventListener('submit', doLogin);
 $('cSlugGen').addEventListener('click', () => { $('cSlug').value = slugFromName($('cName').value); });
 $('colSearch').addEventListener('input', (e) => {
@@ -1316,7 +1666,7 @@ $('colSearch').addEventListener('input', (e) => {
 $('subjectFilter').addEventListener('change', (e) => { state.subject = e.target.value; state.page = 1; loadCollections(); });
 $('prevPage').addEventListener('click', () => { if (state.page > 1) { state.page--; loadCollections(); } });
 $('nextPage').addEventListener('click', () => { if (state.page < state.totalPages) { state.page++; loadCollections(); } });
-$('backToTop').addEventListener('click', () => { state.activeId = null; setHash(null); markActive(); $('wsContent').style.display = 'none'; $('wsEmpty').style.display = 'block'; $('stContent').style.display = 'none'; $('stEmpty').style.display = 'block'; });
+$('backToTop').addEventListener('click', () => { stopQueuePolling(); state.activeId = null; setHash(null); markActive(); $('wsContent').style.display = 'none'; $('wsEmpty').style.display = 'block'; $('stContent').style.display = 'none'; $('stEmpty').style.display = 'block'; });
 
 (async function init() {
   await checkAuth();

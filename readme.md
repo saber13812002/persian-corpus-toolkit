@@ -20,6 +20,7 @@
 | 8 | **Work Registry / سلسله‌مراتب کتاب** (PCM-14D): اثر←نسخه←جلد←سند + scopeهای `work/edition/volume` برای متادیتا + resolve لایه‌ای قفل‌شده به anchor + مهاجرت افزایشی idempotent (rollback فقط حذف 3 جدول/6 ستون) | ✅ (10 تست RD + 139/139 — بدون deploy) |
 | 8b | **صف پایدار پردازش فایل** (PCM-15): ردیف پایدار per-file (status/stage ایمن/attempts/last_error/duration_ms/out_dir) + `on_stage` callback در Word Factory + pause/resume بچ + summary با شمارنده‌های واقعی DB + ریکاوری crash با حفظ stage | ✅ (9 تست Q + 151/151 — بدون deploy) |
 | 8c | **پیکره‌ساز (Corpus Builder) — قرارداد `c-1`** (PCM-16): تبدیل Dumpهای معتبر d-1 به پیکره قابل‌انتقال — دو جریان جدا RAW/NORMALIZED + provenance کامل + dedup بین‌فایلی + آمار واقعی + آرشیو ZIP قطعی + پکیج محلی HF (بدون بارگذاری) + CLI `build-corpus` — بدون DB/ES/شبکه | ✅ (24 تست C + 175/175 — بدون deploy) |
+| 8d | **تکمیل UI استودیو** (PCM-17): کارت صف/بچ‌ها (شمارنده‌های زنده + پردازش/توقف/ادامه + polling هوشمند) + کارت رجیستری اثر‌ها (work/edition/volume + اسناد) + endpoint خواندنی `GET /import/batches` + ستون «رجیستری» در جدول اسناد — evidence-based، فقط REST | ✅ (7 تست S + 182/182 — بدون deploy) |
 | 9 | پایپلاین پیکره + دیتaset + آپلود HuggingFace | ✅ در دسترس |
 | 10 | ایندکسر RAG | 🚧 در دست توسعه |
 
@@ -56,9 +57,9 @@
 │  • sciences.py    — ۱۳ علم اصطلاح‌نامه               │
 │  • factory/       — ★ Word Factory: DOCX→JSONL + Dump d-1│
 │                   + Corpus Builder c-1 (PCM-16)         │
-│  • 9 test files — 175 تست (api/projects/dashboard/     │
+│  • 10 test files — 182 تست (api/projects/dashboard/    │
 │                     knowledge_api/factory/dump/work/    │
-│                     queue/corpus_builder)                │
+│                     queue/corpus_builder/studio_api)    │
 ├────────────────────────────────────────────────────────┤
 │  Corpus Pipeline (corpus/)                             │
 │  • build_corpus.py / build_dataset.py / pipeline.py    │
@@ -272,9 +273,10 @@ cd backend && python -m unittest test_dump -v                                 # 
 cd backend && python -m unittest test_work_registry -v                       # 10/10 (Work Registry — PCM-14D)
 cd backend && python -m unittest test_queue -v                               # 9/9 (صف فایل — PCM-15)
 cd backend && python -m unittest test_corpus_builder -v                       # 24/24 (پیکره‌ساز c-1 — PCM-16)
+cd backend && python -m unittest test_studio_api -v                           # 7/7 (استودیو PCM-17)
 cd backend && python -m unittest test_api test_projects test_dashboard \
   test_knowledge_api test_word_factory test_dump test_work_registry test_queue \
-  test_corpus_builder  # 175/175 (کل)
+  test_corpus_builder test_studio_api  # 182/182 (کل)
 cd extension && node test_popup.js                                            # 8/8
 node --check extension/popup.js extension/background.js extension/content_picker.js
 node -e "JSON.parse(require('fs').readFileSync('extension/manifest.json'))"
@@ -377,6 +379,7 @@ sqlite3 backend/thesaurus.db "SELECT COUNT(*) FROM project_pages"
 | **PCM-14D** Work Registry: سلسله‌مراتب اثر←نسخه←جلد + scopeهای work/edition/volume متادیتا + resolve لایه‌ای + OpenAPI | ✅ (10 تست RD + 139/139 — بدون deploy؛ سند: docs/PCM-14D-WORK-REGISTRY.md) |
 | **PCM-15** صف پایدار پردازش فایل: knowledge_file_queue + queue_control + `on_stage` در factory + pause/resume/summary + ریکاوری crash با حفظ stage + سازگاری Dump d-1 | ✅ (9 تست Q + 151/151 — بدون deploy؛ سند: docs/PCM-15-FILE-QUEUE.md) |
 | **PCM-16** پیکره‌ساز از Dumpهای معتبر d-1: قرارداد c-1 — جریان‌های جدا RAW/NORMALIZED + provenance + dedup + آرشیو قطعی + پکیج محلی HF + CLI build-corpus (بدون DB/ES/شبکه) | ✅ (24 تست C + 175/175 — بدون deploy؛ سند: docs/PCM-16-CORPUS-BUILDER.md) |
+| **PCM-17** تکمیل UI استودیو: کارت صف/بچ‌ها + کارت رجیستری اثر‌ها + `GET /import/batches` (افزایشی) + ستون رجیستری اسناد — evidence-based، فقط REST | ✅ (7 تست S + 182/182 — بدون deploy؛ سند: docs/PCM-17-STUDIO-UI.md) |
 
 جزئیات معماری و نقشه‌ی راه نسخه‌ای (V0.1..V1.0): مستندات PCM-12 در [docs/](docs/) — `PCM-12-AUDIT.md` (وضعیت واقعی)، `PCM-12-ARCHITECTURE.md` (طراحی S2..S9)، `PCM-12-PRD.md` (الزامات)، `PCM-12-ROADMAP.md` (ترتیب اجرا)، `PCM-12-DATA-CONTRACTS.md` (schema/API/Prompt)، `PCM-12-AGENT-HANDOFF.md` (تصمیم‌ها و مرزها)، `PCM-12-ACCEPTANCE-REPORT.md` (گزارش آزمون پذیرش ۲۰ سناریو + ممیزی دسترسی s52)، `PCM-12-ACCEPTANCE-CHECKLIST.md` (چک‌لیست تأیید کاربری با Chrome) و `PCM-12.3-TEST-ISOLATION.md` (رفع ریشه‌ای F-01 + ممیزی امنیتی Grafana).
 

@@ -77,7 +77,9 @@ uploaded → validating → parsing → parsed → approved
 2. **تب مجموعه‌ها**: فهرست مجموعه‌ها (جستجو + فیلتر موضوع + صفحه‌بندی).
    «مجموعه جدید» → نام + slug (پیش‌پیش‌فیل از نام فارسی) + موضوع.
 3. **تب کتاب‌ها** (داخل مجموعه): آپلود DOCX (چندفایلی، ≤50MB/فایل، .docx فقط)؛
-   لیست با وضعیت/SHA/متادیتا.
+   لیست با وضعیت/SHA/متادیتا + **ستون «رجیستری»** (PCM-17: `work_id /
+   edition_id / volume_id` برای سندِ پردازش‌شده؛ خالی = هنوز پردازش نشده
+   یا بدون volume).
    - «پردازش» (process) — job می‌سازد و با poll /jobs به‌روز می‌شود.
    - «تأیید» (approve) — فقط برای `parsed`/`needs_review`.
    - «جداکردن» (delete) — سند را از مجموعه جدا می‌کند (فایل store باقی می‌ماند
@@ -86,6 +88,21 @@ uploaded → validating → parsing → parsed → approved
    unextracted.losses)، بلوک‌ها (صفحه‌بندی‌شده، raw/normalized).
 5. **تب آیکون‌ها (مجموعه)**: فیلدهای متادیتا (CRUD) + مقادیر + سازگاری ES.
 6. **jobها**: نوار پایین، آخرین 20 job (poll هر چند ثانیه).
+7. **کارت صف/بچ‌ها** (PCM-17، وسط صفحه‌ی مجموعه): شمارنده‌های زنده‌ی صف
+   (کل/در انتظار/در حال اجرا/موفق/نیاز به بررسی/ناموفق — فقط از endpoint
+   `GET /import/batches`؛ عدد ساختگی نیست) + جدول بچ‌ها با وضعیت و
+   عملیات:
+   - «پردازش» → `POST .../process` (فایل‌های باقی‌مانده در صف می‌روند).
+   - «توقف» → `POST .../pause` (فایل جاری تمام می‌شود؛ بقیه `pending`
+     می‌مانند؛ بج «توقف‌شده» روی بچ).
+   - «ادامه» → `POST .../resume` (فقط پرچم را پاک می‌کند — برای ادامه
+     دوباره «پردازش» بزنید).
+   - polling خودکار فقط وقتی «در حال اجرا > 0» است (هر ۳ ثانیه).
+8. **کارت رجیستری اثر‌ها** (PCM-17، ستون چپ): «اثر جدید» (title الزامی) →
+   `POST /api/knowledge/works`؛ فهرست/جستجو/صفحه‌بندی works؛ کلیک روی
+   اثر → جزئیات + ویرایش‌ها + فرم «ویرایش جدید» (ناشر/سال)؛ کلیک روی
+   ویرایش → جلد‌ها + اسناد وابسته + فرم «جلد جدید» (`volume_no` عدد یا
+   خالی + label). همه idها (work/edition/volume) LTR و قابل کپی‌اند.
 
 ### آپلود و خطاها
 
@@ -131,13 +148,17 @@ batch (V0.1: registration فقط؛ پردازش bulk = `POST /batches/<id>/proce
 | `/api/knowledge/documents/<doc_id>/file` | GET | فایل اصلی (byte range) |
 | `/api/knowledge/collections/<coll_id>/documents/<doc_id>` | DELETE | جداکردن سند |
 
-### Import / job / متادیتا / سازگاری
+### Import / صف / job / متادیتا / سازگاری
 
 | Endpoint | Method | توضیح |
 |---|---|---|
 | `/api/knowledge/import/batches` | POST | ثبت batch (فهرست فایل+SHA) |
+| `/api/knowledge/import/batches?collection_id=&search=&page=&per_page=` | GET | **PCM-17**: فهرست بچ‌های یک کالکشن (صفحه‌بندی، سقف per_page=100) + `paused` هر بچ + شمارنده‌های زنده‌ی `queue` (سردبیر واحد با `queue/summary`) |
 | `/api/knowledge/import/batches/<id>` | GET | وضعیت batch |
 | `/api/knowledge/import/batches/<id>/process` | POST | پردازش bulk (V0.1) |
+| `/api/knowledge/import/batches/<id>/pause` | POST | توقف صف بچ (فایل جاری تا پایان می‌رسد) |
+| `/api/knowledge/import/batches/<id>/resume` | POST | لغو توقف (پردازش خودکار **شروع نمی‌شود** — دوباره process بزنید) |
+| `/api/knowledge/queue/summary?collection_id=` | GET | شمارنده‌های زنده‌ی صف (pending/running/succeeded/needs_review/failed/attempts + failed_by_stage) |
 | `/api/knowledge/jobs?page=` | GET | jobها |
 | `/api/knowledge/metadata/fields?collection_id=` | GET | فیلدهای متادیتا |
 | `/api/knowledge/metadata/fields` | POST | ساخت field |
@@ -145,6 +166,27 @@ batch (V0.1: registration فقط؛ پردازش bulk = `POST /batches/<id>/proce
 | `/api/knowledge/metadata/values?field_id=` | GET/POST | مقادیر متادیتا |
 | `/api/knowledge/metadata/values/<id>` | DELETE | حذف مقدار |
 | `/api/knowledge/compatibility` | GET | وضعیت ES: **`NOT VERIFIED`** در V0.1 |
+
+### رجیستری اثر‌ها (PCM-14D — در UI از PCM-17)
+
+| Endpoint | Method | توضیح |
+|---|---|---|
+| `/api/knowledge/works?search=&page=` | GET | فهرست works + `edition_count`/`document_count` |
+| `/api/knowledge/works` | POST | ساخت work (title الزامی؛ idempotent) |
+| `/api/knowledge/works/<work_id>` | GET | جزئیات + ویرایش‌ها + اسناد |
+| `/api/knowledge/works/<work_id>` | PATCH | ویرایش فیلدهای work |
+| `/api/knowledge/works/<work_id>/editions` | POST | افزودن ویرایش (publisher/year) |
+| `/api/knowledge/editions/<edition_id>` | GET | جزئیات + جلد‌ها + اسناد |
+| `/api/knowledge/editions/<edition_id>` | PATCH | ویرایش ویرایش |
+| `/api/knowledge/editions/<edition_id>/volumes` | POST | افزودن جلد (volume_no عدد صحیح یا null) |
+| `/api/knowledge/volumes/<volume_id>` | GET | جزئیات جلد + اسناد |
+| `/api/knowledge/metadata/resolve?document_id=` | GET | متادیتای مؤثر سند در زنجیره work/edition/volume |
+
+سلسله‌مراتب: **اثر (work) ← ویرایش (edition) ← جلد (volume) ← اسناد**.
+پردازش واقعی یک سند با Word Factory، `work_id`/`edition_id` (و
+`volume_id` اگر `volume_no` داشته باشد) را به‌صورت قطعی از
+title/author + SHA-256 فایل می‌سازد و در ردیف سند ثبت می‌کند؛ ساخت
+دوباره = همان id (بدون ردیف تکراری).
 
 **قانون auth (AGENTS.md §2 rule 6):** APIهای نوشتاری اکستنشن (`/api/projects*`) باز
 می‌مانند تا کراول زنده قطع نشود؛ namespace خواندنی Knowledge (`/api/knowledge/*`)

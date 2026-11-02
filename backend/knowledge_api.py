@@ -1479,9 +1479,10 @@ def register_knowledge_routes(app, get_db):
             params).fetchone()["n"]
         rows = db.execute(
             f"""SELECT id, document_id, file_name, relative_path, sha256,
-                       file_size, file_id, status, blocks_count, chars_count,
+                       file_size, file_id, work_id, edition_id, volume_id,
+                       status, blocks_count, chars_count,
                        quality_status, quality_score, error, created_at, updated_at
-               FROM knowledge_collection_documents
+                FROM knowledge_collection_documents
                {where_sql}
                ORDER BY id DESC LIMIT ? OFFSET ?""",
             (*params, per_page, (page - 1) * per_page)).fetchall()
@@ -1779,6 +1780,65 @@ def register_knowledge_routes(app, get_db):
                                if e["status"].startswith("invalid")),
             },
         }), 201
+
+    @app.route("/api/knowledge/import/batches", methods=["GET"])
+    @require_auth
+    def knowledge_list_batches():
+        """PCM-17: list the import batches of a collection (paginated).
+
+        Read-only surface for the Studio queue UI: batch rows + per-batch
+        pause flag + live queue counters for the collection. All numbers
+        come straight from the queue table (single source of truth).
+        """
+        db = get_db()
+        ensure_knowledge_schema(db)
+        _recover_interrupted(db)
+        cid = (request.args.get("collection_id") or "").strip()
+        if not cid:
+            return jsonify({"ok": False, "field": "collection_id",
+                            "message": "collection_id لازم است"}), 400
+        coll = db.execute(
+            "SELECT collection_id FROM knowledge_collections WHERE collection_id=?",
+            (cid,)).fetchone()
+        if not coll:
+            return jsonify({"ok": False, "field": "collection_id",
+                            "message": "کالکشن پیدا نشد"}), 404
+        search = (request.args.get("search") or "").strip()
+        page = max(1, int(request.args.get("page") or 1))
+        per_page = min(100, max(1, int(request.args.get("per_page") or 50)))
+
+        where, params = ["collection_id = ?"], [cid]
+        if search:
+            where.append("(batch_id LIKE ? OR folder_name LIKE ?)")
+            like = f"%{search}%"
+            params.extend([like, like])
+        where_sql = "WHERE " + " AND ".join(where)
+        total = db.execute(
+            f"SELECT COUNT(*) AS n FROM knowledge_import_batches {where_sql}",
+            params).fetchone()["n"]
+        rows = db.execute(
+            f"""SELECT b.*,
+                        CASE WHEN EXISTS(
+                            SELECT 1 FROM knowledge_queue_control q
+                             WHERE q.scope = 'batch:' || b.batch_id
+                               AND q.paused = 1)
+                         THEN 1 ELSE 0 END AS paused
+                FROM knowledge_import_batches b
+                {where_sql}
+                ORDER BY b.created_at DESC, b.batch_id
+                LIMIT ? OFFSET ?""",
+            (*params, per_page, (page - 1) * per_page)).fetchall()
+        counters = queue_counters(db, cid)
+        stages = [
+            dict(r) for r in db.execute(
+                """SELECT stage, COUNT(*) AS files FROM knowledge_file_queue
+                   WHERE stage IS NOT NULL AND collection_id=?
+                   GROUP BY stage""", (cid,))]
+        return jsonify({"batches": [dict(r) for r in rows],
+                        "total": total, "page": page, "per_page": per_page,
+                        "total_pages": (total + per_page - 1) // per_page,
+                        "queue": {"counters": counters,
+                                  "failed_by_stage": stages}})
 
     @app.route("/api/knowledge/import/batches/<batch_id>", methods=["GET"])
     @require_auth

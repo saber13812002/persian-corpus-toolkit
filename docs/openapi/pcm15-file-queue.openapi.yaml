@@ -1,10 +1,10 @@
 openapi: 3.0.3
 info:
-  title: Persian Corpus Toolkit — Knowledge Studio: Per-file Processing Queue (PCM-15)
+  title: "Persian Corpus Toolkit — Knowledge Studio: Per-file Processing Queue (PCM-15)"
   version: 1.0.0
   description: |
     PCM-15 additive extension of the Corpus Knowledge Studio API
-    (`/api/knowledge/*`).
+    (`/api/knowledge/*`), extended by PCM-17 (Studio UI surface).
 
     Adds a persistent per-file processing queue
     (`knowledge_file_queue`, PK (collection_id, file_key)) with
@@ -154,6 +154,108 @@ paths:
                 failed_by_stage: []
         "401": { $ref: "#/components/responses/Unauthorized" }
         "404": { $ref: "#/components/responses/NotFound" }
+  /api/knowledge/import/batches:
+    get:
+      tags: [batches, queue]
+      operationId: listBatches
+      summary: List a collection's import batches + live queue counters (PCM-17)
+      description: |
+        Read-only surface for the Studio queue UI. Returns the batch rows
+        (newest first) with a per-batch `paused` flag derived from
+        `knowledge_queue_control` (scope = `batch:<batch_id>`), plus the
+        collection's live queue counters (same computation as
+        GET /api/knowledge/queue/summary). All numbers come straight from
+        the queue table — no cached/fabricated statistics.
+      parameters:
+        - name: collection_id
+          in: query
+          required: true
+          schema: { type: string }
+          description: Text collection_id (NOT the integer row id); unknown -> 404
+        - name: search
+          in: query
+          required: false
+          schema: { type: string }
+          description: LIKE filter on batch_id / folder_name
+        - name: page
+          in: query
+          required: false
+          schema: { type: integer, minimum: 1, default: 1 }
+        - name: per_page
+          in: query
+          required: false
+          schema: { type: integer, minimum: 1, maximum: 100, default: 50 }
+      responses:
+        "200":
+          description: Batches + pagination + queue counters
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  batches:
+                    type: array
+                    items:
+                      allOf:
+                        - $ref: "#/components/schemas/ImportBatch"
+                        - type: object
+                          properties:
+                            paused: { type: integer, enum: [0, 1] }
+                  total: { type: integer }
+                  page: { type: integer }
+                  per_page: { type: integer }
+                  total_pages: { type: integer }
+                  queue:
+                    type: object
+                    properties:
+                      counters: { $ref: "#/components/schemas/QueueCounters" }
+                      failed_by_stage:
+                        type: array
+                        items:
+                          type: object
+                          properties:
+                            stage: { type: string }
+                            files: { type: integer }
+              example:
+                batches:
+                  - batch_id: "b-1a2b3c4d"
+                    collection_id: "c-01234567"
+                    folder_name: "pct17 folder"
+                    file_count: 2
+                    processed_count: 1
+                    failed_count: 1
+                    status: done
+                    created_at: "2026-11-01T20:00:00Z"
+                    updated_at: "2026-11-01T20:00:05Z"
+                    paused: 0
+                total: 1
+                page: 1
+                per_page: 50
+                total_pages: 1
+                queue:
+                  counters:
+                    total: 2
+                    pending: 0
+                    running: 0
+                    succeeded: 1
+                    needs_review: 0
+                    failed: 1
+                    failed_with_safe_stage: 1
+                    attempts_total: 2
+                  failed_by_stage:
+                    - { stage: intake, files: 1 }
+        "400":
+          description: Missing collection_id
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  ok: { type: boolean, example: false }
+                  field: { type: string, example: collection_id }
+                  message: { type: string }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
   /api/knowledge/import/batches/{batch_id}:
     get:
       tags: [batches]
@@ -191,6 +293,19 @@ components:
       in: cookie
       name: pct_session
   schemas:
+    ImportBatch:
+      type: object
+      description: knowledge_import_batches row
+      properties:
+        batch_id: { type: string, example: "b-1a2b3c4d" }
+        collection_id: { type: string, example: "c-01234567" }
+        folder_name: { type: [string, "null"], example: "pct17 folder" }
+        file_count: { type: integer, example: 2 }
+        processed_count: { type: integer, example: 1 }
+        failed_count: { type: integer, example: 1 }
+        status: { type: string, enum: [planned, processing, done] }
+        created_at: { type: string }
+        updated_at: { type: string }
     QueueRow:
       type: object
       properties:
