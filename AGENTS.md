@@ -119,6 +119,9 @@ cd backend && python -m unittest test_api test_projects test_dashboard \
 | **PCM-17** تکمیل UI استودیو: کارت صف/بچ‌ها (شمارنده‌های زنده + process/pause/resume) + کارت رجیستری اثر‌ها + `GET /api/knowledge/import/batches` (افزایشی) + ستون رجیستری اسناد | ✅ (7 تست S + 182 کامل؛ بدون deploy؛ سند: docs/PCM-17-STUDIO-UI.md) |
 | **PCM-18** ممیزی observability روی s52: اسکریپت خواندنی + گزارش (اجرای s52 مسدود — host unreachable) | ✅ (اسکریپت + گزارش؛ بدون deploy؛ اجرای s52 در انتظار دسترسی) |
 | **PCM-19** قرارداد API: تست‌های CT-01..CT-06 (200 کامل) + به‌روزرسانی README/AGENTS/OpenAPI + GitLab CI test-only + نمونه کلاینت REST + چک‌کن OpenAPI | ✅ (18 تست CT؛ بدون deploy؛ سند: docs/openapi/README.md) |
+| **PCM-20** خروجی کامل JSON پیکره‌ی «تفسیر تسنیم» + ممیزی شماره صفحه (`deploy/pcm20_tasnim_export.py`) | ✅ (read-only روی سرور: 45,844 سند / 73MB؛ بدون deploy) |
+| **PCM-20.2** ممیزی عمیق خروجی واقعی + تطبیق با AI Dump Builder (`deploy/pcm20_2_tasnim_audit.py`) | ✅ (باگ parse_barg اثبات شد؛ adapter بدون تغییر کد Builder ممکن است؛ بدون deploy) |
+| **PCM-20.3** Tasnim Corpus Factory: `corpus/tasnim/` (13 ماژول) + 16 تست T — audit gate + پیکره‌ی canonical (RAW/NORMALIZED جدا) + V01–V08 + dataset‌های 1/10/50/90/100 + adapter Dump سازگار با builder + diff + زنجیره‌ی manifest/provenance (immutable، append-only) | ✅ (16 تست + رگرسیون کامل 200؛ بدون deploy؛ سند: docs/PCM-20.3-TASNIM-FORFACTORY.md؛ embedding/Neo4j = مأموریت بعدی) |
 
 گزارش‌ها: `گزارش-PCM-0X.md` (۱۱ بخش: وضعیت قبل، طراحی، مهاجرت، فایل/API، تست،
 نتیجه production، SHA+لینک، git status، بکاپ/rollback، موارد باقی‌مانده، روش تست دستی).
