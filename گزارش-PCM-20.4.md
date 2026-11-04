@@ -134,14 +134,15 @@ AI Dump Builder Input` با provenance کامل (SHA-256 در هر گام) — �
 
 | محیط | وضعیت | SHA |
 |------|--------|-----|
-| **Local** (این ویندوز) | commit + push به GitHub | `<شماره‌ی commit نهایی — در فاز Git تکمیل می‌شود>` |
-| **GitHub** (origin: `saber13812002/persian-corpus-toolkit`) | push شده | `<SHA — بعد از push>` |
+| **Local** (این ویندوز) | commit + push به GitHub | `1b79f9a95bc3f129fba351544dbc5b713cfaf4e1` (push: `8db3b60..1b79f9a main -> main`) |
+| **GitHub** (origin: `saber13812002/persian-corpus-toolkit`) | push شده | `1b79f9a95bc3f129fba351544dbc5b713cfaf4e1` (= `origin/main`) |
 | **GitLab internal** (`s52:2222`) | **دسترس‌نیافتنی** — از شبکه‌ی فعلی `172.20.1.52:2222` unreachable (همان وضعیت PCM-18/20)؛ ریپو/ترانسفر تاریخچه انجام **نشد** و ادعایی درباره‌ی آن نیست | — |
 | (مرجع) toolkit commit هنگام اجرای Builder | — | `8db3b60a2ce1a9a4dcead4a6f62dd7f61dff9151` |
 
 - commit‌ها منطقی/سپارشی هستند؛ **هیچ داده‌ی واقعی** (data/، snapshot، dumps،
-  builds) در Git نمی‌رود (data/ و فایل‌های `.tmp_*` gitignored) — فقط کد/اسناد/
-  گزارش و SHAهای provenance.
+  builds) در Git نمی‌رود (`data/` gitignored است؛ فایل‌های `.tmp_*` هم untracked
+  ماندند و stage نشدند — فقط 6 فایل صریح stage شد، هرگز `git add .`) — فقط
+  کد/اسناد/گزارش و SHAهای provenance.
 - بدون force push.
 
 ## G. موارد NOT VERIFIED
