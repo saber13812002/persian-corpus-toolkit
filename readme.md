@@ -22,6 +22,8 @@
 | 8c | **پیکره‌ساز (Corpus Builder) — قرارداد `c-1`** (PCM-16): تبدیل Dumpهای معتبر d-1 به پیکره قابل‌انتقال — دو جریان جدا RAW/NORMALIZED + provenance کامل + dedup بین‌فایلی + آمار واقعی + آرشیو ZIP قطعی + پکیج محلی HF (بدون بارگذاری) + CLI `build-corpus` — بدون DB/ES/شبکه | ✅ (24 تست C + 175/175 — بدون deploy) |
 | 8d | **تکمیل UI استودیو** (PCM-17): کارت صف/بچ‌ها (شمارنده‌های زنده + پردازش/توقف/ادامه + polling هوشمند) + کارت رجیستری اثر‌ها (work/edition/volume + اسناد) + endpoint خواندنی `GET /import/batches` + ستون «رجیستری» در جدول اسناد — evidence-based، فقط REST | ✅ (7 تست S + 182/182 — بدون deploy) |
 | 8e | **قرارداد API + CI + کلاینت** (PCM-19): تست‌های قرارداد CT-01..CT-06 (OpenAPI spec ↔ app زنده) + GitLab CI test-only (`.gitlab-ci.yml`) + چک‌کن OpenAPI + نمونه کلاینت REST (فقط stdlib) | ✅ (18 تست CT + 200/200 — بدون deploy) |
+| 8f | **Tasnim Corpus Factory — قرارداد `c-20.3`** (PCM-20.3): خط لوله «تفسیر تسنیم همتا» — Work→Edition→Volume→Page با شناسه‌های قطعی + RAW/NORMALIZED جدا + flag به‌جای حذف + QC + idempotency/دترمینیسم + دیتاست‌های 1/10/50/90/100% (`stratified-even-blocks`) + diff/manifest/registry + خروجی Dump سازگار با ai-dump-builder — بدون DB/ES/شبکه | ✅ (16 تست T + 200/200 — بدون deploy) |
+| 8g | **پذیرش واقعی Tasnim — زنجیره end-to-end** (PCM-20.4): snapshot واقعی 45,844 صفحه (SHA verify + GATE 1.5 truncation) → پیکره canonical v0001 → 6 دیتاست نسخه‌شده (شامل 1 جلد + fixture افزایشی) → 3 خروجی Dump → **3 build واقعی ai-dump-builder** (mock embedding؛ Neo4j/شبکه درگیر نشد) + زنجیره‌ی manifest/provenance + 216 تست سبز | ✅ (acceptance PASS — بدون deploy) |
 | 9 | پایپلاین پیکره + دیتaset + آپلود HuggingFace | ✅ در دسترس |
 | 10 | ایندکسر RAG | 🚧 در دست توسعه |
 
@@ -66,6 +68,8 @@
 │  Corpus Pipeline (corpus/)                             │
 │  • build_corpus.py / build_dataset.py / pipeline.py    │
 │  • upload_to_hf.py — آپلود به 🤗 HuggingFace          │
+│  • tasnim/ — ★ Tasnim Corpus Factory + acceptance      │
+│                  (PCM-20.3/20.4 — بدون DB/ES/شبکه)     │
 ├────────────────────────────────────────────────────────┤
 │  RAG Indexer (در دست توسعه)                           │
 │  • Embedding با GPU، تخمین زمان، resume، anti-ban      │
@@ -107,12 +111,15 @@ persian-corpus-toolkit/
 │   ├── test_popup.js        # ۸ تست UI (node)
 │   └── icons/
 ├── corpus/                  # پایپلاین پیکره و دیتاست
+│   └── tasnim/              # ★ Tasnim Corpus Factory: audit/build/dataset/dump/diff (PCM-20.3/20.4)
 ├── dashboard/               # داشبورد (تب‌های اصلی + «پروژه‌ها» + studio.html + overlay ورود)
 ├── data/                    # (gitignored) store پایدار: data/knowledge/{files,out} (PCM-14B)
+│                            #   + data/tasnim/pcm20_4/ (خروجی‌های پذیرش — gitignored)
 ├── deploy/                  # nginx vhost + systemd + اسکریپت‌های دپلوی PCM
 ├── docs/                    # project-dashboard.md · dashboard-authentication.md ·
 │                            #   WORD-FACTORY-USER-GUIDE.md · WORD-STUDIO-KNOWLEDGE-GUIDE.md ·
-│                            #   PCM-14C.3-DUMP-CONTRACT.md · PCM-12/13
+│                            #   PCM-14C.3-DUMP-CONTRACT.md · PCM-12/13 ·
+│                            #   PCM-20.3-TASNIM-FORFACTORY.md · PCM-20.4-TASNIM-ACCEPTANCE.md
 ├── docker-compose.yml       # backend محلی روی 127.0.0.1:5055
 ├── AGENTS.md                # قواعد سخت دپلوی/مهاجرت/رمز
 └── گزارش-وضعیت-پروژه.md / گزارش-PCM-0X.md

@@ -122,6 +122,7 @@ cd backend && python -m unittest test_api test_projects test_dashboard \
 | **PCM-20** خروجی کامل JSON پیکره‌ی «تفسیر تسنیم» + ممیزی شماره صفحه (`deploy/pcm20_tasnim_export.py`) | ✅ (read-only روی سرور: 45,844 سند / 73MB؛ بدون deploy) |
 | **PCM-20.2** ممیزی عمیق خروجی واقعی + تطبیق با AI Dump Builder (`deploy/pcm20_2_tasnim_audit.py`) | ✅ (باگ parse_barg اثبات شد؛ adapter بدون تغییر کد Builder ممکن است؛ بدون deploy) |
 | **PCM-20.3** Tasnim Corpus Factory: `corpus/tasnim/` (13 ماژول) + 16 تست T — audit gate + پیکره‌ی canonical (RAW/NORMALIZED جدا) + V01–V08 + dataset‌های 1/10/50/90/100 + adapter Dump سازگار با builder + diff + زنجیره‌ی manifest/provenance (immutable، append-only) | ✅ (16 تست + رگرسیون کامل 200؛ بدون deploy؛ سند: docs/PCM-20.3-TASNIM-FORFACTORY.md؛ embedding/Neo4j = مأموریت بعدی) |
+| **PCM-20.4** پذیرش واقعی end-to-end تسنیم: snapshot واقعی 45,844 صفحه (SHA verify + GATE 1.5 truncation) → پیکره‌ی canonical v0001 → 6 دیتاست نسخه‌شده (شامل 1 جلد + fixture افزایشی با diff/immutable) → 3 خروجی Dump + **3 build واقعی ai-dump-builder** (mock embedding؛ بدون LiteLLM/Neo4j/collection عملیاتی) + زنجیره‌ی registry 17-entry + 216 تست سبز (200 رگرسیون + 16 T؛ 0 skip) | ✅ (acceptance PASS؛ بدون deploy؛ سند: docs/PCM-20.4-TASNIM-ACCEPTANCE.md؛ embedding/Neo4j واقعی = PCM-20.5) |
 
 گزارش‌ها: `گزارش-PCM-0X.md` (۱۱ بخش: وضعیت قبل، طراحی، مهاجرت، فایل/API، تست،
 نتیجه production، SHA+لینک، git status، بکاپ/rollback، موارد باقی‌مانده، روش تست دستی).

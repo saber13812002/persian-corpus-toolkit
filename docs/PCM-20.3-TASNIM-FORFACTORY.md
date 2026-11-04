@@ -234,9 +234,14 @@ python -X utf8 -m corpus.tasnim.cli build-dataset --data-root … --corpus v0001
 python -X utf8 -m corpus.tasnim.cli export-dump --data-root … --dataset v0001 --percentage 10
 ```
 
-## ۱۳. موارد باز (NOT VERIFIED — فهرست دقیق در گزارش)
+## ۱۳. موارد باز — وضعیت بعد از PCM-20.4
 
-- منشأ `truncated_at_2000` (برش در سایت vs کراول) — فقط علامت‌گذاری شد.
-- اجرای روی خروجی واقعی 73MB روی s52 انجام **نشده** است (فقط fixture 21 رکورد
-  + رگرسیون).
-- اجرای واقعی ai-dump-builder (embedding/Neo4j) — مأموریت بعدی.
+- **منشأ `truncated_at_2000` — حل شد (PCM-20.4، GATE 1.5):** برش در سمت
+  منبع (سقف RAG سایت — با API زنده اثبات شد)؛ صفر برش در export/کراول
+  (تفصیل: `docs/PCM-20.4-TASNIM-ACCEPTANCE.md` §۴).
+- **اجرای روی خروجی واقعی 73MB — حل شد (PCM-20.4):** پیکره‌ی canonical v0001
+  روی 45,844 صفحه‌ی واقعی ساخته و اعتبارسنجی شد (content sha256
+  `ee87686a…`) + 6 دیتاست نسخه‌شده + fixture افزایشی (تفصیل: سند PCM-20.4 §۵/§۶).
+- **اجرای واقعی ai-dump-builder — نصفه حل شد (PCM-20.4):** 3 build واقعی
+  Builder با `--mock-embed` (بدون LiteLLM/Neo4j/شبکه) روی 3 خروجی Dump —
+  همه DUMP_VALIDATED. **embedding واقعی + Neo4j = PCM-20.5** (محیط ایزوله).
