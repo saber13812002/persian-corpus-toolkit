@@ -1,0 +1,62 @@
+{
+ "added": [
+  {
+   "flags": [],
+   "item_index": 990001,
+   "page_id": "tasnim_hamta__hamta-2026__vol047__p990001",
+   "source_page_id": 999999,
+   "volume_id": "tasnim_hamta__hamta-2026__vol047"
+  }
+ ],
+ "changed": [
+  {
+   "flags": [],
+   "item_index": 39007,
+   "new_content_hash": "b2f1c296c9839c1b0f42e65f7e78576ec9d4dff5f6150a85d2abfd2bfb86a2c6",
+   "old_content_hash": "b2f1c296c9839c1b0f42e65f7e78576ec9d4dff5f6150a85d2abfd2bfb86a2c6",
+   "page_id": "tasnim_hamta__hamta-2026__volkeyd531f422__p39007",
+   "source_page_id": 4
+  },
+  {
+   "flags": [
+    "no_barg"
+   ],
+   "item_index": 39490,
+   "new_content_hash": "6cc20db167fafd0462e0a7e0d2d1f0ec964cca96522d3ecd9150497e684523fe",
+   "old_content_hash": "6cc20db167fafd0462e0a7e0d2d1f0ec964cca96522d3ecd9150497e684523fe",
+   "page_id": "tasnim_hamta__hamta-2026__volkeyd531f422__p39490",
+   "source_page_id": 488
+  }
+ ],
+ "counts": {
+  "added": 1,
+  "changed": 2,
+  "duplicate_rows_in_new": 0,
+  "from_pages": 21,
+  "healed": 0,
+  "removed_from_source": 1,
+  "to_pages": 22,
+  "unchanged": 18
+ },
+ "from": "v0002",
+ "from_content_sha256": "8a1cad109266f76be8d1827a1fcd53fe0d3c70e373cbda3cc134bf5c78ab883b",
+ "healed": [],
+ "kind": "tasnim-change-manifest",
+ "removed_from_source": [
+  {
+   "item_index": 39023,
+   "note": "removed_from_source — در پیکره‌ی قبلی بود، در منبع جدید نیست (حذف خودکار ممنوع؛ نسخه‌ی قبلی immutable)",
+   "page_id": "tasnim_hamta__hamta-2026__volkeyd531f422__p39023",
+   "source_page_id": 20,
+   "volume_id": "tasnim_hamta__hamta-2026__volkeyd531f422"
+  }
+ ],
+ "to": "v0003",
+ "to_content_sha256": "0d86db167cd3bbf803a958c4660b8ea887f134438c77fe499c8b0b78250c7f36",
+ "truncated": {
+  "added": false,
+  "changed": false,
+  "healed": false,
+  "removed_from_source": false
+ }
+}

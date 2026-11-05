@@ -1,0 +1,44 @@
+empty record: 488 39490
+v1: 21 records -> data/tasnim/pcm20_4\validation\incremental-fixture\source-v2\tasnim-corpus-v1.jsonl
+v2: 22 records -> data/tasnim/pcm20_4\validation\incremental-fixture\source-v2\tasnim-corpus-v2.jsonl
+v1 build rc: 0
+=== BUILD CORPUS ===
+version        : v0002
+pages          : 21
+volumes        : 1
+content sha256 : 8a1cad109266f76be8d1827a1fcd53fe0d3c70e373cbda3cc134bf5c78ab883b
+build dir      : data/tasnim/pcm20_4\corpus\builds\v0002
+validate       : PASS
+DONE.
+
+v2 build rc: 0
+=== BUILD CORPUS ===
+version        : v0003
+pages          : 22
+volumes        : 2
+content sha256 : 0d86db167cd3bbf803a958c4660b8ea887f134438c77fe499c8b0b78250c7f36
+build dir      : data/tasnim/pcm20_4\corpus\builds\v0003
+validate       : PASS
+DONE.
+
+v2 tag: v0003
+validate v2 rc: 0
+=== VALIDATE CORPUS: data/tasnim/pcm20_4\corpus\builds\v0003 ===
+RESULT: PASS
+
+diff rc: 0
+=== DIFF v0002 -> v0003 ===
+  from_pages             21
+  to_pages               22
+  added                  1
+  changed                2
+  unchanged              18
+  healed                 0
+  removed_from_source    1
+  duplicate_rows_in_new  0
+change manifest: data/tasnim/pcm20_4\reports\diff_v0002_v0003\change-manifest.json
+sha256         : 7b302035e93711e990aaeec6fb8b1eeb40256c86e2bf683cdf115199dada1751
+DONE.
+
+real v0001 untouched: True
+SUMMARY WRITTEN: {"v1": "v0002", "v2": "v0003", "v1_records": 21, "v2_records": 22, "healed": {"page_id": 488, "item_index": 39490, "was": "empty", "now": "ok"}, "changed": {"page_id": 4, "item_index": 39007}, "removed": {"page_id": 20, "item_index": 39023}, "duplicate_of": {"page_id": 1, "item_index": 39004}, "new": {"page_id": 999999, "item_index": 990001}, "v0001_untouched_after_incremental_build": true, "rc": {"build_v1": 0, "build_v2": 0, "validate_v2": 0, "diff": 0}}

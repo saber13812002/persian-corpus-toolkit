@@ -1,0 +1,59 @@
+<!DOCTYPE html>
+<!-- lang/dir are the Persian defaults only. src/i18n applies the resolved
+     locale (fa / ar = rtl, en = ltr) to <html> before the app mounts. -->
+<!-- The default locale renders first; main.js applies the stored or
+     requested locale before mount and rewrites lang/dir. -->
+<html lang="fa" dir="rtl" data-default-dir="rtl">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover, interactive-widget=resizes-content">
+  <meta name="theme-color" content="#3d5c42">
+  <meta name="format-detection" content="telephone=no">
+  <meta name="description" content="فهم آیه در سیاق، استخراج دیدگاه تفسیری مؤلف، و تولید محتوای قرآنی بر پایه تفسیر تسنیم؛ با تفکیک نظر مؤلف از مطالب منقول.">
+  <!-- v1.15.0 - SEO defaults.
+       These tags are the only metadata a crawler sees before the bundle
+       runs, so they are filled per template at build time by
+       templateMetaPlugin in vite.config.js. Once the app is mounted the
+       router (meta.seo) and useSeoMeta keep them in sync per route. -->
+  <meta name="robots" content="index, follow">
+  <link rel="canonical" href="https://tasnim.hamtaa.org/">
+  <!-- v1.67.1 - per-template favicons. Paths are rewritten at build/dev
+       time to /favicons/<template>/... so each product keeps its own mark. -->
+  <link rel="icon" type="image/x-icon" href="/favicons/tasnim/favicon.ico">
+  <link rel="icon" type="image/png" sizes="32x32" href="/favicons/tasnim/favicon-32x32.png">
+  <link rel="icon" type="image/png" sizes="16x16" href="/favicons/tasnim/favicon-16x16.png">
+  <link rel="apple-touch-icon" sizes="180x180" href="/favicons/tasnim/apple-touch-icon.png">
+  <link rel="manifest" href="/favicons/tasnim/site.webmanifest">
+  <meta property="og:type" content="website">
+  <meta property="og:site_name" content="تسنیم — دستیار پژوهشی تفسیر تسنیم آیت‌الله جوادی آملی">
+  <meta property="og:url" content="https://tasnim.hamtaa.org/">
+  <meta property="og:locale" content="fa_IR">
+  <meta property="og:title" content="تسنیم — دستیار پژوهشی تفسیر تسنیم آیت‌الله جوادی آملی">
+  <meta property="og:description" content="فهم آیه در سیاق، استخراج دیدگاه تفسیری مؤلف، و تولید محتوای قرآنی بر پایه تفسیر تسنیم؛ با تفکیک نظر مؤلف از مطالب منقول.">
+  <meta property="og:image" content="https://tasnim.hamtaa.org/favicons/tasnim/android-chrome-512x512.png">
+  <meta name="twitter:card" content="summary">
+  <meta name="twitter:title" content="تسنیم — دستیار پژوهشی تفسیر تسنیم آیت‌الله جوادی آملی">
+  <meta name="twitter:description" content="فهم آیه در سیاق، استخراج دیدگاه تفسیری مؤلف، و تولید محتوای قرآنی بر پایه تفسیر تسنیم؛ با تفکیک نظر مؤلف از مطالب منقول.">
+  <meta name="twitter:image" content="https://tasnim.hamtaa.org/favicons/tasnim/android-chrome-512x512.png">
+  <title>تسنیم — دستیار پژوهشی تفسیر تسنیم آیت‌الله جوادی آملی</title>
+
+  <script type="module" crossorigin src="/assets/index-Cve6St2q.js"></script>
+  <link rel="modulepreload" crossorigin href="/assets/vendor-vue-CXOQNPDU.js">
+  <link rel="modulepreload" crossorigin href="/assets/vendor-capacitor-CXKy7gJz.js">
+  <link rel="modulepreload" crossorigin href="/assets/vendor-utils-C7Y_hnr5.js">
+  <link rel="stylesheet" crossorigin href="/assets/index-BED4Av6b.css">
+</head>
+<body>
+  <div id="app"></div>
+  <!-- v1.77.0 - PWA: register the service worker (public/sw.js is copied to the
+       dist root, so its scope is "/"). Skipped inside the Capacitor shell and
+       on plain HTTP, where a worker is neither needed nor allowed. -->
+  <script>
+    if ('serviceWorker' in navigator && location.protocol === 'https:' && !window.Capacitor) {
+      window.addEventListener('load', function () {
+        navigator.serviceWorker.register('/sw.js').catch(function () {})
+      })
+    }
+  </script>
+</body>
+</html>

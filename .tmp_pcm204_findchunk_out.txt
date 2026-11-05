@@ -1,0 +1,13 @@
+CTX: .../auth/me/phone/verify",AUTH_PASSWORD_RESET_REQUEST:"/auth/password/reset/request",AUTH_PASSWORD_RESET_VERIFY:"/auth/password/reset/verify",SEARCH:"/search",FILES:"/files",FILES_PUBLIC:"/files/public",CHUNK_DETAIL:e=>`/files/${e}/chunk-detail`,CHAT_STREAM:"/chat/stream",CHAT_SESSIONS:"/chat/sessions",CHAT_SESSION:e=>`/chat/sessions/${e}`,CHAT_CANCEL:e=>`/chat/cancel/${e}`,CHAT_MESSAGE_FEEDBACK:e=>`/chat/messages/${e}/feedback`,CHAT_MESSAGE_EXPORT:e=>`/chat/messages/${e}/export`,OPERATOR_ACTIONS:"/operator/ac...
+
+CTX: ...oveEventListener("resize",l),a.value=null}),{navTarget:a,targetReady:r,present:n}}async function On(e,t,a=null){const n=new URLSearchParams({item_index:String(t)});a&&n.set("section",a);const r=`${ae.CHUNK_DETAIL(e)}?${n}`,o=await Nt(r);if(!o||o.original_text==null&&o.metadata==null)throw new Error("جزئیات قطعه یافت نشد.");const i=o,s={text:i.original_text||"",vectorized_text:i.original_text||"",position:typeof t=="number"?t:parseInt(t,10),id:t,section:i.section||a||null,...i.metadata&&typeof i.metadata=="o...
+
+DEF: CHUNK_DETAIL:e=>`/files/${e
+
+APISTR: /api/v1
+
+APISTR: /api/v1/asr
+
+APISTR: /api/v1
+
+APISTR: /api/v1/asr

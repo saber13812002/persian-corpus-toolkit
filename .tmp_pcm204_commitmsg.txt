@@ -1,0 +1,15 @@
+PCM-20.4: real-world acceptance of the Tasnim end-to-end chain (docs + config). Proves: Real Snapshot -> Canonical Corpus -> Versioned Dataset -> AI Dump Builder Input, with full provenance. No deploy, no code changes (factory code = 2422b74).
+
+docs/PCM-20.4-TASNIM-ACCEPTANCE.md: 13-section acceptance doc.
+Stage 1: real snapshot 45,844 pages (tasnim-corpus.json 72.9MB sha cee2c08a / jsonl fd927b66 / audit db6c30f4 - ALL_MATCH vs reference; JSON<->JSONL 0 mismatches).
+GATE 1.5: 28 texts at exactly 2000 chars (0.06%) = source-side RAG cap proven via live API; zero export/crawl truncation.
+20.4-A: corpus v0001 built from real JSONL (6 volumes, RAW/NORMALIZED separate, flag-not-delete, census ok 33399/short 12366/empty 35/dup_ii 18/trunc 28; content sha ee87686a); QC A PASS; idempotent re-run reuses v0001; cross-root determinism (same SHAs, different data-root).
+20.4-B: 6 versioned datasets (1/10/50/90/100% + 10pct single-volume 56) via stratified-even-blocks, per-dataset flags/coverage, registry chain; rerun idempotent; incremental fixture (1 new/1 changed/1 duplicate/1 healed/1 removed) -> diff v0002->v0003 (added 1, changed 2, healed 0, removed 1 NOT auto-deleted, versions immutable); INCR VERIFY PASS.
+20.4-C: 3 Dump exports (adapter corpus/tasnim/dump.py) + 3 REAL ai-dump-builder builds (--mock-embed --no-embed-reuse, builder commit 1c500a64, dim 1024) - vol56 2197 rec / 10pct 3416 rec / 100pct 33443 rec (872.2MB) - all DUMP_VALIDATED (in-build + independent validate); mock = ONLY embedding vectors; no LiteLLM/network/Neo4j/operational collection touched; field-mapping table + 4 verbatim JSON samples.
+registry: 17-entry provenance chain (source-snapshot -> corpus v0001-v0003 -> 6 datasets -> 3 dumps).
+
+گزارش-PCM-20.4.md: final 8-section Persian report (A snapshot+gate, B corpus, C datasets, D builder, E tests PASS/FAIL/SKIP, F git 3-env table, G NOT VERIFIED, H PCM-20.5 proposal) + evidence appendix.
+
+Tests: backend regression 200/200 OK (0 fail/0 err/0 skip - the 10 CT tests formerly skipped now PASS after pinning pyyaml in the project .venv) + 16/16 T-suite (test_corpus_tasnim.py) = 216 green.
+
+readme.md: feature rows 8f (PCM-20.3 factory) + 8g (PCM-20.4 acceptance) + corpus/tasnim in architecture/tree. AGENTS.md: roadmap row PCM-20.4. docs/PCM-20.3-TASNIM-FORFACTORY.md section 13: 3 open items marked resolved (truncation origin = GATE 1.5; real 73MB run = done; real builder = mock done, real embedding/Neo4j = PCM-20.5). backend/requirements.txt: pyyaml==6.0.3 pinned (project venv only - no global install).

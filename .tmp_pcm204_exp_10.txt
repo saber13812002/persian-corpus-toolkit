@@ -1,0 +1,10 @@
+=== EXPORT DUMP (adapter for ai-dump-builder) ===
+dataset        : v0001
+version        : v0002
+books          : 6
+records        : 3416 (skipped_short=1168, truncated=0)
+required fields: OK
+content sha256 : 3ef895e32375764db76d00407198e2f8c28e175eb4fcdb7a43b3ef5d92db1878
+out dir        : data/tasnim/pcm20_4\dumps\10pct\v0002
+NOTE: embedding/Neo4j OUT OF SCOPE در این فاز (مأموریت بعدی).
+DONE.

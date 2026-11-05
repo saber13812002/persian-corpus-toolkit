@@ -1,0 +1,20 @@
+shell bytes: 3845
+scripts: ['/assets/index-Cve6St2q.js']
+hint: /assets/index-BED4Av6b.css
+hint: /assets/index-Cve6St2q.js
+bundle /assets/index-Cve6St2q.js bytes=1085418
+  api: /api/
+  api: /api/v1
+  api: /api/v1/asr
+  api: /payload
+  api: file_id
+  api: payload
+  api: payloadId
+  api: payload_id
+  api: ui.payloadTooLarge
+  MARKER 'truncate' x5
+    ctx: ...g,[c("span",{class:"text-sm text-gray-500 font-medium group-hover:text-teal-700 truncate max-w-[180px] sm:max-w-[250px]",title:H.value},C(H.value),9,jg)])])]))],6))}};m...
+    ctx: ...tems-center gap-2.5 min-w-0"},hm={key:0,class:"text-sm font-bold text-[#1a2160] truncate"},mm={key:1,class:"text-sm font-bold text-[#1a2160] truncate"},pm={class:"flex ...
+    ctx: ...old text-[#1a2160] truncate"},mm={key:1,class:"text-sm font-bold text-[#1a2160] truncate"},pm={class:"flex items-center gap-1"},fm=["disabled","title","aria-label"],ym=...
+    ctx: ...ass:"min-w-0 flex-1 text-start"},Ox={class:"text-[13px] font-bold text-gray-800 truncate"},Hx={class:"text-[11px] text-gray-500 mt-0.5"},Fx={key:0},$x=["title","aria-la...
+    ctx: ...:"text-start min-w-0"},Ww={class:"text-sm font-bold text-gray-900 leading-tight truncate"},jw={key:0,class:"w-1.5 h-1.5 rounded-full bg-emerald-400 inline-block"},Bw={k...

@@ -1,0 +1,2 @@
+ITEMFN: return Object.defineProperty(s,"_file",{value:{id:i.file_id??null,slug:i.file_slug??null},enumerable:!1,configurable:!0,writable:!0}),s}async function Qg(e,t=null){if(t==null||t==="")throw new Error("شناسهٔ آیتم (item_index) مشخص نشده است.");return await On(e,t)}async function Gg(e,t,a){const n=typeof t=="number"?t:parseInt(t,10);if(Number.isNaN(n))return null;const r=a==="next"?n+1:n-1;if(r<0)return null;try{return await On(e,r)}catch(o){return ue.warn(`No payload found at item_index=${r}:`,o),null}}async
+ROUTE: /api/v1/asr

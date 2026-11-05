@@ -1,0 +1,568 @@
+{
+ "total": 45844,
+ "flag_counts": {
+  "empty": 35,
+  "short": 12366,
+  "truncated_at_2000": 28,
+  "dup_item_index": 18,
+  "no_barg": 35,
+  "missing_item_index": 0,
+  "ok": 33399
+ },
+ "short_census": {
+  "length_hist": {
+   "10_14": 5274,
+   "15_19": 1955,
+   "1_4": 10,
+   "5_9": 5127
+  },
+  "count": 12366,
+  "pattern_hits": {
+   "has_ayat": 142,
+   "has_sura_word": 274,
+   "has_bab": 4,
+   "has_moqaddma": 1,
+   "has_fasl": 2
+  }
+ },
+ "pattern_hits": {},
+ "samples": {
+  "shorts": [
+   {
+    "pos": 4,
+    "item_index": 39008,
+    "len": 9,
+    "text": "بحث روایی",
+    "url": "https://tasnim.hamtaa.org/payload?file_id=tasnim&item_index=39008"
+   },
+   {
+    "pos": 1209,
+    "item_index": 40213,
+    "len": 13,
+    "text": "2. حدود اعجاز",
+    "url": "https://tasnim.hamtaa.org/payload?file_id=tasnim&item_index=40213"
+   },
+   {
+    "pos": 2486,
+    "item_index": 41490,
+    "len": 10,
+    "text": "تناسب آیات",
+    "url": "https://tasnim.hamtaa.org/payload?file_id=tasnim&item_index=41490"
+   },
+   {
+    "pos": 3739,
+    "item_index": 42743,
+    "len": 5,
+    "text": "تفسیر",
+    "url": "https://tasnim.hamtaa.org/payload?file_id=tasnim&item_index=42743"
+   },
+   {
+    "pos": 4779,
+    "item_index": 43783,
+    "len": 19,
+    "text": "2. اسلامی بودن علوم",
+    "url": "https://tasnim.hamtaa.org/payload?file_id=tasnim&item_index=43783"
+   },
+   {
+    "pos": 5795,
+    "item_index": 44799,
+    "len": 12,
+    "text": "تصدیر به وحی",
+    "url": "https://tasnim.hamtaa.org/payload?file_id=tasnim&item_index=44799"
+   },
+   {
+    "pos": 7055,
+    "item_index": 51059,
+    "len": 5,
+    "text": "* * *",
+    "url": "https://tasnim.hamtaa.org/payload?file_id=tasnim&item_index=51059&section=%D8%AA%D9%81%D8%B3%DB%8C%D8%B1+%D8%A"
+   },
+   {
+    "pos": 8246,
+    "item_index": 52250,
+    "len": 6,
+    "text": "مفردات",
+    "url": "https://tasnim.hamtaa.org/payload?file_id=tasnim&item_index=52250&section=%D8%AA%D9%81%D8%B3%DB%8C%D8%B1+%D8%A"
+   },
+   {
+    "pos": 9229,
+    "item_index": 53233,
+    "len": 14,
+    "text": "اشارات و لطایف",
+    "url": "https://tasnim.hamtaa.org/payload?file_id=tasnim&item_index=53233&section=%D8%AA%D9%81%D8%B3%DB%8C%D8%B1+%D8%A"
+   },
+   {
+    "pos": 10202,
+    "item_index": 54206,
+    "len": 10,
+    "text": "تناسب آیات",
+    "url": "https://tasnim.hamtaa.org/payload?file_id=tasnim&item_index=54206&section=%D8%AA%D9%81%D8%B3%DB%8C%D8%B1+%D8%A"
+   },
+   {
+    "pos": 11180,
+    "item_index": 55184,
+    "len": 14,
+    "text": "هدفداری آفرینش",
+    "url": "https://tasnim.hamtaa.org/payload?file_id=tasnim&item_index=55184&section=%D8%AA%D9%81%D8%B3%DB%8C%D8%B1+%D8%A"
+   },
+   {
+    "pos": 12739,
+    "item_index": 1018,
+    "len": 10,
+    "text": "تناسب آیات",
+    "url": "https://tasnim.hamtaa.org/payload?file_id=tasnim&item_index=1018&section=%D8%AA%D9%81%D8%B3%DB%8C%D8%B1+%D8%AA"
+   },
+   {
+    "pos": 14111,
+    "item_index": 2390,
+    "len": 17,
+    "text": "4. ولی عفو از مهر",
+    "url": "https://tasnim.hamtaa.org/payload?file_id=tasnim&item_index=2390&section=%D8%AA%D9%81%D8%B3%DB%8C%D8%B1+%D8%AA"
+   },
+   {
+    "pos": 15280,
+    "item_index": 3559,
+    "len": 10,
+    "text": "تناسب آیات",
+    "url": "https://tasnim.hamtaa.org/payload?file_id=tasnim&item_index=3559&section=%D8%AA%D9%81%D8%B3%DB%8C%D8%B1+%D8%AA"
+   },
+   {
+    "pos": 16746,
+    "item_index": 60949,
+    "len": 5,
+    "text": "تفسیر",
+    "url": "https://tasnim.hamtaa.org/payload?file_id=tasnim&item_index=60949&section=%D8%AA%D9%81%D8%B3%DB%8C%D8%B1+%D8%A"
+   },
+   {
+    "pos": 17886,
+    "item_index": 62089,
+    "len": 6,
+    "text": "مفردات",
+    "url": "https://tasnim.hamtaa.org/payload?file_id=tasnim&item_index=62089&section=%D8%AA%D9%81%D8%B3%DB%8C%D8%B1+%D8%A"
+   },
+   {
+    "pos": 19061,
+    "item_index": 63264,
+    "len": 10,
+    "text": "تناسب آیات",
+    "url": "https://tasnim.hamtaa.org/payload?file_id=tasnim&item_index=63264&section=%D8%AA%D9%81%D8%B3%DB%8C%D8%B1+%D8%A"
+   },
+   {
+    "pos": 20148,
+    "item_index": 64351,
+    "len": 12,
+    "text": "گزیدهٔ تفسیر",
+    "url": "https://tasnim.hamtaa.org/payload?file_id=tasnim&item_index=64351&section=%D8%AA%D9%81%D8%B3%DB%8C%D8%B1+%D8%A"
+   },
+   {
+    "pos": 21203,
+    "item_index": 65406,
+    "len": 8,
+    "text": "شأن نزول",
+    "url": "https://tasnim.hamtaa.org/payload?file_id=tasnim&item_index=65406&section=%D8%AA%D9%81%D8%B3%DB%8C%D8%B1+%D8%A"
+   },
+   {
+    "pos": 22163,
+    "item_index": 66366,
+    "len": 10,
+    "text": "تناسب آیات",
+    "url": "https://tasnim.hamtaa.org/payload?file_id=tasnim&item_index=66366&section=%D8%AA%D9%81%D8%B3%DB%8C%D8%B1+%D8%A"
+   },
+   {
+    "pos": 23183,
+    "item_index": 67386,
+    "len": 11,
+    "text": "1. شأن نزول",
+    "url": "https://tasnim.hamtaa.org/payload?file_id=tasnim&item_index=67386&section=%D8%AA%D9%81%D8%B3%DB%8C%D8%B1+%D8%A"
+   },
+   {
+    "pos": 24393,
+    "item_index": 68596,
+    "len": 14,
+    "text": "اشارات و لطایف",
+    "url": "https://tasnim.hamtaa.org/payload?file_id=tasnim&item_index=68596&section=%D8%AA%D9%81%D8%B3%DB%8C%D8%B1+%D8%A"
+   },
+   {
+    "pos": 25495,
+    "item_index": 69698,
+    "len": 12,
+    "text": "گزیدهٔ تفسیر",
+    "url": "https://tasnim.hamtaa.org/payload?file_id=tasnim&item_index=69698&section=%D8%AA%D9%81%D8%B3%DB%8C%D8%B1+%D8%A"
+   },
+   {
+    "pos": 26528,
+    "item_index": 70731,
+    "len": 8,
+    "text": "شأن نزول",
+    "url": "https://tasnim.hamtaa.org/payload?file_id=tasnim&item_index=70731&section=%D8%AA%D9%81%D8%B3%DB%8C%D8%B1+%D8%A"
+   },
+   {
+    "pos": 27827,
+    "item_index": 72030,
+    "len": 9,
+    "text": "پیش گفتار",
+    "url": "https://tasnim.hamtaa.org/payload?file_id=tasnim&item_index=72030&section=%D8%AA%D9%81%D8%B3%DB%8C%D8%B1+%D8%A"
+   },
+   {
+    "pos": 28768,
+    "item_index": 72971,
+    "len": 9,
+    "text": "بحث روایی",
+    "url": "https://tasnim.hamtaa.org/payload?file_id=tasnim&item_index=72971&section=%D8%AA%D9%81%D8%B3%DB%8C%D8%B1+%D8%A"
+   },
+   {
+    "pos": 29979,
+    "item_index": 74182,
+    "len": 12,
+    "text": "گزیدهٔ تفسیر",
+    "url": "https://tasnim.hamtaa.org/payload?file_id=tasnim&item_index=74182&section=%D8%AA%D9%81%D8%B3%DB%8C%D8%B1+%D8%A"
+   },
+   {
+    "pos": 31084,
+    "item_index": 75287,
+    "len": 12,
+    "text": "گزیدهٔ تفسیر",
+    "url": "https://tasnim.hamtaa.org/payload?file_id=tasnim&item_index=75287&section=%D8%AA%D9%81%D8%B3%DB%8C%D8%B1+%D8%A"
+   },
+   {
+    "pos": 32066,
+    "item_index": 76269,
+    "len": 10,
+    "text": "تناسب آیات",
+    "url": "https://tasnim.hamtaa.org/payload?file_id=tasnim&item_index=76269&section=%D8%AA%D9%81%D8%B3%DB%8C%D8%B1+%D8%A"
+   },
+   {
+    "pos": 33048,
+    "item_index": 77251,
+    "len": 15,
+    "text": "معنای ﴿ءاسفونا﴾",
+    "url": "https://tasnim.hamtaa.org/payload?file_id=tasnim&item_index=77251&section=%D8%AA%D9%81%D8%B3%DB%8C%D8%B1+%D8%A"
+   },
+   {
+    "pos": 34157,
+    "item_index": 78360,
+    "len": 5,
+    "text": "تفسیر",
+    "url": "https://tasnim.hamtaa.org/payload?file_id=tasnim&item_index=78360&section=%D8%AA%D9%81%D8%B3%DB%8C%D8%B1+%D8%A"
+   },
+   {
+    "pos": 35399,
+    "item_index": 79602,
+    "len": 19,
+    "text": "نام ها و اوصاف سوره",
+    "url": "https://tasnim.hamtaa.org/payload?file_id=tasnim&item_index=79602&section=%D8%AA%D9%81%D8%B3%DB%8C%D8%B1+%D8%A"
+   },
+   {
+    "pos": 36421,
+    "item_index": 80624,
+    "len": 12,
+    "text": "گزیدهٔ تفسیر",
+    "url": "https://tasnim.hamtaa.org/payload?file_id=tasnim&item_index=80624&section=%D8%AA%D9%81%D8%B3%DB%8C%D8%B1+%D8%A"
+   },
+   {
+    "pos": 37616,
+    "item_index": 81819,
+    "len": 6,
+    "text": "مفردات",
+    "url": "https://tasnim.hamtaa.org/payload?file_id=tasnim&item_index=81819&section=%D8%AA%D9%81%D8%B3%DB%8C%D8%B1+%D8%A"
+   },
+   {
+    "pos": 38766,
+    "item_index": 82969,
+    "len": 15,
+    "text": "تفضلی بودن بهشت",
+    "url": "https://tasnim.hamtaa.org/payload?file_id=tasnim&item_index=82969&section=%D8%AA%D9%81%D8%B3%DB%8C%D8%B1+%D8%A"
+   },
+   {
+    "pos": 39928,
+    "item_index": 84131,
+    "len": 8,
+    "text": "غرر آیات",
+    "url": "https://tasnim.hamtaa.org/payload?file_id=tasnim&item_index=84131&section=%D8%AA%D9%81%D8%B3%DB%8C%D8%B1+%D8%A"
+   },
+   {
+    "pos": 40907,
+    "item_index": 85110,
+    "len": 13,
+    "text": "اتاق فکر دشمن",
+    "url": "https://tasnim.hamtaa.org/payload?file_id=tasnim&item_index=85110&section=%D8%AA%D9%81%D8%B3%DB%8C%D8%B1+%D8%A"
+   },
+   {
+    "pos": 42017,
+    "item_index": 86220,
+    "len": 18,
+    "text": "3. تصدیق روز قیامت",
+    "url": "https://tasnim.hamtaa.org/payload?file_id=tasnim&item_index=86220&section=%D8%AA%D9%81%D8%B3%DB%8C%D8%B1+%D8%A"
+   },
+   {
+    "pos": 43311,
+    "item_index": 87514,
+    "len": 9,
+    "text": "بحث روایی",
+    "url": "https://tasnim.hamtaa.org/payload?file_id=tasnim&item_index=87514&section=%D8%AA%D9%81%D8%B3%DB%8C%D8%B1+%D8%A"
+   },
+   {
+    "pos": 44509,
+    "item_index": 88712,
+    "len": 17,
+    "text": "منشأ تحقق موجودات",
+    "url": "https://tasnim.hamtaa.org/payload?file_id=tasnim&item_index=88712&section=%D8%AA%D9%81%D8%B3%DB%8C%D8%B1+%D8%A"
+   },
+   {
+    "pos": 45829,
+    "item_index": 91063,
+    "len": 17,
+    "text": "8. حکم روزه مسافر",
+    "url": "https://tasnim.hamtaa.org/payload?file_id=tasnim&item_index=91063&section=%D8%AA%D9%81%D8%B3%DB%8C%D8%B1+%D8%A"
+   }
+  ],
+  "empties": [
+   {
+    "pos": 486,
+    "item_index": 39490,
+    "values_keys": [
+     "ادرس صفحه",
+     "برگ",
+     "لینک صفحه بعد",
+     "لینک صفحه قبل",
+     "متن"
+    ],
+    "url": "https://tasnim.hamtaa.org/payload?file_id=tasnim&item_index=39490"
+   },
+   {
+    "pos": 1259,
+    "item_index": 40263,
+    "values_keys": [
+     "ادرس صفحه",
+     "برگ",
+     "لینک صفحه بعد",
+     "لینک صفحه قبل",
+     "متن"
+    ],
+    "url": "https://tasnim.hamtaa.org/payload?file_id=tasnim&item_index=40263"
+   },
+   {
+    "pos": 1260,
+    "item_index": 40264,
+    "values_keys": [
+     "ادرس صفحه",
+     "برگ",
+     "لینک صفحه بعد",
+     "لینک صفحه قبل",
+     "متن"
+    ],
+    "url": "https://tasnim.hamtaa.org/payload?file_id=tasnim&item_index=40264"
+   },
+   {
+    "pos": 4307,
+    "item_index": 43311,
+    "values_keys": [
+     "ادرس صفحه",
+     "برگ",
+     "لینک صفحه بعد",
+     "لینک صفحه قبل",
+     "متن"
+    ],
+    "url": "https://tasnim.hamtaa.org/payload?file_id=tasnim&item_index=43311"
+   },
+   {
+    "pos": 8329,
+    "item_index": 52333,
+    "values_keys": [
+     "ادرس صفحه",
+     "برگ",
+     "لینک صفحه بعد",
+     "لینک صفحه قبل",
+     "متن"
+    ],
+    "url": "https://tasnim.hamtaa.org/payload?file_id=tasnim&item_index=52333&section=%D8%AA%D9%81%D8%B3%DB%8C%D8%B1+%D8%A"
+   },
+   {
+    "pos": 8445,
+    "item_index": 52449,
+    "values_keys": [
+     "ادرس صفحه",
+     "برگ",
+     "لینک صفحه بعد",
+     "لینک صفحه قبل",
+     "متن"
+    ],
+    "url": "https://tasnim.hamtaa.org/payload?file_id=tasnim&item_index=52449&section=%D8%AA%D9%81%D8%B3%DB%8C%D8%B1+%D8%A"
+   },
+   {
+    "pos": 8501,
+    "item_index": 52505,
+    "values_keys": [
+     "ادرس صفحه",
+     "برگ",
+     "لینک صفحه بعد",
+     "لینک صفحه قبل",
+     "متن"
+    ],
+    "url": "https://tasnim.hamtaa.org/payload?file_id=tasnim&item_index=52505&section=%D8%AA%D9%81%D8%B3%DB%8C%D8%B1+%D8%A"
+   },
+   {
+    "pos": 10235,
+    "item_index": 54239,
+    "values_keys": [
+     "ادرس صفحه",
+     "برگ",
+     "لینک صفحه بعد",
+     "لینک صفحه قبل",
+     "متن"
+    ],
+    "url": "https://tasnim.hamtaa.org/payload?file_id=tasnim&item_index=54239&section=%D8%AA%D9%81%D8%B3%DB%8C%D8%B1+%D8%A"
+   },
+   {
+    "pos": 10338,
+    "item_index": 54342,
+    "values_keys": [
+     "ادرس صفحه",
+     "برگ",
+     "لینک صفحه بعد",
+     "لینک صفحه قبل",
+     "متن"
+    ],
+    "url": "https://tasnim.hamtaa.org/payload?file_id=tasnim&item_index=54342&section=%D8%AA%D9%81%D8%B3%DB%8C%D8%B1+%D8%A"
+   },
+   {
+    "pos": 16395,
+    "item_index": 60598,
+    "values_keys": [
+     "ادرس صفحه",
+     "برگ",
+     "لینک صفحه بعد",
+     "لینک صفحه قبل",
+     "متن"
+    ],
+    "url": "https://tasnim.hamtaa.org/payload?file_id=tasnim&item_index=60598&section=%D8%AA%D9%81%D8%B3%DB%8C%D8%B1+%D8%A"
+   }
+  ],
+  "truncated": [
+   {
+    "pos": 133,
+    "item_index": 39137,
+    "tail_60": "یی به جای دیگر نرفته تا با تعبیر به جای اصلی اش بازگردد. دو.",
+    "head_60": "رویاها دو قسم اند: أ. حق و صادق. ب. باطل و کاذب. رویاهای حق "
+   },
+   {
+    "pos": 180,
+    "item_index": 39184,
+    "tail_60": "سلام 110 برتری پاداش آخرتی بر پاداش دنیایی 111 بحث روایی 112",
+    "head_60": "آیات 50 و 51 گزیدهٴ تفسیر 27 تفسیر 29 مفردات 29 دستور آزادی "
+   },
+   {
+    "pos": 822,
+    "item_index": 39826,
+    "tail_60": "د» است؛ نظیر ﴿لم یخروا علیها صما و عمیانا﴾ أی لم یمروا کذلک.",
+    "head_60": "سجده پدر و مادر و برادران، سجده تکریم، خضوع، اجلال و تعظیم ب"
+   },
+   {
+    "pos": 6499,
+    "item_index": 50503,
+    "tail_60": "هم می کنند، بسیار بیشتر و درجاتی از بهشت، ویژهٔ ایشان است: ﴿",
+    "head_60": "قرآن کریم انسان ها را که از جهت هوشمندی متفاوت اند، به شیوه "
+   },
+   {
+    "pos": 6610,
+    "item_index": 50614,
+    "tail_60": "است اخذ اجرت در برابر کار 312 پایان همراهی خضر با موسی ５ 313",
+    "head_60": "4. بطلان تشبیه رویداد غدیر و سقیفه به داستان موسی و خضر ５ 25"
+   },
+   {
+    "pos": 9085,
+    "item_index": 53089,
+    "tail_60": "هرست کتب 609 فهرست منابع 617 سورﮤ طه پیش گفتار و آیات 1 - 69",
+    "head_60": "مفردات 472 تناسب آیات 472 بستر مبارزه ساحران با موسای کلیم ع"
+   },
+   {
+    "pos": 9480,
+    "item_index": 53484,
+    "tail_60": "ید تام باشد و مردم باید کاملا بفهمند و پس از تبین رشد از غی:",
+    "head_60": "سخنان حضرت موسی علیه السلام برای فراعنه ناآشنا بود و جز با ز"
+   },
+   {
+    "pos": 14757,
+    "item_index": 3036,
+    "tail_60": "خالفان حضرت علی ( علیه السلام ) نماز میت خوانده می شد. ٭ ٭ ٭",
+    "head_60": "عن الأصبغ بن نباته قال : جاء رجل إلی علی ( علیه السلام ) بال"
+   },
+   {
+    "pos": 17298,
+    "item_index": 61501,
+    "tail_60": "0 ـ 104 گزیدهٴ تفسیر 558 تفسیر 559 مفردات 559 تناسب آیات 560",
+    "head_60": "اظهار ایمان ساحران 485 واکنش فرعون به ایمان ساحران 486 اتهام"
+   },
+   {
+    "pos": 17421,
+    "item_index": 61624,
+    "tail_60": "یا امر طبیعی، نمی گذارد دو دریا به هم درآمیزند و ممزوج شوند.",
+    "head_60": "از جلوه های نظم الهی در جهان که دلیل دیگری بر توحید ربوبی و "
+   },
+   {
+    "pos": 18406,
+    "item_index": 62609,
+    "tail_60": "69 جزای حسنه در قیامت و معنای خیر 571 ولایت، بهترین حسنه 573",
+    "head_60": "تابع و متبوع بودن علم 502 بحث روایی 503 ثبت همه چیز در کتاب "
+   },
+   {
+    "pos": 19706,
+    "item_index": 63909,
+    "tail_60": "ت 386 فرجام قارون 386 پشیمانی دنیاطلبان پس از عذاب قارون 387",
+    "head_60": "پاسخ چهارم به بهانه های مشرکان در ایمان نیاوردن به پیامبر اک"
+   }
+  ],
+  "content_first3": [
+   {
+    "pos": 133,
+    "lines": [
+     "رویاها دو قسم اند: أ. حق و صادق. ب. باطل و کاذب. رویاهای حق و دارای تعبیر، ریشه "
+    ]
+   },
+   {
+    "pos": 6610,
+    "lines": [
+     "4. بطلان تشبیه رویداد غدیر و سقیفه به داستان موسی و خضر ５ 256 بحث روایی 256 1. چ"
+    ]
+   },
+   {
+    "pos": 17298,
+    "lines": [
+     "اظهار ایمان ساحران 485 واکنش فرعون به ایمان ساحران 486 اتهام فرعون به حضرت موسی "
+    ]
+   },
+   {
+    "pos": 20974,
+    "lines": [
+     "مفردات 449 تناسب آیات 449 آیت بودن رعد و برق 449 آیت بودن باران و احیای زمین 452"
+    ]
+   },
+   {
+    "pos": 27509,
+    "lines": [
+     "گزیدهٴ تفسیر 628 تفسیر 628 مفردات 628 تناسب آیات 629 فرجام متقیان و تبهکاران 629"
+    ]
+   },
+   {
+    "pos": 33281,
+    "lines": [
+     "با در نظر گرفتن مجموع ادله و شواهد تدریجی بودن نزول قرآن، باید نزول دفعی قرآن تو"
+    ]
+   },
+   {
+    "pos": 38445,
+    "lines": [
+     "خدای متعالی پس از بحث از تدبیر امور جهان و علم خدا درباره آسمان ها و زمین، از مع"
+    ]
+   }
+  ]
+ },
+ "multi_line_shorts": 0,
+ "values_key_census": {
+  "ادرس صفحه": 12366,
+  "برگ": 12366,
+  "لینک صفحه بعد": 12366,
+  "لینک صفحه قبل": 12366,
+  "متن": 12366
+ }
+}

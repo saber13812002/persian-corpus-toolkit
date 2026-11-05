@@ -1,0 +1,26 @@
+=== TASNIM AUDIT (read-only) ===
+source jsonl : C:\Users\s.tabatabaei\Documents\saberprojects\persian-corpus-toolkit\data\tasnim\pcm20_4\source-snapshot\tasnim-corpus.jsonl
+jsonl sha256 : fd927b663733fe0530afdf76d6deb6b42f3b40d807297e60722fe3b0e79e96b5  (72906133 bytes, 45844 records)
+summary sha256: 1b96b1b07c1acca11ebfcd75e3cd8f5f706c76955e6023e30923f6dc7a2fc733
+-- integrity --
+  incomplete_empty       35
+  short_lt_20            12366
+  truncated_at_2000      28
+  no_barg                35
+  missing_item_index     0
+  text_len           p50=64 p90=1710 p99=1985 max=2000
+-- duplicates --
+  dup item_index     9 values / 9 extra rows
+  dup content_hash   0 values / 0 extra rows
+-- barg reparse (fixed parser) --
+  with raw barg      45844
+  with parsed barg   45809
+  == item_index+1    45800
+  != export barg     44801
+-- item_index gap --
+  min=0 max=91077 distinct=45835 missing=45243 dup=9
+-- volumes --
+  strategy census    {'url_section': 39878, 'text': 0, 'none': 5966}
+  distinct url sections: 6
+audit written  : data/tasnim/pcm20_4/validation/audit_gate.json  sha256=8e5ebfc801eff1cb0104d59e3f13d2638cc09487646270dba81b972bf6c66812
+DONE — read-only; nothing was modified.

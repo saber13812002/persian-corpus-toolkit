@@ -4,10 +4,12 @@
 زیردستورها:
     audit            درگاه آشتیابی روی خروجی PCM-20 (فقط‌خواندن)
     build-corpus     ساخت پیکره‌ی رسمی (نسخه‌ای + manifest + validate)
-    validate-corpus  اعتبارسنجی یک build موجود
+    build-semantic   لایه‌ی معنایی روی یک build (PCM-20.5 GATE 1) — نسخه‌ی جدید
+    validate-corpus  اعتبارسنجی یک build موجود (به‌صورت خودکار S01..S07 برای semantic)
     build-dataset    ساخت دیتاست pct٪ (لایه‌بندی‌شده، قطعی) [+ --volume N]
     export-dump      ساخت خروجی سازگار با ai-dump-builder (بدون embedding)
     diff             Change Manifest بین دو نسخه‌ی پیکره
+    semantic-diff    semantic-diff 7 دسته‌ای بین دو build (PCM-20.5 GATE 1)
 
 کد خروجی: 0 = موفق/REUSED · 1 = خطای اجرا/اعتبارسنجی · 2 = خطای ورودی.
 همه‌ی زیردستورها فقط‌خواندن روی ورودی‌ها هستند؛ خروجی زیر data/tasnim می‌نویسد.
@@ -25,6 +27,7 @@ from . import dump as DP
 from . import manifest as M
 from . import normalize as N
 from . import reconcile as R
+from . import semantic as SEM
 from . import transform as T
 from . import validate as VAL
 from . import versioning as V
@@ -219,6 +222,17 @@ def cmd_validate_corpus(args) -> int:
     if not os.path.isdir(build_dir):
         return _fail("corpus build dir not found: %s" % args.build, 2)
     ok, errors, warnings = VAL.validate_corpus(build_dir)
+    # PCM-20.5 GATE 1: اگر build لایه‌ی معنایی دارد، S01..S07 هم اجرا می‌شود
+    root_hint = args.data_root if os.path.isdir(args.data_root) else None
+    try:
+        corpus = C.read_json(os.path.join(build_dir, "corpus.json"))
+        if "semantic" in corpus:
+            ok2, s_errors, s_warnings = SEM.validate_semantic(build_dir, root_hint)
+            errors = list(errors) + ["S: %s" % e for e in s_errors]
+            warnings = list(warnings) + list(s_warnings)
+            ok = ok and ok2
+    except Exception:
+        pass
     _emit("=== VALIDATE CORPUS: %s ===" % build_dir)
     for e in errors:
         _emit("  ERROR: %s" % e)
@@ -226,6 +240,81 @@ def cmd_validate_corpus(args) -> int:
         _emit("  WARN: %s" % w)
     _emit("RESULT: %s" % ("PASS" if ok else "FAIL"))
     return 0 if ok else 1
+
+
+# --------------------------------------------------------------------------- build-semantic (PCM-20.5 GATE 1)
+def cmd_build_semantic(args) -> int:
+    C.force_utf8_stdio()
+    paths = V.root_paths(args.data_root)
+    builds = paths["corpus_builds"]
+    base_dir = os.path.join(builds, args.base)
+    if not os.path.isdir(base_dir):
+        return _fail("base corpus build not found: %s" % args.base, 2)
+    try:
+        result = SEM.build_semantic(base_dir)
+    except ValueError as e:
+        return _fail(str(e), 2)
+    corpus2, pages2, context = result["corpus"], result["pages"], result["context"]
+    base_manifest, base_rel = result["base_manifest"], result["base_rel"]
+
+    files = SEM.content_files_semantic(corpus2, pages2, context)
+    csha = T.content_sha256_of_files(files)
+    reuse = V.find_reusable_version(builds, None, csha)
+    if reuse:
+        _emit("REUSED %s — semantic content identical (same base + rules). No new version."
+              % reuse)
+        return 0
+
+    bdata = base_manifest.get("data") or {}
+    prev_entry = M.chain_entry(base_manifest, base_rel)
+    tag = V.version_tag(V.next_version_number(builds))
+    out_dir = V.version_dir(builds, tag)
+    written = SEM.write_semantic(out_dir, corpus2, pages2, context)
+    if written["files"] != files:
+        return _fail("write verification failed (sha mismatch after write)")
+
+    manifest = M.build_manifest("corpus", tag, {
+        "content_sha256": csha,
+        "files": written["files"],
+        "source": bdata.get("source") or {},
+        "base": {"version": base_manifest.get("version"),
+                 "content_sha256": bdata.get("content_sha256"),
+                 "path_rel": base_rel},
+        "config": corpus2.get("config") or {},
+        "stats": corpus2.get("stats") or {},
+        "gaps": SEM.gaps_ledger(corpus2),
+        "_prev": prev_entry,
+    })
+    M.write_manifest(out_dir, manifest)
+    V.update_registry(paths["manifests"], "corpus", tag,
+                      {"content_sha256": csha,
+                       "sha256": C.sha256_file(os.path.join(out_dir, "manifest.json"))})
+
+    cc = result["class_counts"]
+    _emit("=== BUILD SEMANTIC (PCM-20.5 GATE 1) ===")
+    _emit("version        : %s" % tag)
+    _emit("base           : %s (%s)" % (args.base, bdata.get("content_sha256")))
+    _emit("pages          : %d" % len(pages2))
+    _emit("context records: %d (hidden, verbatim)" % len(context))
+    _emit("class census   : %s" % cc)
+    _emit("basis census   : %s" % result["basis_counts"])
+    _emit("content sha256 : %s" % csha)
+    _emit("build dir      : %s" % out_dir)
+
+    ok, errors, warnings = VAL.validate_corpus(out_dir)
+    ok2, s_errors, s_warnings = SEM.validate_semantic(out_dir, args.data_root)
+    errors = list(errors) + ["S: %s" % e for e in s_errors]
+    warnings = list(warnings) + list(s_warnings)
+    ok = ok and ok2
+    _emit("validate       : %s" % ("PASS" if ok else "FAIL"))
+    for e in errors[:10]:
+        _emit("  ERROR: %s" % e)
+    for w in warnings[:10]:
+        _emit("  WARN: %s" % w)
+    if not ok:
+        return 1
+    _emit("DONE.")
+    return 0
 
 
 # --------------------------------------------------------------------------- build-dataset
@@ -357,6 +446,26 @@ def cmd_diff(args) -> int:
     return 0
 
 
+# --------------------------------------------------------------------------- semantic-diff (PCM-20.5 GATE 1)
+def cmd_semantic_diff(args) -> int:
+    try:
+        written = SEM.write_semantic_change_manifest(args.data_root,
+                                                     args.from_version, args.to_version)
+    except ValueError as e:
+        return _fail(str(e), 2)
+    ch = written["diff"]
+    _emit("=== SEMANTIC DIFF %s -> %s ===" % (args.from_version, args.to_version))
+    for k, v in ch["counts"].items():
+        _emit("  %-24s %s" % (k, v))
+    for key in ("added_pages", "missing_pages", "recovered", "changed"):
+        if ch.get(key + "_truncated"):
+            _emit("  (list %s truncated to %d rows)" % (key, SEM._MAX_LIST))
+    _emit("semantic change: %s" % written["path"])
+    _emit("sha256         : %s" % written["sha256"])
+    _emit("DONE.")
+    return 0
+
+
 # --------------------------------------------------------------------------- parser
 def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(
@@ -406,6 +515,18 @@ def build_parser() -> argparse.ArgumentParser:
     sp.add_argument("--from", dest="from_version", required=True, help="vNNNN قبلی")
     sp.add_argument("--to", dest="to_version", required=True, help="vNNNN جدید")
     sp.set_defaults(func=cmd_diff)
+
+    sp = sub.add_parser("build-semantic",
+                        help="لایه‌ی معنایی روی یک build (PCM-20.5 GATE 1)")
+    sp.add_argument("--data-root", default="data/tasnim")
+    sp.add_argument("--base", required=True, help="نسخه‌ی base پیکره (vNNNN)")
+    sp.set_defaults(func=cmd_build_semantic)
+
+    sp = sub.add_parser("semantic-diff", help="semantic-diff 7 دسته‌ای بین دو build")
+    sp.add_argument("--data-root", default="data/tasnim")
+    sp.add_argument("--from", dest="from_version", required=True, help="vNNNN قبلی")
+    sp.add_argument("--to", dest="to_version", required=True, help="vNNNN جدید")
+    sp.set_defaults(func=cmd_semantic_diff)
     return p
 
 

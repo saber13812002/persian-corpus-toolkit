@@ -1,0 +1,21 @@
+OK  I1 v0002 has 21 pages
+OK  I2 v0003 has 22 pages
+OK  I3a dup row count=2 (v0003, spid=1)
+OK  I3b dup ids d0/d1
+OK  I3c both carry dup flag
+OK  I3d v0002 single row, no dup flag
+OK  I4a healed empty in v0002
+OK  I4b healed: empty flag gone
+  e488 flags v0002: ['empty', 'no_barg']
+  e488 flags v0003: ['no_barg']
+  e488 raw_barg    : 
+OK  I4c healed text non-empty
+OK  I5 changed text differs
+OK  I6a removed present in v0002
+OK  I6b removed absent in v0003
+OK  I7a new page in v0003
+OK  I7b new page not in v0002
+OK  I7c new page id
+OK  I7d new page vol47
+
+INCR VERIFY: PASS (0 errors)
