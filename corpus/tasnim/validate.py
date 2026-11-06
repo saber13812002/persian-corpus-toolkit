@@ -10,6 +10,9 @@
   V06  RAW/NORMALIZED: textNormalized مطابق policy از text بازتولید می‌شود.
   V07  آمار: page_count و شمارنده‌های کیفیت با شمارش واقعی یکسان.
   V08  manifest: SHAهای ثبت‌شده با فایل‌ها یکسان + زنجیره‌ی prev.
+  V09  truncation: flag truncated_at_2000 ⟺ len(text)==SOURCE_CHAR_CAP
+       (رسمی‌سازی cap سمت‌منبع؛ PCM-20.5 GATE 1.5 + PCM-20.6 D3) و
+       هشدار اگر متنی بلندتر از cap یافت شود (نشانه‌ی cap شکسته).
 
 برگشت: (ok, errors, warnings) — همان قرارداد validateهای PCT.
 """
@@ -148,5 +151,29 @@ def validate_corpus(build_dir: str) -> tuple:
         warnings.extend(mwarn)
     else:
         warnings.append("V08 manifest.json missing in build dir")
+
+    # V09 truncation (cap سمت‌منبع = 2000؛ PCM-20.5 GATE 1.5 / PCM-20.6 D3)
+    v09_bad = 0
+    v09_over = 0
+    for p in pages:
+        flagged = S.F_TRUNCATED_2000 in (p["quality_status"].get("flags") or [])
+        at_cap = len(p.get("text") or "") == S.SOURCE_CHAR_CAP
+        if flagged != at_cap:
+            v09_bad += 1
+            if v09_bad <= 5:
+                errors.append("V09 truncated_at_2000 flag inconsistent with len(text) "
+                               "(flagged=%s len=%d): %s"
+                               % (flagged, len(p.get("text") or ""), p.get("page_id")))
+        elif len(p.get("text") or "") > S.SOURCE_CHAR_CAP:
+            v09_over += 1
+            if v09_over <= 5:
+                warnings.append("V09 text longer than source cap %d: %s (len=%d)"
+                                % (S.SOURCE_CHAR_CAP, p.get("page_id"),
+                                   len(p.get("text") or "")))
+    if v09_bad > 5:
+        errors.append("V09 %d more pages with inconsistent truncated_at_2000 flag"
+                      % (v09_bad - 5))
+    if v09_over > 5:
+        warnings.append("V09 %d more pages longer than source cap" % (v09_over - 5))
 
     return (not errors), errors, warnings

@@ -1,5 +1,6 @@
 # -*- coding: utf-8 -*-
-"""tasnim.semantic — PCM-20.5 GATE 1: لایه‌ی معنایی روی پیکره‌ی رسمی.
+"""tasnim.semantic — PCM-20.5 GATE 1: لایه‌ی معنایی روی پیکره‌ی رسمی
++ PCM-20.6 SUBTASK 02: قرارداد Semantic v0003 (cs-20.6) — hidden context.
 
 این ماژول یک نسخه‌ی معنایی (semantic) از یک build پیکره‌ی موجود (base) می‌سازد:
 
@@ -26,7 +27,29 @@
 شامل می‌شود (حتی صفر)؛ ترتیب context = ترتیب فایل.
 
 قواعد عدم‌تغییری: base دست‌نخورده می‌ماند؛ نسخه‌ی جدید فقط اضافه می‌شود.
+
+قرارداد v0003 (cs-20.6) — افزایشی روی cs-20.5، فقط با opt-in:
+  * base الزامی: یک build معنایی cs-20.5 (نه corpus خالی). `build_semantic`
+    با قرارداد پیش‌فرض (cs-20.5) روی base معنایی خطا می‌دهد (S11).
+  * رکوردهای جدید با visibility "hidden_context" (سیاست: system-only برای
+    embedding/جستجو — هرگز render عمومی):
+      - HeadingRecord (heading-records.jsonl): متن عنوان، page_id مبدأ،
+        item_index، volume_no + روابط parent/children (عنوان‌های هم‌جلد).
+      - ContextRecord (hidden-context-records.jsonl): page_id مبدأ +
+        next_page_id/next_item_index/next_volume_no + hidden_summary
+        (حداکثر 3 خط) + summary_sha256 + summary_meta (model/model_version)
+        + provenance.
+  * در build قطعی (این ماژول) hidden_summary همان استخراج verbatim است
+    (method "verbatim-extract/1.0"، model=None)؛ تولید با LLM (Qwen3.8-27B-FP8)
+    خارج از اینجا است (pilot: deploy/pcm206_hc_pilot.py) و ورودی همان
+    رکوردهای این قرارداد.
+  * truncation: `semantic.truncation` برای هر صفحه (truncated_at_source
+    ⟺ len(text)==SOURCE_CHAR_CAP) + بلوک `semantic.truncation` در corpus
+    با فهرست صفحات متاثر و ارجاع شواهد GATE 1.5.
+  * همه‌ی فیلدها/فایل‌های cs-20.5 بدون تغییر حفظ می‌شوند (S08: تطبیق
+    فیلد‌به‌فیلد با base cs-20.5؛ context-records.jsonl بایت‌به‌بایت).
 """
+
 from __future__ import annotations
 
 import copy
@@ -38,15 +61,19 @@ from collections import Counter
 from . import common as C
 from . import manifest as M
 from . import reconcile as R
+from . import schema as S
 from . import transform as T
 from . import versioning as V
 
 
 SEMANTIC_SCHEMA_VERSION = "cs-20.5"
+SEMANTIC_SCHEMA_VERSION_V3 = "cs-20.6"   # قرارداد Semantic v0003 (PCM-20.6 SUBTASK 02)
+CONTRACTS = (SEMANTIC_SCHEMA_VERSION, SEMANTIC_SCHEMA_VERSION_V3)
 RULE_SET = "semantic-rules/1.0"
 SUMMARY_METHOD = "verbatim-extract/1.0"
 MAX_SUMMARY_LINES = 3
-VISIBILITY_HIDDEN = "hidden"
+VISIBILITY_HIDDEN = "hidden"               # cs-20.5 (رکوردهای ctx:)
+HC_VISIBILITY = S.HC_VISIBILITY            # "hidden_context" — cs-20.6
 
 CLS_CONTENT = "CONTENT_PAGE"
 CLS_CHAPTER = "CHAPTER_HEADING"
@@ -255,29 +282,253 @@ def build_semantic(base_dir: str) -> dict:
             "base_manifest": base_manifest, "base_rel": base_rel, "base_dir": ab}
 
 
-def content_files_semantic(corpus: dict, pages: list, context: list) -> dict:
+# --------------------------------------------------------------------------- v0003 (cs-20.6)
+def _v3_truncation_of(p: dict) -> dict:
+    """بلوک truncation هر صفحه (cap سمت‌منبع = 2000؛ GATE 1.5)."""
+    text = p.get("text") or ""
+    return {
+        "truncated_at_source": (len(text) == S.SOURCE_CHAR_CAP
+                                or S.F_TRUNCATED_2000
+                                in ((p.get("quality_status") or {}).get("flags") or [])),
+        "source_char_cap": S.SOURCE_CHAR_CAP,
+        "gate": "PCM-20.5 GATE 1.5",
+    }
+
+
+def build_semantic_v3(base_dir: str) -> dict:
+    """لایه‌ی معنایی v0003 (cs-20.6) از روی یک build معنایی cs-20.5.
+
+    افزایشی: همه‌ی فیلدها و فایل‌های cs-20.5 بدون تغییر حفظ می‌شوند؛
+    افزوده می‌شود: semantic.truncation + semantic.hidden_context (لینک)
+    برای هر صفحه، بلوک‌های hidden_context/truncation در corpus.semantic،
+    و دو فایل heading-records.jsonl + hidden-context-records.jsonl.
+    """
+    ab = os.path.abspath(base_dir)
+    parent = os.path.dirname(ab)
+    if os.path.basename(parent) != "builds":
+        raise ValueError("base_dir must be <data_root>/corpus/builds/vNNNN: %s" % base_dir)
+    base_rel = "corpus/builds/%s" % os.path.basename(ab)
+
+    corpus = C.read_json(os.path.join(ab, "corpus.json"))
+    pages = C.read_jsonl(os.path.join(ab, "pages.jsonl"))
+    ctx5 = C.read_jsonl(os.path.join(ab, "context-records.jsonl"))
+    base_manifest = M.load_manifest(ab)
+    sem5 = corpus.get("semantic") or {}
+    if sem5.get("schema_version") != SEMANTIC_SCHEMA_VERSION:
+        raise ValueError("v0003 (cs-20.6) requires a %s semantic base; base %s has %r"
+                         % (SEMANTIC_SCHEMA_VERSION, base_rel, sem5.get("schema_version")))
+    bdata = base_manifest.get("data") or {}
+    if not bdata.get("content_sha256"):
+        raise ValueError("base manifest lacks data.content_sha256: %s" % base_rel)
+
+    corpus2 = copy.deepcopy(corpus)
+    pages2 = copy.deepcopy(pages)
+    n = len(pages2)
+    by_pid = {p.get("page_id"): p for p in pages2}
+    ctx_origin_pids = {r.get("heading_page_id") for r in ctx5}
+
+    # --- هر صفحه: truncation + لینک hidden_context
+    truncation_pages = []
+    for p in pages2:
+        s = p.get("semantic") or {}
+        t = _v3_truncation_of(p)
+        s["truncation"] = t
+        if t["truncated_at_source"]:
+            truncation_pages.append(p["page_id"])
+        is_heading = s.get("record_class") in (CLS_CHAPTER, CLS_SECTION)
+        s["hidden_context"] = {
+            "heading_record_id": (S.heading_record_id_of(p["page_id"])
+                                  if is_heading else None),
+            "context_record_id": (S.context_record_id_of(p["page_id"])
+                                  if p["page_id"] in ctx_origin_pids else None),
+        }
+
+    # --- heading-records.jsonl (روابط parent/children بین عنوان‌های هم‌جلد)
+    vol_headings = {}
+    for i, p in enumerate(pages2):
+        if (p.get("semantic") or {}).get("record_class") in (CLS_CHAPTER, CLS_SECTION):
+            vol_headings.setdefault((p.get("volume") or {}).get("volume_id"), []).append(i)
+    heading_recs = []
+    for vid, idxs in vol_headings.items():
+        for pos, i in enumerate(idxs):
+            p = pages2[i]
+            end = idxs[pos + 1] if pos + 1 < len(idxs) else n
+            rec = {
+                "record_id": S.heading_record_id_of(p["page_id"]),
+                "visibility": HC_VISIBILITY,
+                "record_kind": S.HC_RECORD_KIND_HEADING,
+                "heading_text": p.get("text") or "",
+                "page_id": p["page_id"],
+                "item_index": p.get("item_index"),
+                "volume_no": (p.get("volume") or {}).get("volume_no"),
+                "volume_id": vid,
+                "volume_title": _volume_title(p.get("volume")),
+                "source_class": (p.get("semantic") or {}).get("record_class"),
+                "parent_heading_page_id": (pages2[idxs[pos - 1]]["page_id"]
+                                           if pos > 0 else None),
+                "children_page_ids": [pages2[j]["page_id"] for j in range(i + 1, end)
+                                      if (pages2[j].get("volume") or {}).get("volume_id") == vid],
+                "next_page_id": (p.get("semantic") or {}).get("next_page_id"),
+                "provenance": {
+                    "source_page_id": p.get("source_page_id"),
+                    "content_hash": p.get("content_hash"),
+                    "captured_at": p.get("captured_at"),
+                },
+            }
+            rec["heading_hash"] = C.sha256_text(
+                C.canonical_json({k: v for k, v in rec.items() if k != "heading_hash"}).decode("utf-8"))
+            heading_recs.append(rec)
+
+    # --- hidden-context-records.jsonl (همان انتخاب cs-20.5، همان ترتیب)
+    hc_context = []
+    for r5 in ctx5:
+        hp = by_pid.get(r5.get("heading_page_id"))
+        np_ = by_pid.get(r5.get("next_page_id"))
+        if hp is None or np_ is None:
+            continue
+        summary = r5.get("next_page_summary")
+        rec = {
+            "record_id": S.context_record_id_of(hp["page_id"]),
+            "visibility": HC_VISIBILITY,
+            "record_kind": S.HC_RECORD_KIND_CONTEXT,
+            "page_id": hp["page_id"],                     # مبدأ (صفحه‌ی عنوان)
+            "heading_text": r5.get("heading_text"),
+            "item_index": hp.get("item_index"),
+            "volume_no": (hp.get("volume") or {}).get("volume_no"),
+            "volume_id": (hp.get("volume") or {}).get("volume_id"),
+            "next_page_id": r5.get("next_page_id"),
+            "next_item_index": r5.get("next_item_index"),
+            "next_volume_no": (np_.get("volume") or {}).get("volume_no"),
+            "hidden_summary": summary,
+            "summary_lines": r5.get("summary_lines"),
+            "summary_sha256": (C.sha256_text(summary) if summary is not None else None),
+            "summary_meta": {
+                "method": SUMMARY_METHOD,
+                "model": None,
+                "model_version": None,
+                "prompt_version": None,
+                "max_lines": MAX_SUMMARY_LINES,
+            },
+            "provenance": {
+                "source_page_id": np_.get("source_page_id"),
+                "content_hash": np_.get("content_hash"),
+                "captured_at": np_.get("captured_at"),
+            },
+        }
+        rec["context_hash"] = C.sha256_text(
+            C.canonical_json({k: v for k, v in rec.items() if k != "context_hash"}).decode("utf-8"))
+        hc_context.append(rec)
+
+    # --- corpus.semantic: نسخه‌ی v0003 (بلوک‌های cs-20.5 دست‌نخورده)
+    sem3 = corpus2["semantic"]
+    sem3["schema_version"] = SEMANTIC_SCHEMA_VERSION_V3
+    sem3["mission"] = "PCM-20.6 SUBTASK 02"
+    sem3["prev_contract"] = SEMANTIC_SCHEMA_VERSION
+    sem3["base_corpus"] = {
+        "version": base_manifest.get("version"),
+        "content_sha256": bdata.get("content_sha256"),
+        "kind": "corpus",
+        "path_rel": base_rel,
+    }
+    sem3["hidden_context"] = {
+        "policy": S.HC_POLICY_TEXT,
+        "visibility": HC_VISIBILITY,
+        "heading_records": {
+            "count": len(heading_recs),
+            "file": S.HC_FILE_HEADING,
+            "record_id_prefix": S.HC_PREFIX_HEADING,
+        },
+        "context_records": {
+            "count": len(hc_context),
+            "file": S.HC_FILE_CONTEXT,
+            "record_id_prefix": S.HC_PREFIX_CONTEXT,
+            "method": SUMMARY_METHOD,
+            "model": None,
+            "model_version": None,
+            "prompt_version": None,
+            "max_summary_lines": MAX_SUMMARY_LINES,
+            "summary_sha256_of": "hidden_summary text",
+        },
+        "relations": {
+            "parent": "nearest previous heading in the same volume (parent_heading_page_id)",
+            "children": ("same-volume pages after the heading, up to the next heading "
+                         "(children_page_ids)"),
+            "next": "next page in the same volume (next_page_id/next_item_index/next_volume_no)",
+        },
+    }
+    sem3["truncation"] = {
+        "source_char_cap": S.SOURCE_CHAR_CAP,
+        "gate": "PCM-20.5 GATE 1.5",
+        "evidence": {"path_rel": S.GATE_1_5_EVIDENCE_REL,
+                     "sha256": S.GATE_1_5_EVIDENCE_SHA},
+        "affected_count": len(truncation_pages),
+        "affected_pages": truncation_pages,
+    }
+    corpus2.setdefault("stats", {}).setdefault("semantic", {})["hidden_context"] = {
+        "heading_record_count": len(heading_recs),
+        "context_record_count": len(hc_context),
+        "truncated_at_source_count": len(truncation_pages),
+    }
+    cc3 = Counter((p.get("semantic") or {}).get("record_class") for p in pages2)
+    class_counts3 = {k: cc3.get(k, 0) for k in CLASSES}
+    bc3 = Counter((p.get("semantic") or {}).get("class_basis") for p in pages2)
+    basis_counts3 = {k: bc3.get(k, 0) for k in BASES}
+    return {"corpus": corpus2, "pages": pages2,
+            "context": ctx5,                 # رکوردهای cs-20.5 (دست‌نخورده)
+            "hidden_context": hc_context,    # ContextRecordهای v0003
+            "heading_records": heading_recs,
+            "class_counts": class_counts3,
+            "basis_counts": basis_counts3,
+            "truncation_pages": truncation_pages,
+            "base_manifest": base_manifest, "base_rel": base_rel, "base_dir": ab}
+
+
+def content_files_semantic(corpus: dict, pages: list, context: list,
+                           heading_records: list = None, hidden_context: list = None) -> dict:
     cbytes = C.canonical_json(corpus)
     pbytes = b"".join(C.canonical_json_line(p) for p in pages)
     xbytes = b"".join(C.canonical_json_line(r) for r in context)
-    return {
+    files = {
         "corpus.json": {"sha256": C.sha256_bytes(cbytes), "size_bytes": len(cbytes)},
         "pages.jsonl": {"sha256": C.sha256_bytes(pbytes), "size_bytes": len(pbytes)},
         "context-records.jsonl": {"sha256": C.sha256_bytes(xbytes), "size_bytes": len(xbytes)},
     }
+    if heading_records is not None:
+        hbytes = b"".join(C.canonical_json_line(r) for r in heading_records)
+        files[S.HC_FILE_HEADING] = {
+            "sha256": C.sha256_bytes(hbytes), "size_bytes": len(hbytes)}
+    if hidden_context is not None:
+        gbytes = b"".join(C.canonical_json_line(r) for r in hidden_context)
+        files[S.HC_FILE_CONTEXT] = {
+            "sha256": C.sha256_bytes(gbytes), "size_bytes": len(gbytes)}
+    return files
 
 
-def write_semantic(build_dir: str, corpus: dict, pages: list, context: list) -> dict:
+def write_semantic(build_dir: str, corpus: dict, pages: list, context: list,
+                   heading_records: list = None, hidden_context: list = None) -> dict:
     os.makedirs(build_dir, exist_ok=True)
+    files_all = content_files_semantic(corpus, pages, context,
+                                       heading_records, hidden_context)
     paths = {
         "corpus.json": os.path.join(build_dir, "corpus.json"),
         "pages.jsonl": os.path.join(build_dir, "pages.jsonl"),
         "context-records.jsonl": os.path.join(build_dir, "context-records.jsonl"),
     }
+    if heading_records is not None:
+        paths[S.HC_FILE_HEADING] = os.path.join(build_dir, S.HC_FILE_HEADING)
+    if hidden_context is not None:
+        paths[S.HC_FILE_CONTEXT] = os.path.join(build_dir, S.HC_FILE_CONTEXT)
     C.write_json(paths["corpus.json"], corpus)
     C.write_jsonl(paths["pages.jsonl"], pages)
     C.write_bytes(paths["context-records.jsonl"],
                   b"".join(C.canonical_json_line(r) for r in context))
-    expected = content_files_semantic(corpus, pages, context)
+    if heading_records is not None:
+        C.write_bytes(os.path.join(build_dir, S.HC_FILE_HEADING),
+                      b"".join(C.canonical_json_line(r) for r in heading_records))
+    if hidden_context is not None:
+        C.write_bytes(os.path.join(build_dir, S.HC_FILE_CONTEXT),
+                      b"".join(C.canonical_json_line(r) for r in hidden_context))
+    expected = files_all
     files = {}
     for name, meta in expected.items():
         p = paths[name]
@@ -537,6 +788,274 @@ def validate_semantic(build_dir: str, data_root: str = None) -> tuple:
     for e in merr:
         errors.append("S07: %s" % e)
     warnings.extend(mwarn)
+
+    if sem.get("schema_version") == SEMANTIC_SCHEMA_VERSION_V3:
+        # S08 — v0003: ساختار + عدم‌تغییری بخش‌های cs-20.5 نسبت به base
+        for key in ("prev_contract", "hidden_context", "truncation"):
+            if key not in sem:
+                errors.append("S08: semantic.%s missing (cs-20.6)" % key)
+        if sem.get("prev_contract") != SEMANTIC_SCHEMA_VERSION:
+            errors.append("S08: semantic.prev_contract must be %r: got %r"
+                          % (SEMANTIC_SCHEMA_VERSION, sem.get("prev_contract")))
+        hc_block = sem.get("hidden_context") or {}
+        if hc_block.get("policy") != S.HC_POLICY_TEXT:
+            errors.append("S08: hidden_context.policy mismatch (system-only policy)")
+        if hc_block.get("visibility") != HC_VISIBILITY:
+            errors.append("S08: hidden_context.visibility must be %r" % HC_VISIBILITY)
+        t3 = sem.get("truncation") or {}
+        if t3.get("source_char_cap") != S.SOURCE_CHAR_CAP:
+            errors.append("S08: truncation.source_char_cap must be %d" % S.SOURCE_CHAR_CAP)
+        ev = t3.get("evidence") or {}
+        if ev.get("sha256") != S.GATE_1_5_EVIDENCE_SHA:
+            errors.append("S08: truncation.evidence.sha256 mismatch (GATE 1.5)")
+        hc_files = (S.HC_FILE_HEADING, S.HC_FILE_CONTEXT)
+        for fname in hc_files:
+            if fname not in (mdata.get("files") or {}):
+                errors.append("S08: manifest file missing: %s" % fname)
+        hr_path = os.path.join(build_dir, S.HC_FILE_HEADING)
+        gc_path = os.path.join(build_dir, S.HC_FILE_CONTEXT)
+        hr_recs = C.read_jsonl(hr_path) if os.path.exists(hr_path) else []
+        gc_recs = C.read_jsonl(gc_path) if os.path.exists(gc_path) else []
+        if (hc_block.get("heading_records") or {}).get("count") != len(hr_recs):
+            errors.append("S08: hidden_context.heading_records.count %r != %d file rows"
+                          % ((hc_block.get("heading_records") or {}).get("count"), len(hr_recs)))
+        if (hc_block.get("context_records") or {}).get("count") != len(gc_recs):
+            errors.append("S08: hidden_context.context_records.count %r != %d file rows"
+                          % ((hc_block.get("context_records") or {}).get("count"), len(gc_recs)))
+        ids3 = ([r.get("record_id") for r in hr_recs]
+                + [r.get("record_id") for r in gc_recs])
+        if len(set(ids3)) != len(ids3):
+            errors.append("S08: duplicate hidden-context record_id")
+        # base cs-20.5 باید همان buildی باشد که base_corpus به آن اشاره می‌کند
+        if root and base_rel:
+            base_dir3 = os.path.join(root, base_rel.replace("/", os.sep))
+            if os.path.isdir(base_dir3):
+                try:
+                    b3_corpus = C.read_json(os.path.join(base_dir3, "corpus.json"))
+                    b3_pages = C.read_jsonl(os.path.join(base_dir3, "pages.jsonl"))
+                    b3_ctx = C.read_jsonl(os.path.join(base_dir3, "context-records.jsonl"))
+                except Exception as e:
+                    errors.append("S08: base cs-20.5 unreadable: %s" % e)
+                else:
+                    b3_sem = (b3_corpus.get("semantic") or {})
+                    if b3_sem.get("schema_version") != SEMANTIC_SCHEMA_VERSION:
+                        errors.append("S08: base corpus is not a %s semantic build"
+                                      % SEMANTIC_SCHEMA_VERSION)
+                    s08_diff = 0
+                    for p, b in zip(pages, b3_pages):
+                        diff_f = None
+                        for f in ("text", "text_normalized", "content_hash", "url", "barg",
+                                  "raw_barg", "item_index", "quality_status", "page_id",
+                                  "position", "source_page_id", "captured_at", "volume"):
+                            if p.get(f) != b.get(f):
+                                diff_f = f
+                                break
+                        if diff_f is None:
+                            s3s = (p.get("semantic") or {})
+                            s3b = (b.get("semantic") or {})
+                            for f in ("record_class", "class_basis", "class_rule", "order",
+                                      "next_page_id", "next_item_index"):
+                                if s3s.get(f) != s3b.get(f):
+                                    diff_f = "semantic." + f
+                                    break
+                        if diff_f is not None:
+                            s08_diff += 1
+                            if s08_diff <= 5:
+                                errors.append("S08: page field %s differs from cs-20.5 base "
+                                              "(page_id=%s)" % (diff_f, p.get("page_id")))
+                    if s08_diff > 5:
+                        errors.append("S08: %d more pages differ from cs-20.5 base"
+                                      % (s08_diff - 5))
+                    if sem.get("classification") != b3_sem.get("classification"):
+                        errors.append("S08: semantic.classification differs from cs-20.5 base")
+                    if sem.get("order_key") != b3_sem.get("order_key"):
+                        errors.append("S08: semantic.order_key differs from cs-20.5 base")
+                    if (sem.get("context_records") or {}).get("count") != len(b3_ctx):
+                        errors.append("S08: semantic.context_records.count differs from base")
+                    if C.sha256_file(os.path.join(build_dir, "context-records.jsonl")) != \
+                       C.sha256_file(os.path.join(base_dir3, "context-records.jsonl")):
+                        errors.append("S08: context-records.jsonl differs (sha) from "
+                                      "cs-20.5 base")
+
+        # S09 — v0003: سرشناسی رکوردهای heading + hidden-context
+        by_pid3 = {p.get("page_id"): p for p in pages}
+        pid_to_i = {p.get("page_id"): i for i, p in enumerate(pages)}
+        vol_head_idx = {}
+        head_pos = {}
+        for i, p in enumerate(pages):
+            if (p.get("semantic") or {}).get("record_class") in (CLS_CHAPTER, CLS_SECTION):
+                vid_h = (p.get("volume") or {}).get("volume_id")
+                idxs_h = vol_head_idx.setdefault(vid_h, [])
+                head_pos[p["page_id"]] = len(idxs_h)
+                idxs_h.append(i)
+        exp_hr_pids = [p["page_id"] for p in pages
+                       if (p.get("semantic") or {}).get("record_class")
+                       in (CLS_CHAPTER, CLS_SECTION)]
+        if [r.get("page_id") for r in hr_recs] != exp_hr_pids:
+            errors.append("S09: heading records do not cover exactly the heading pages "
+                          "(file order = page order)")
+        s09 = 0
+
+        def _s09(msg, rid):
+            nonlocal s09
+            s09 += 1
+            if s09 <= 5:
+                errors.append("S09: %s (record_id=%s)" % (msg, rid))
+
+        for r in hr_recs:
+            rid = r.get("record_id")
+            p = by_pid3.get(r.get("page_id"))
+            if p is None:
+                _s09("heading page missing: %s" % r.get("page_id"), rid)
+                continue
+            if r.get("record_id") != S.heading_record_id_of(p["page_id"]):
+                _s09("record_id not deterministic", rid)
+            if r.get("visibility") != HC_VISIBILITY:
+                _s09("visibility != hidden_context", rid)
+            if r.get("record_kind") != S.HC_RECORD_KIND_HEADING:
+                _s09("record_kind != heading", rid)
+            if r.get("heading_text") != p.get("text"):
+                _s09("heading_text != page.text", rid)
+            if r.get("item_index") != p.get("item_index"):
+                _s09("item_index mismatch", rid)
+            vol = p.get("volume") or {}
+            if r.get("volume_no") != vol.get("volume_no") or r.get("volume_id") != vol.get("volume_id"):
+                _s09("volume_no/volume_id mismatch", rid)
+            if r.get("source_class") != (p.get("semantic") or {}).get("record_class"):
+                _s09("source_class mismatch", rid)
+            if r.get("next_page_id") != (p.get("semantic") or {}).get("next_page_id"):
+                _s09("next_page_id mismatch", rid)
+            prov = r.get("provenance") or {}
+            if (prov.get("source_page_id") != p.get("source_page_id")
+                    or prov.get("content_hash") != p.get("content_hash")
+                    or prov.get("captured_at") != p.get("captured_at")):
+                _s09("provenance mismatch", rid)
+            # روابط parent/children: بازتولید قطعی
+            vid = vol.get("volume_id")
+            idxs = vol_head_idx.get(vid, [])
+            i = pid_to_i[p["page_id"]]
+            pos = head_pos.get(p["page_id"], -1)
+            exp_parent = pages[idxs[pos - 1]]["page_id"] if (pos > 0) else None
+            end = idxs[pos + 1] if (pos + 1 < len(idxs)) else len(pages)
+            exp_children = [pages[j]["page_id"] for j in range(i + 1, end)
+                            if (pages[j].get("volume") or {}).get("volume_id") == vid]
+            if r.get("parent_heading_page_id") != exp_parent:
+                _s09("parent_heading_page_id != recomputed", rid)
+            if r.get("children_page_ids") != exp_children:
+                _s09("children_page_ids != recomputed", rid)
+            meta = {k: v for k, v in r.items() if k != "heading_hash"}
+            if r.get("heading_hash") != C.sha256_text(C.canonical_json(meta).decode("utf-8")):
+                _s09("heading_hash mismatch", rid)
+            hc_link = (p.get("semantic") or {}).get("hidden_context") or {}
+            if hc_link.get("heading_record_id") != r.get("record_id"):
+                _s09("page.semantic.hidden_context.heading_record_id not linked", rid)
+        if s09 > 5:
+            errors.append("S09: %d more heading record errors" % (s09 - 5))
+        s09 = 0
+
+        def _s09c(msg, rid):
+            nonlocal s09
+            s09 += 1
+            if s09 <= 5:
+                errors.append("S09: %s (record_id=%s)" % (msg, rid))
+
+        for r in gc_recs:
+            rid = r.get("record_id")
+            p = by_pid3.get(r.get("page_id"))
+            if p is None:
+                _s09c("origin page missing: %s" % r.get("page_id"), rid)
+                continue
+            if r.get("record_id") != S.context_record_id_of(p["page_id"]):
+                _s09c("record_id not deterministic", rid)
+            if r.get("visibility") != HC_VISIBILITY:
+                _s09c("visibility != hidden_context", rid)
+            if r.get("record_kind") != S.HC_RECORD_KIND_CONTEXT:
+                _s09c("record_kind != context", rid)
+            hsem = (p.get("semantic") or {})
+            if hsem.get("record_class") not in (CLS_CHAPTER, CLS_SECTION):
+                _s09c("origin page is not a heading class", rid)
+            if r.get("heading_text") != p.get("text"):
+                _s09c("heading_text != page.text", rid)
+            if r.get("item_index") != p.get("item_index"):
+                _s09c("item_index mismatch", rid)
+            vol = p.get("volume") or {}
+            if r.get("volume_no") != vol.get("volume_no") or r.get("volume_id") != vol.get("volume_id"):
+                _s09c("volume_no/volume_id mismatch", rid)
+            if r.get("next_page_id") != hsem.get("next_page_id"):
+                _s09c("next_page_id != semantic.next_page_id", rid)
+            np_ = by_pid3.get(r.get("next_page_id"))
+            if np_ is None:
+                _s09c("next page missing: %s" % r.get("next_page_id"), rid)
+                continue
+            if r.get("next_item_index") != np_.get("item_index"):
+                _s09c("next_item_index mismatch", rid)
+            if r.get("next_volume_no") != (np_.get("volume") or {}).get("volume_no"):
+                _s09c("next_volume_no mismatch", rid)
+            summary, n_lines = extract_summary(np_.get("text") or "")
+            if r.get("hidden_summary") != summary:
+                _s09c("hidden_summary != recomputed verbatim extract", rid)
+            if r.get("summary_lines") != n_lines:
+                _s09c("summary_lines mismatch", rid)
+            if r.get("summary_sha256") != (C.sha256_text(summary)
+                                           if summary is not None else None):
+                _s09c("summary_sha256 mismatch", rid)
+            meta = r.get("summary_meta") or {}
+            if (meta.get("method") != SUMMARY_METHOD or meta.get("model") is not None
+                    or meta.get("model_version") is not None
+                    or meta.get("prompt_version") is not None
+                    or meta.get("max_lines") != MAX_SUMMARY_LINES):
+                _s09c("summary_meta mismatch (deterministic build: model must be None)", rid)
+            prov = r.get("provenance") or {}
+            if (prov.get("source_page_id") != np_.get("source_page_id")
+                    or prov.get("content_hash") != np_.get("content_hash")
+                    or prov.get("captured_at") != np_.get("captured_at")):
+                _s09c("provenance mismatch (next page)", rid)
+            ch = {k: v for k, v in r.items() if k != "context_hash"}
+            if r.get("context_hash") != C.sha256_text(C.canonical_json(ch).decode("utf-8")):
+                _s09c("context_hash mismatch", rid)
+            hc_link = hsem.get("hidden_context") or {}
+            if hc_link.get("context_record_id") != r.get("record_id"):
+                _s09c("page.semantic.hidden_context.context_record_id not linked", rid)
+        # ترتیب gc باید با ترتیب context cs-20.5 یکسان باشد (همان انتخاب)
+        if [r.get("page_id") for r in gc_recs] != \
+           [r.get("heading_page_id") for r in ctx_recs]:
+            errors.append("S09: hidden-context order differs from cs-20.5 context order")
+        if s09 > 5:
+            errors.append("S09: %d more context record errors" % (s09 - 5))
+
+        # S10 — v0003: truncation
+        s10 = 0
+
+        def _s10(msg, pid):
+            nonlocal s10
+            s10 += 1
+            if s10 <= 5:
+                errors.append("S10: %s (page_id=%s)" % (msg, pid))
+
+        exp_trunc = []
+        for p in pages:
+            s = p.get("semantic") or {}
+            t = s.get("truncation")
+            if not isinstance(t, dict):
+                _s10("semantic.truncation missing", p.get("page_id"))
+                continue
+            flags = (p.get("quality_status") or {}).get("flags") or []
+            exp = (len(p.get("text") or "") == S.SOURCE_CHAR_CAP
+                   or S.F_TRUNCATED_2000 in flags)
+            if t.get("truncated_at_source") != exp:
+                _s10("truncated_at_source inconsistent with text/flags", p.get("page_id"))
+            if t.get("source_char_cap") != S.SOURCE_CHAR_CAP:
+                _s10("source_char_cap wrong", p.get("page_id"))
+            if exp:
+                exp_trunc.append(p["page_id"])
+        if t3.get("affected_count") != len(exp_trunc):
+            errors.append("S10: truncation.affected_count %r != recomputed %d"
+                          % (t3.get("affected_count"), len(exp_trunc)))
+        if t3.get("affected_pages") != exp_trunc:
+            errors.append("S10: truncation.affected_pages != recomputed list")
+        if s10 > 5:
+            errors.append("S10: %d more truncation errors" % (s10 - 5))
+
     return (not errors), errors, warnings
 
 

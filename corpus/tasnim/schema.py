@@ -40,12 +40,39 @@ DEFAULT_VOL_LABEL = "نامشخص"
 F_OK = "ok"
 F_EMPTY = "empty"                      # متن خالی/غیرمتنی
 F_SHORT = "short"                      # 1..19 کاراکتر (زیر min_text_chars Builder = 20)
-F_TRUNCATED_2000 = "truncated_at_2000"  # len==2000 (اشتباه به‌نظر می‌رسد؛ NOT VERIFIED)
+F_TRUNCATED_2000 = "truncated_at_2000"  # len==2000 — cap سمت‌منبع؛ اثبات‌شده در PCM-20.5 GATE 1.5
 F_DUP_INDEX = "dup_item_index"         # item_index تکراری بین رکوردها
 F_NO_BARG = "no_barg"                  # «برگ» بدون رقم (raw وجود دارد ولی ارقمی نیست)
 F_MISSING_INDEX = "missing_item_index"  # item_index در URL نیست/نامعتبر
 
 FLAGS_ALL = (F_EMPTY, F_SHORT, F_TRUNCATED_2000, F_DUP_INDEX, F_NO_BARG, F_MISSING_INDEX)
+
+# ---- محدودیت ۲۰۰۰ کاراکتر سمت‌منبع (PCM-20.5 GATE 1.5 → رسمی‌شده در PCM-20.6 D3) ----
+SOURCE_CHAR_CAP = 2000  # API chunk-detail منبع حداکثر ۲۰۰۰ کاراکتر برمی‌گرداند (E1..E4)
+GATE_1_5_EVIDENCE_REL = "pcm20_4/validation/gate1_5_truncation_conclusion.json"
+GATE_1_5_EVIDENCE_SHA = (
+    "b0f45e9381db78da8a16b8e577038e2de8a8897f0c59c38b01cf1dc192d5158d")
+
+# ---- قرارداد Semantic v0003 (cs-20.6) — رکوردهای پنهان (PCM-20.6 SUBTASK 02) ----
+# visibility رکوردهای hidden-context: system-only (embedding/جستجو) —
+# هرگز به‌صورت عمومی render نمی‌شوند (سیاست نمایش: hidden_context).
+HC_VISIBILITY = "hidden_context"
+HC_RECORD_KIND_HEADING = "heading"
+HC_RECORD_KIND_CONTEXT = "context"
+HC_PREFIX_HEADING = "hctx:"      # record_id = "hctx:<page_id>"
+HC_PREFIX_CONTEXT = "hcctx:"     # record_id = "hcctx:<page_id>"
+HC_POLICY_TEXT = ("hidden summaries are system-only (embedding/retrieval) and must "
+                  "never be rendered publicly")
+HC_FILE_HEADING = "heading-records.jsonl"
+HC_FILE_CONTEXT = "hidden-context-records.jsonl"
+
+
+def heading_record_id_of(page_id: str) -> str:
+    return "%s%s" % (HC_PREFIX_HEADING, page_id)
+
+
+def context_record_id_of(page_id: str) -> str:
+    return "%s%s" % (HC_PREFIX_CONTEXT, page_id)
 
 
 def _h8(obj) -> str:

@@ -27,6 +27,7 @@ from . import dump as DP
 from . import manifest as M
 from . import normalize as N
 from . import reconcile as R
+from . import schema as S
 from . import semantic as SEM
 from . import transform as T
 from . import validate as VAL
@@ -250,14 +251,21 @@ def cmd_build_semantic(args) -> int:
     base_dir = os.path.join(builds, args.base)
     if not os.path.isdir(base_dir):
         return _fail("base corpus build not found: %s" % args.base, 2)
+    contract = args.contract
     try:
-        result = SEM.build_semantic(base_dir)
+        if contract == SEM.SEMANTIC_SCHEMA_VERSION_V3:
+            result = SEM.build_semantic_v3(base_dir)
+        else:
+            result = SEM.build_semantic(base_dir)
     except ValueError as e:
         return _fail(str(e), 2)
     corpus2, pages2, context = result["corpus"], result["pages"], result["context"]
+    heading_records = result.get("heading_records")
+    hidden_context = result.get("hidden_context")
     base_manifest, base_rel = result["base_manifest"], result["base_rel"]
 
-    files = SEM.content_files_semantic(corpus2, pages2, context)
+    files = SEM.content_files_semantic(corpus2, pages2, context,
+                                       heading_records, hidden_context)
     csha = T.content_sha256_of_files(files)
     reuse = V.find_reusable_version(builds, None, csha)
     if reuse:
@@ -269,7 +277,8 @@ def cmd_build_semantic(args) -> int:
     prev_entry = M.chain_entry(base_manifest, base_rel)
     tag = V.version_tag(V.next_version_number(builds))
     out_dir = V.version_dir(builds, tag)
-    written = SEM.write_semantic(out_dir, corpus2, pages2, context)
+    written = SEM.write_semantic(out_dir, corpus2, pages2, context,
+                                 heading_records, hidden_context)
     if written["files"] != files:
         return _fail("write verification failed (sha mismatch after write)")
 
@@ -291,9 +300,16 @@ def cmd_build_semantic(args) -> int:
                        "sha256": C.sha256_file(os.path.join(out_dir, "manifest.json"))})
 
     cc = result["class_counts"]
-    _emit("=== BUILD SEMANTIC (PCM-20.5 GATE 1) ===")
+    _emit("=== BUILD SEMANTIC (contract=%s) ===" % contract)
     _emit("version        : %s" % tag)
     _emit("base           : %s (%s)" % (args.base, bdata.get("content_sha256")))
+    _emit("contract       : %s" % contract)
+    if hidden_context is not None:
+        _emit("heading records: %d (hidden_context)" % len(heading_records))
+        _emit("hidden context : %d (hidden_context, %s)"
+              % (len(hidden_context), SEM.SUMMARY_METHOD))
+        _emit("truncated@%d  : %d pages (GATE 1.5)"
+              % (S.SOURCE_CHAR_CAP, len(result.get("truncation_pages") or [])))
     _emit("pages          : %d" % len(pages2))
     _emit("context records: %d (hidden, verbatim)" % len(context))
     _emit("class census   : %s" % cc)
@@ -517,9 +533,14 @@ def build_parser() -> argparse.ArgumentParser:
     sp.set_defaults(func=cmd_diff)
 
     sp = sub.add_parser("build-semantic",
-                        help="لایه‌ی معنایی روی یک build (PCM-20.5 GATE 1)")
+                        help="لایه‌ی معنایی روی یک build (PCM-20.5 GATE 1; cs-20.6 = v0003)")
     sp.add_argument("--data-root", default="data/tasnim")
-    sp.add_argument("--base", required=True, help="نسخه‌ی base پیکره (vNNNN)")
+    sp.add_argument("--base", required=True,
+                    help="نسخه‌ی base (vNNNN؛ برای cs-20.6: build معنایی cs-20.5)")
+    sp.add_argument("--contract", default=SEM.SEMANTIC_SCHEMA_VERSION,
+                    choices=list(SEM.CONTRACTS),
+                    help="قرارداد معنایی (پیش‌فرض cs-20.5؛ cs-20.6 = Semantic v0003 "
+                         "hidden-context، نیاز به base معنایی cs-20.5)")
     sp.set_defaults(func=cmd_build_semantic)
 
     sp = sub.add_parser("semantic-diff", help="semantic-diff 7 دسته‌ای بین دو build")

@@ -18,7 +18,7 @@ from . import common as C
 from . import schema as S
 
 MIN_TEXT_CHARS = 20          # هم‌راستا با min_text_chars Builder
-TRUNCATED_LEN = 2000         # max=2000 در ممیزی PCM-20.2 (خاستگاه: NOT VERIFIED)
+TRUNCATED_LEN = 2000         # cap سمت‌منبع — اثبات‌شده در PCM-20.5 GATE 1.5 (rationalized: PCM-20.6 D3)
 
 
 # --------------------------------------------------------------------------- load
