@@ -1,0 +1,631 @@
+=== TASNIM AUDIT (read-only) ===
+source jsonl : C:\Users\SD4AD~1.TAB\AppData\Local\Temp\pct-tasnim-test-r1i46gtu\src\tasnim-corpus.jsonl
+jsonl sha256 : f8f66dc79ccd7e790757f394a65dbf697be0ec115aa64b753d943be7443f6599  (10887 bytes, 21 records)
+summary sha256: eda854dce46f2d1b10159a8326250cae87d1382bf7e17b89c4f01d33204a4174
+-- integrity --
+  incomplete_empty       1
+  short_lt_20            1
+  truncated_at_2000      1
+  no_barg                1
+  missing_item_index     0
+  text_len           p50=54 p90=57 p99=1612 max=2000
+-- duplicates --
+  dup item_index     1 values / 1 extra rows
+  dup content_hash   0 values / 0 extra rows
+-- barg reparse (fixed parser) --
+  with raw barg      21
+  with parsed barg   20
+  == item_index+1    0
+  != export barg     1
+-- item_index gap --
+  min=1 max=21 distinct=20 missing=1 dup=1
+-- volumes --
+  strategy census    {'url_section': 19, 'text': 0, 'none': 2}
+  distinct url sections: 4
+audit written  : C:\Users\SD4AD~1.TAB\AppData\Local\Temp\pct-tasnim-test-r1i46gtu\data\tasnim\reports\audit-f8f66dc79ccd.json  sha256=e4942b56eda5464dfaf8edc70fbc15869577b3a0a9b1fe4f10e0172896e830a2
+DONE — read-only; nothing was modified.
+.=== BUILD CORPUS ===
+version        : v0001
+pages          : 21
+volumes        : 4
+content sha256 : 44a84c2f3154ea07b2b5459cb067624371fc71d10351373322e99315b91b2c71
+build dir      : C:\Users\SD4AD~1.TAB\AppData\Local\Temp\pct-tasnim-test-38q3mnx0\data\tasnim\corpus\builds\v0001
+validate       : PASS
+DONE.
+.=== BUILD CORPUS ===
+version        : v0001
+pages          : 21
+volumes        : 4
+content sha256 : a7f8bf2ffd9a1ccc7ede56c64d4ae58256172f1e95ed4946edb05eda12fa1a62
+build dir      : C:\Users\SD4AD~1.TAB\AppData\Local\Temp\pct-tasnim-test-v3cd410i\data\tasnim\corpus\builds\v0001
+validate       : PASS
+DONE.
+.=== BUILD CORPUS ===
+version        : v0001
+pages          : 21
+volumes        : 4
+content sha256 : d4f6583ecd46bc39638cbbcbb576fb694676d877bfdc7379c1d2cb951d98557e
+build dir      : C:\Users\SD4AD~1.TAB\AppData\Local\Temp\pct-tasnim-test-1vo41ljk\data\tasnim\corpus\builds\v0001
+validate       : PASS
+DONE.
+.=== BUILD CORPUS ===
+version        : v0001
+pages          : 21
+volumes        : 4
+content sha256 : a96c5914fd05e15385536557b6d35c5d4bd25da1021021ea02ef2bfd0e209f6a
+build dir      : C:\Users\SD4AD~1.TAB\AppData\Local\Temp\pct-tasnim-test-jnqsse1u\data\tasnim\corpus\builds\v0001
+validate       : PASS
+DONE.
+C:\Users\s.tabatabaei\Documents\saberprojects\persian-corpus-toolkit\test_corpus_tasnim.py:261: ResourceWarning: unclosed file <_io.TextIOWrapper name='C:\\Users\\SD4AD~1.TAB\\AppData\\Local\\Temp\\pct-tasnim-test-jnqsse1u\\data\\tasnim\\corpus\\builds\\v0001\\pages.jsonl' mode='r' encoding='utf-8'>
+  lines = open(pp, encoding="utf-8").read().splitlines()
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+C:\Users\s.tabatabaei\Documents\saberprojects\persian-corpus-toolkit\test_corpus_tasnim.py:265: ResourceWarning: unclosed file <_io.TextIOWrapper name='C:\\Users\\SD4AD~1.TAB\\AppData\\Local\\Temp\\pct-tasnim-test-jnqsse1u\\data\\tasnim\\corpus\\builds\\v0001\\pages.jsonl' mode='w' encoding='utf-8'>
+  open(pp, "w", encoding="utf-8").write("\n".join(lines) + "\n")
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+.=== BUILD CORPUS ===
+version        : v0001
+pages          : 21
+volumes        : 4
+content sha256 : c36273c09ef76768c1f8db013219e93dbdac59e428d5c4d9d79e48c6a870fc98
+build dir      : C:\Users\SD4AD~1.TAB\AppData\Local\Temp\pct-tasnim-test-pii7uyzz\data\tasnim\corpus\builds\v0001
+validate       : PASS
+DONE.
+=== BUILD DATASET ===
+pct            : 1%
+version        : v0001
+selected pages : 0
+corpus         : v0001
+content sha256 : 98e6789f9c4a1819f717563ebc018668323927b6e845897f672cf35ca9282e53
+out dir        : C:\Users\SD4AD~1.TAB\AppData\Local\Temp\pct-tasnim-test-pii7uyzz\data\tasnim\datasets\1pct\v0001
+  vol 1      pages=6     selected=0     coverage=0.0%
+  vol 2      pages=9     selected=0     coverage=0.0%
+  vol 31     pages=4     selected=0     coverage=0.0%
+  vol None   pages=2     selected=0     coverage=0.0%
+DONE.
+=== BUILD DATASET ===
+pct            : 10%
+version        : v0001
+selected pages : 2
+corpus         : v0001
+content sha256 : 45c696c9b44625667f4679f8b21c239cd61a582447facf552d565225590e68c0
+out dir        : C:\Users\SD4AD~1.TAB\AppData\Local\Temp\pct-tasnim-test-pii7uyzz\data\tasnim\datasets\10pct\v0001
+  vol 1      pages=6     selected=1     coverage=16.67%
+  vol 2      pages=9     selected=1     coverage=11.11%
+  vol 31     pages=4     selected=0     coverage=0.0%
+  vol None   pages=2     selected=0     coverage=0.0%
+DONE.
+=== BUILD DATASET ===
+pct            : 50%
+version        : v0001
+selected pages : 10
+corpus         : v0001
+content sha256 : cf268e4fb9a65a84e604ba1b64569d26d137612935be7ca3baba106c5b022288
+out dir        : C:\Users\SD4AD~1.TAB\AppData\Local\Temp\pct-tasnim-test-pii7uyzz\data\tasnim\datasets\50pct\v0001
+  vol 1      pages=6     selected=3     coverage=50.0%
+  vol 2      pages=9     selected=4     coverage=44.44%
+  vol 31     pages=4     selected=2     coverage=50.0%
+  vol None   pages=2     selected=1     coverage=50.0%
+DONE.
+=== BUILD DATASET ===
+pct            : 90%
+version        : v0001
+selected pages : 19
+corpus         : v0001
+content sha256 : da82ef095b2668b09326628813ffd7fdf781b4f7f863421e97658cb4c833eee5
+out dir        : C:\Users\SD4AD~1.TAB\AppData\Local\Temp\pct-tasnim-test-pii7uyzz\data\tasnim\datasets\90pct\v0001
+  vol 1      pages=6     selected=5     coverage=83.33%
+  vol 2      pages=9     selected=8     coverage=88.89%
+  vol 31     pages=4     selected=4     coverage=100.0%
+  vol None   pages=2     selected=2     coverage=100.0%
+DONE.
+=== BUILD DATASET ===
+pct            : 100%
+version        : v0001
+selected pages : 21
+corpus         : v0001
+content sha256 : 019b54f8ad3313df29ec71e4a3fd0859b49531442db4ad9875ee60d9c2e631a0
+out dir        : C:\Users\SD4AD~1.TAB\AppData\Local\Temp\pct-tasnim-test-pii7uyzz\data\tasnim\datasets\100pct\v0001
+  vol 1      pages=6     selected=6     coverage=100.0%
+  vol 2      pages=9     selected=9     coverage=100.0%
+  vol 31     pages=4     selected=4     coverage=100.0%
+  vol None   pages=2     selected=2     coverage=100.0%
+DONE.
+.=== BUILD CORPUS ===
+version        : v0001
+pages          : 21
+volumes        : 4
+content sha256 : 9053f3a7f4c4fdd8c9a4ae34b6a82ddca61f0feea878d640b1e80ab2b2933a88
+build dir      : C:\Users\SD4AD~1.TAB\AppData\Local\Temp\pct-tasnim-test-c5nurzug\data\tasnim\corpus\builds\v0001
+validate       : PASS
+DONE.
+=== BUILD DATASET ===
+pct            : 1%
+version        : v0001
+selected pages : 0
+corpus         : v0001
+content sha256 : a08a11e4130637ab1c094798376b68df7f247f9a74baa8c9eb64012ce2eb11c6
+out dir        : C:\Users\SD4AD~1.TAB\AppData\Local\Temp\pct-tasnim-test-c5nurzug\data\tasnim\datasets\1pct\v0001
+  vol 1      pages=6     selected=0     coverage=0.0%
+  vol 2      pages=9     selected=0     coverage=0.0%
+  vol 31     pages=4     selected=0     coverage=0.0%
+  vol None   pages=2     selected=0     coverage=0.0%
+DONE.
+=== BUILD DATASET ===
+pct            : 10%
+version        : v0001
+selected pages : 2
+corpus         : v0001
+content sha256 : 72a00d2c7bb51e5e662cc7369ee2202ed6a0fa740989df95f36a28c3cc769ee6
+out dir        : C:\Users\SD4AD~1.TAB\AppData\Local\Temp\pct-tasnim-test-c5nurzug\data\tasnim\datasets\10pct\v0001
+  vol 1      pages=6     selected=1     coverage=16.67%
+  vol 2      pages=9     selected=1     coverage=11.11%
+  vol 31     pages=4     selected=0     coverage=0.0%
+  vol None   pages=2     selected=0     coverage=0.0%
+DONE.
+=== BUILD DATASET ===
+pct            : 50%
+version        : v0001
+selected pages : 10
+corpus         : v0001
+content sha256 : 407492dd9897024fa46d47d15cdf4c2852db0fc5d1e077c22318689f1d24198b
+out dir        : C:\Users\SD4AD~1.TAB\AppData\Local\Temp\pct-tasnim-test-c5nurzug\data\tasnim\datasets\50pct\v0001
+  vol 1      pages=6     selected=3     coverage=50.0%
+  vol 2      pages=9     selected=4     coverage=44.44%
+  vol 31     pages=4     selected=2     coverage=50.0%
+  vol None   pages=2     selected=1     coverage=50.0%
+DONE.
+=== BUILD DATASET ===
+pct            : 90%
+version        : v0001
+selected pages : 19
+corpus         : v0001
+content sha256 : 4aae925afb75b63301e2fd791501cb11340b6392c25ced732f55f956cdc1a0bc
+out dir        : C:\Users\SD4AD~1.TAB\AppData\Local\Temp\pct-tasnim-test-c5nurzug\data\tasnim\datasets\90pct\v0001
+  vol 1      pages=6     selected=5     coverage=83.33%
+  vol 2      pages=9     selected=8     coverage=88.89%
+  vol 31     pages=4     selected=4     coverage=100.0%
+  vol None   pages=2     selected=2     coverage=100.0%
+DONE.
+=== BUILD DATASET ===
+pct            : 100%
+version        : v0001
+selected pages : 21
+corpus         : v0001
+content sha256 : 6ec7af90928022bab24a4c6397d55d557506cb38c3c0f29cd0885b74f13e9d0a
+out dir        : C:\Users\SD4AD~1.TAB\AppData\Local\Temp\pct-tasnim-test-c5nurzug\data\tasnim\datasets\100pct\v0001
+  vol 1      pages=6     selected=6     coverage=100.0%
+  vol 2      pages=9     selected=9     coverage=100.0%
+  vol 31     pages=4     selected=4     coverage=100.0%
+  vol None   pages=2     selected=2     coverage=100.0%
+DONE.
+=== BUILD DATASET ===
+pct            : 50%
+version        : v0002
+selected pages : 4
+corpus         : v0001
+content sha256 : 9fceab6e33f9a617a2774c9f142426e604c78a56af0ac12d672c33fc02c2d2f5
+out dir        : C:\Users\SD4AD~1.TAB\AppData\Local\Temp\pct-tasnim-test-c5nurzug\data\tasnim\datasets\50pct\v0002
+  vol 2      pages=9     selected=4     coverage=44.44%
+DONE.
+.=== BUILD CORPUS ===
+version        : v0001
+pages          : 21
+volumes        : 4
+content sha256 : ada1d42e4fb723cfa8b36f151019dea5466ba98911bfc0778a7115a893ec704f
+build dir      : C:\Users\SD4AD~1.TAB\AppData\Local\Temp\pct-tasnim-test-upi0yo2x\data\tasnim\corpus\builds\v0001
+validate       : PASS
+DONE.
+REUSED v0001 — content identical (same input + config). No new version.
+.=== BUILD CORPUS ===
+version        : v0001
+pages          : 21
+volumes        : 4
+content sha256 : 32156bac41b8f105bd72990d9107ae61b4e24bc587dd668c4e9b1245933923b9
+build dir      : C:\Users\SD4AD~1.TAB\AppData\Local\Temp\pct-tasnim-test-4x3ca11t\data\tasnim\corpus\builds\v0001
+validate       : PASS
+DONE.
+=== BUILD CORPUS ===
+version        : v0001
+pages          : 21
+volumes        : 4
+content sha256 : 32156bac41b8f105bd72990d9107ae61b4e24bc587dd668c4e9b1245933923b9
+build dir      : C:\Users\SD4AD~1.TAB\AppData\Local\Temp\pct-tasnim-test-4x3ca11t\data2\tasnim\corpus\builds\v0001
+validate       : PASS
+DONE.
+=== BUILD DATASET ===
+pct            : 50%
+version        : v0001
+selected pages : 10
+corpus         : v0001
+content sha256 : 6d85cca9a4f31578c103e2cd5a56ee1313ad5ff72697a2b3c0800f6cbedd4f61
+out dir        : C:\Users\SD4AD~1.TAB\AppData\Local\Temp\pct-tasnim-test-4x3ca11t\data\tasnim\datasets\50pct\v0001
+  vol 1      pages=6     selected=3     coverage=50.0%
+  vol 2      pages=9     selected=4     coverage=44.44%
+  vol 31     pages=4     selected=2     coverage=50.0%
+  vol None   pages=2     selected=1     coverage=50.0%
+DONE.
+=== BUILD DATASET ===
+pct            : 50%
+version        : v0001
+selected pages : 10
+corpus         : v0001
+content sha256 : 6d85cca9a4f31578c103e2cd5a56ee1313ad5ff72697a2b3c0800f6cbedd4f61
+out dir        : C:\Users\SD4AD~1.TAB\AppData\Local\Temp\pct-tasnim-test-4x3ca11t\data2\tasnim\datasets\50pct\v0001
+  vol 1      pages=6     selected=3     coverage=50.0%
+  vol 2      pages=9     selected=4     coverage=44.44%
+  vol 31     pages=4     selected=2     coverage=50.0%
+  vol None   pages=2     selected=1     coverage=50.0%
+DONE.
+.=== BUILD CORPUS ===
+version        : v0001
+pages          : 21
+volumes        : 4
+content sha256 : ab02b665e1eb1e3527c8cc345f5851021087edf3b59751272e5941aac3970199
+build dir      : C:\Users\SD4AD~1.TAB\AppData\Local\Temp\pct-tasnim-test-d8ccp80w\data\tasnim\corpus\builds\v0001
+validate       : PASS
+DONE.
+=== BUILD DATASET ===
+pct            : 100%
+version        : v0001
+selected pages : 21
+corpus         : v0001
+content sha256 : 46ac03d37a0cf8c8d43a85375148504edfb4dc50a4f02bbe31b42f05ee6028e9
+out dir        : C:\Users\SD4AD~1.TAB\AppData\Local\Temp\pct-tasnim-test-d8ccp80w\data\tasnim\datasets\100pct\v0001
+  vol 1      pages=6     selected=6     coverage=100.0%
+  vol 2      pages=9     selected=9     coverage=100.0%
+  vol 31     pages=4     selected=4     coverage=100.0%
+  vol None   pages=2     selected=2     coverage=100.0%
+DONE.
+=== EXPORT DUMP (adapter for ai-dump-builder) ===
+dataset        : v0001
+version        : v0001
+books          : 4
+records        : 19 (skipped_short=2, truncated=0)
+required fields: OK
+content sha256 : 9dd4794368ea7b72d75c1d390f4f54f0d4ad85589e35217c1f44f57eb62c5309
+out dir        : C:\Users\SD4AD~1.TAB\AppData\Local\Temp\pct-tasnim-test-d8ccp80w\data\tasnim\dumps\100pct\v0001
+NOTE: embedding/Neo4j OUT OF SCOPE در این فاز (مأموریت بعدی).
+DONE.
+.=== BUILD CORPUS ===
+version        : v0001
+pages          : 21
+volumes        : 4
+content sha256 : 6df3032cc97f3d721037fe8c41156e9b793e3c801855120be73de73ae7efd362
+build dir      : C:\Users\SD4AD~1.TAB\AppData\Local\Temp\pct-tasnim-test-u1ga20m8\data\tasnim\corpus\builds\v0001
+validate       : PASS
+DONE.
+=== BUILD CORPUS ===
+version        : v0002
+pages          : 21
+volumes        : 4
+content sha256 : 4455e22c7330d3cea8c2becde8e1749e766e5d3a0424136d359a839d8c57af3c
+build dir      : C:\Users\SD4AD~1.TAB\AppData\Local\Temp\pct-tasnim-test-u1ga20m8\data\tasnim\corpus\builds\v0002
+validate       : PASS
+DONE.
+=== DIFF v0001 -> v0002 ===
+  from_pages             21
+  to_pages               21
+  added                  1
+  changed                1
+  unchanged              19
+  healed                 0
+  removed_from_source    1
+  duplicate_rows_in_new  0
+change manifest: C:\Users\SD4AD~1.TAB\AppData\Local\Temp\pct-tasnim-test-u1ga20m8\data\tasnim\reports\diff_v0001_v0002\change-manifest.json
+sha256         : a7f07cc447c8d8fa1999c8b7900aefc2e8f0ffbfc7dab009b32eb126bb97d44b
+DONE.
+.=== BUILD CORPUS ===
+version        : v0001
+pages          : 21
+volumes        : 4
+content sha256 : e2121d53b1d1dfe910412818c50a020dd6abc9ccddbf00e2d1847043dc139d1c
+build dir      : C:\Users\SD4AD~1.TAB\AppData\Local\Temp\pct-tasnim-test-18rnz4dh\data\tasnim\corpus\builds\v0001
+validate       : PASS
+DONE.
+=== BUILD DATASET ===
+pct            : 10%
+version        : v0001
+selected pages : 2
+corpus         : v0001
+content sha256 : b9e9f08a801182e69b27c2bd41f4fca1d98f2314940a66002ceb175f8762302c
+out dir        : C:\Users\SD4AD~1.TAB\AppData\Local\Temp\pct-tasnim-test-18rnz4dh\data\tasnim\datasets\10pct\v0001
+  vol 1      pages=6     selected=1     coverage=16.67%
+  vol 2      pages=9     selected=1     coverage=11.11%
+  vol 31     pages=4     selected=0     coverage=0.0%
+  vol None   pages=2     selected=0     coverage=0.0%
+DONE.
+.=== BUILD CORPUS ===
+version        : v0001
+pages          : 21
+volumes        : 4
+content sha256 : 9dfba4938c5bb40a5be48d410cf5cee78bd355f92b6fb68d3fd128ebf9bf8c5d
+build dir      : C:\Users\SD4AD~1.TAB\AppData\Local\Temp\pct-tasnim-test-wpkc_fh6\data\tasnim\corpus\builds\v0001
+validate       : PASS
+DONE.
+=== BUILD CORPUS ===
+version        : v0002
+pages          : 22
+volumes        : 4
+content sha256 : b1fd8ccba415d1390db2a59f63eb7fe607adf551706b4bbf528ec63e62b77c5a
+build dir      : C:\Users\SD4AD~1.TAB\AppData\Local\Temp\pct-tasnim-test-wpkc_fh6\data\tasnim\corpus\builds\v0002
+validate       : PASS
+DONE.
+.ERROR: jsonl not found: C:\Users\SD4AD~1.TAB\AppData\Local\Temp\pct-tasnim-test-kxpwvi2_\nope.jsonl
+ERROR: corpus build not found: v9999
+ERROR: jsonl not found: C:\Users\SD4AD~1.TAB\AppData\Local\Temp\pct-tasnim-test-kxpwvi2_\nope.jsonl
+=== BUILD CORPUS ===
+version        : v0001
+pages          : 21
+volumes        : 4
+content sha256 : b3bf29e2bbe3335bfabea133470b783426938406ee751e5fbad01a033afa6571
+build dir      : C:\Users\SD4AD~1.TAB\AppData\Local\Temp\pct-tasnim-test-kxpwvi2_\data\tasnim\corpus\builds\v0001
+validate       : PASS
+DONE.
+usage: python -m corpus.tasnim.cli build-dataset [-h] [--data-root DATA_ROOT]
+                                                 --corpus CORPUS
+                                                 --percentage {1,10,50,90,100}
+                                                 [--volume VOLUME]
+                                                 [--blocks BLOCKS]
+python -m corpus.tasnim.cli build-dataset: error: argument --percentage: invalid choice: '33' (choose from '1', '10', '50', '90', '100')
+...=== BUILD CORPUS ===
+version        : v0001
+pages          : 10
+volumes        : 2
+content sha256 : 85756773d4e24afe38b21ab3a74111b7ae6a02e267a164d3b7c626c8b2e21ae9
+build dir      : C:\Users\SD4AD~1.TAB\AppData\Local\Temp\pct-sem-test-cfi1v53b\data\tasnim\corpus\builds\v0001
+validate       : PASS
+DONE.
+=== BUILD SEMANTIC (PCM-20.5 GATE 1) ===
+version        : v0002
+base           : v0001 (85756773d4e24afe38b21ab3a74111b7ae6a02e267a164d3b7c626c8b2e21ae9)
+pages          : 10
+context records: 3 (hidden, verbatim)
+class census   : {'CONTENT_PAGE': 3, 'CHAPTER_HEADING': 1, 'SECTION_HEADING': 3, 'SHORT_CONTENT': 1, 'EMPTY_PAGE': 1, 'UNKNOWN_STRUCTURE': 1}
+basis census   : {'definitive': 5, 'guessed': 5}
+content sha256 : f3ac83c051a445b20c8553be3554fc5ac5bec4df7f563e8a2e1dd1b62a4d9c14
+build dir      : C:\Users\SD4AD~1.TAB\AppData\Local\Temp\pct-sem-test-cfi1v53b\data\tasnim\corpus\builds\v0002
+validate       : PASS
+DONE.
+.=== BUILD CORPUS ===
+version        : v0001
+pages          : 10
+volumes        : 2
+content sha256 : 6599809c57ed8e03783af21c64c462aa966abb8a4b17e9f9ae1c01c569afd181
+build dir      : C:\Users\SD4AD~1.TAB\AppData\Local\Temp\pct-sem-test-_4euqy0x\data\tasnim\corpus\builds\v0001
+validate       : PASS
+DONE.
+=== BUILD SEMANTIC (PCM-20.5 GATE 1) ===
+version        : v0002
+base           : v0001 (6599809c57ed8e03783af21c64c462aa966abb8a4b17e9f9ae1c01c569afd181)
+pages          : 10
+context records: 3 (hidden, verbatim)
+class census   : {'CONTENT_PAGE': 3, 'CHAPTER_HEADING': 1, 'SECTION_HEADING': 3, 'SHORT_CONTENT': 1, 'EMPTY_PAGE': 1, 'UNKNOWN_STRUCTURE': 1}
+basis census   : {'definitive': 5, 'guessed': 5}
+content sha256 : b3aa65959f8bf125791245afc07bae7cabe117bafe24f6e1ca31740d30e1fdd7
+build dir      : C:\Users\SD4AD~1.TAB\AppData\Local\Temp\pct-sem-test-_4euqy0x\data\tasnim\corpus\builds\v0002
+validate       : PASS
+DONE.
+.=== BUILD CORPUS ===
+version        : v0001
+pages          : 10
+volumes        : 2
+content sha256 : 1b9f7866ab15de34a227b6ea86bcd9daad2921463e8380c0f5e21dd060826140
+build dir      : C:\Users\SD4AD~1.TAB\AppData\Local\Temp\pct-sem-test-xkwxbahp\data\tasnim\corpus\builds\v0001
+validate       : PASS
+DONE.
+=== BUILD SEMANTIC (PCM-20.5 GATE 1) ===
+version        : v0002
+base           : v0001 (1b9f7866ab15de34a227b6ea86bcd9daad2921463e8380c0f5e21dd060826140)
+pages          : 10
+context records: 3 (hidden, verbatim)
+class census   : {'CONTENT_PAGE': 3, 'CHAPTER_HEADING': 1, 'SECTION_HEADING': 3, 'SHORT_CONTENT': 1, 'EMPTY_PAGE': 1, 'UNKNOWN_STRUCTURE': 1}
+basis census   : {'definitive': 5, 'guessed': 5}
+content sha256 : 62d0e33e96eb11bf8dcd8409604a97306c56b6af74e7ab1713eea614af3ca8d4
+build dir      : C:\Users\SD4AD~1.TAB\AppData\Local\Temp\pct-sem-test-xkwxbahp\data\tasnim\corpus\builds\v0002
+validate       : PASS
+DONE.
+=== VALIDATE CORPUS: C:\Users\SD4AD~1.TAB\AppData\Local\Temp\pct-sem-test-xkwxbahp\data\tasnim\corpus\builds\v0002 ===
+RESULT: PASS
+.=== BUILD CORPUS ===
+version        : v0001
+pages          : 10
+volumes        : 2
+content sha256 : 20452c465c5349f4b539bc908500242dfb0dc9a322bdef30561d23ad90c3a6b1
+build dir      : C:\Users\SD4AD~1.TAB\AppData\Local\Temp\pct-sem-test-ojjmloup\data\tasnim\corpus\builds\v0001
+validate       : PASS
+DONE.
+=== BUILD SEMANTIC (PCM-20.5 GATE 1) ===
+version        : v0002
+base           : v0001 (20452c465c5349f4b539bc908500242dfb0dc9a322bdef30561d23ad90c3a6b1)
+pages          : 10
+context records: 3 (hidden, verbatim)
+class census   : {'CONTENT_PAGE': 3, 'CHAPTER_HEADING': 1, 'SECTION_HEADING': 3, 'SHORT_CONTENT': 1, 'EMPTY_PAGE': 1, 'UNKNOWN_STRUCTURE': 1}
+basis census   : {'definitive': 5, 'guessed': 5}
+content sha256 : 407cb1a7cde501722cd18c5ec4da198de541c6550c9a494b9050ff9612b60c18
+build dir      : C:\Users\SD4AD~1.TAB\AppData\Local\Temp\pct-sem-test-ojjmloup\data\tasnim\corpus\builds\v0002
+validate       : PASS
+DONE.
+.=== BUILD CORPUS ===
+version        : v0001
+pages          : 10
+volumes        : 2
+content sha256 : a6e29be67cf6147ea25ff88904013ea056f5a11b9a43ab16a0b6d216996fa905
+build dir      : C:\Users\SD4AD~1.TAB\AppData\Local\Temp\pct-sem-test-4863gbge\data\tasnim\corpus\builds\v0001
+validate       : PASS
+DONE.
+=== BUILD SEMANTIC (PCM-20.5 GATE 1) ===
+version        : v0002
+base           : v0001 (a6e29be67cf6147ea25ff88904013ea056f5a11b9a43ab16a0b6d216996fa905)
+pages          : 10
+context records: 3 (hidden, verbatim)
+class census   : {'CONTENT_PAGE': 3, 'CHAPTER_HEADING': 1, 'SECTION_HEADING': 3, 'SHORT_CONTENT': 1, 'EMPTY_PAGE': 1, 'UNKNOWN_STRUCTURE': 1}
+basis census   : {'definitive': 5, 'guessed': 5}
+content sha256 : 37f4ef1d0d7abeb01cc6f60e69cdd7788dbe741d788e8c73371567e2bd6a5c3c
+build dir      : C:\Users\SD4AD~1.TAB\AppData\Local\Temp\pct-sem-test-4863gbge\data\tasnim\corpus\builds\v0002
+validate       : PASS
+DONE.
+=== BUILD CORPUS ===
+version        : v0001
+pages          : 10
+volumes        : 2
+content sha256 : a6e29be67cf6147ea25ff88904013ea056f5a11b9a43ab16a0b6d216996fa905
+build dir      : C:\Users\SD4AD~1.TAB\AppData\Local\Temp\pct-sem-test-4863gbge\data2\tasnim\corpus\builds\v0001
+validate       : PASS
+DONE.
+=== BUILD SEMANTIC (PCM-20.5 GATE 1) ===
+version        : v0002
+base           : v0001 (a6e29be67cf6147ea25ff88904013ea056f5a11b9a43ab16a0b6d216996fa905)
+pages          : 10
+context records: 3 (hidden, verbatim)
+class census   : {'CONTENT_PAGE': 3, 'CHAPTER_HEADING': 1, 'SECTION_HEADING': 3, 'SHORT_CONTENT': 1, 'EMPTY_PAGE': 1, 'UNKNOWN_STRUCTURE': 1}
+basis census   : {'definitive': 5, 'guessed': 5}
+content sha256 : 37f4ef1d0d7abeb01cc6f60e69cdd7788dbe741d788e8c73371567e2bd6a5c3c
+build dir      : C:\Users\SD4AD~1.TAB\AppData\Local\Temp\pct-sem-test-4863gbge\data2\tasnim\corpus\builds\v0002
+validate       : PASS
+DONE.
+.=== BUILD CORPUS ===
+version        : v0001
+pages          : 10
+volumes        : 2
+content sha256 : 1b2b4da410442ac6ef2e5f260a48241fbb7a73be321497c203177bac688c1a0c
+build dir      : C:\Users\SD4AD~1.TAB\AppData\Local\Temp\pct-sem-test-k8lqpyd2\data\tasnim\corpus\builds\v0001
+validate       : PASS
+DONE.
+=== BUILD SEMANTIC (PCM-20.5 GATE 1) ===
+version        : v0002
+base           : v0001 (1b2b4da410442ac6ef2e5f260a48241fbb7a73be321497c203177bac688c1a0c)
+pages          : 10
+context records: 3 (hidden, verbatim)
+class census   : {'CONTENT_PAGE': 3, 'CHAPTER_HEADING': 1, 'SECTION_HEADING': 3, 'SHORT_CONTENT': 1, 'EMPTY_PAGE': 1, 'UNKNOWN_STRUCTURE': 1}
+basis census   : {'definitive': 5, 'guessed': 5}
+content sha256 : 90153f8a8bd2a48d08ddda93871db51d05e4e81633ea81caf3f3c92a7c06f8c2
+build dir      : C:\Users\SD4AD~1.TAB\AppData\Local\Temp\pct-sem-test-k8lqpyd2\data\tasnim\corpus\builds\v0002
+validate       : PASS
+DONE.
+=== SEMANTIC DIFF v0001 -> v0002 ===
+  pages_from               10
+  pages_to                 10
+  added_pages              0
+  recovered                0
+  changed                  0
+  unchanged                10
+  missing_pages            0
+  duplicate_rows           0
+  unresolved_gaps          0
+  context_records_added    3
+semantic change: C:\Users\SD4AD~1.TAB\AppData\Local\Temp\pct-sem-test-k8lqpyd2\data\tasnim\reports\diff_v0001_v0002\semantic-change.json
+sha256         : 4aeaeefc765a2444c93d227323f4e7fbc941aaf39518fa2234c9c69a5e18d3ca
+DONE.
+.=== BUILD CORPUS ===
+version        : v0001
+pages          : 10
+volumes        : 2
+content sha256 : c473d7fde763b8b35994ce6573cb96fe8639288e3de4e183e4c37d869ed70072
+build dir      : C:\Users\SD4AD~1.TAB\AppData\Local\Temp\pct-sem-test-mq5v8ubv\data\tasnim\corpus\builds\v0001
+validate       : PASS
+DONE.
+=== BUILD SEMANTIC (PCM-20.5 GATE 1) ===
+version        : v0002
+base           : v0001 (c473d7fde763b8b35994ce6573cb96fe8639288e3de4e183e4c37d869ed70072)
+pages          : 10
+context records: 3 (hidden, verbatim)
+class census   : {'CONTENT_PAGE': 3, 'CHAPTER_HEADING': 1, 'SECTION_HEADING': 3, 'SHORT_CONTENT': 1, 'EMPTY_PAGE': 1, 'UNKNOWN_STRUCTURE': 1}
+basis census   : {'definitive': 5, 'guessed': 5}
+content sha256 : 56382120a8aeba581abe7f9667cc52b8d65508739adfe78adeb98bcd0100b9e3
+build dir      : C:\Users\SD4AD~1.TAB\AppData\Local\Temp\pct-sem-test-mq5v8ubv\data\tasnim\corpus\builds\v0002
+validate       : PASS
+DONE.
+.=== BUILD CORPUS ===
+version        : v0001
+pages          : 10
+volumes        : 2
+content sha256 : 5bc8542deeb36a0c99c2628dfd20bfabba42d08fab21a27b8f6148ba04e4f8be
+build dir      : C:\Users\SD4AD~1.TAB\AppData\Local\Temp\pct-sem-test-2mdtm22k\data\tasnim\corpus\builds\v0001
+validate       : PASS
+DONE.
+=== BUILD SEMANTIC (PCM-20.5 GATE 1) ===
+version        : v0002
+base           : v0001 (5bc8542deeb36a0c99c2628dfd20bfabba42d08fab21a27b8f6148ba04e4f8be)
+pages          : 10
+context records: 3 (hidden, verbatim)
+class census   : {'CONTENT_PAGE': 3, 'CHAPTER_HEADING': 1, 'SECTION_HEADING': 3, 'SHORT_CONTENT': 1, 'EMPTY_PAGE': 1, 'UNKNOWN_STRUCTURE': 1}
+basis census   : {'definitive': 5, 'guessed': 5}
+content sha256 : 8c8f31596d3a45a3aae4271ad6c67da89d78f4047bb249d82831b48e4ce11a61
+build dir      : C:\Users\SD4AD~1.TAB\AppData\Local\Temp\pct-sem-test-2mdtm22k\data\tasnim\corpus\builds\v0002
+validate       : PASS
+DONE.
+.=== BUILD CORPUS ===
+version        : v0001
+pages          : 10
+volumes        : 2
+content sha256 : 7c4bd34f7bdf16409251b752f81aca830ead0fe1c3107887e9a1faddd80da406
+build dir      : C:\Users\SD4AD~1.TAB\AppData\Local\Temp\pct-sem-test-0eruclkh\data\tasnim\corpus\builds\v0001
+validate       : PASS
+DONE.
+=== BUILD SEMANTIC (PCM-20.5 GATE 1) ===
+version        : v0002
+base           : v0001 (7c4bd34f7bdf16409251b752f81aca830ead0fe1c3107887e9a1faddd80da406)
+pages          : 10
+context records: 3 (hidden, verbatim)
+class census   : {'CONTENT_PAGE': 3, 'CHAPTER_HEADING': 1, 'SECTION_HEADING': 3, 'SHORT_CONTENT': 1, 'EMPTY_PAGE': 1, 'UNKNOWN_STRUCTURE': 1}
+basis census   : {'definitive': 5, 'guessed': 5}
+content sha256 : 3bd0277839a2821b241a21b6ab531fb7ec65fb00f1938765a608dc0043f66e8a
+build dir      : C:\Users\SD4AD~1.TAB\AppData\Local\Temp\pct-sem-test-0eruclkh\data\tasnim\corpus\builds\v0002
+validate       : PASS
+DONE.
+.=== BUILD CORPUS ===
+version        : v0001
+pages          : 10
+volumes        : 2
+content sha256 : e8186f919e02ca5bf49c86f26fca915dfd0bcae40c3e6c99fe0ac72c847ce8f8
+build dir      : C:\Users\SD4AD~1.TAB\AppData\Local\Temp\pct-sem-test-ditketc4\data\tasnim\corpus\builds\v0001
+validate       : PASS
+DONE.
+=== BUILD SEMANTIC (PCM-20.5 GATE 1) ===
+version        : v0002
+base           : v0001 (e8186f919e02ca5bf49c86f26fca915dfd0bcae40c3e6c99fe0ac72c847ce8f8)
+pages          : 10
+context records: 3 (hidden, verbatim)
+class census   : {'CONTENT_PAGE': 3, 'CHAPTER_HEADING': 1, 'SECTION_HEADING': 3, 'SHORT_CONTENT': 1, 'EMPTY_PAGE': 1, 'UNKNOWN_STRUCTURE': 1}
+basis census   : {'definitive': 5, 'guessed': 5}
+content sha256 : 0d3b57a82465c86cb2ad8aa9cbd632af33c4f1fbd2e9bc825e94c4ba725dc477
+build dir      : C:\Users\SD4AD~1.TAB\AppData\Local\Temp\pct-sem-test-ditketc4\data\tasnim\corpus\builds\v0002
+validate       : PASS
+DONE.
+=== VALIDATE CORPUS: C:\Users\SD4AD~1.TAB\AppData\Local\Temp\pct-sem-test-ditketc4\data\tasnim\corpus\builds\v0002 ===
+  ERROR: V08 sha mismatch: context-records.jsonl
+  ERROR: S: S04: heading_text != page.text (record_id=ctx:tasnim_hamta__hamta-2026__vol001__p2)
+  ERROR: S: S04: context_hash mismatch (record_id=ctx:tasnim_hamta__hamta-2026__vol001__p2)
+  ERROR: S: S07: sha mismatch: context-records.jsonl
+RESULT: FAIL
+.=== BUILD CORPUS ===
+version        : v0001
+pages          : 10
+volumes        : 2
+content sha256 : cdc7621ecbb21294c85887e1138684fa8fdbacfc82e376e3fe97c8b7848bf0b4
+build dir      : C:\Users\SD4AD~1.TAB\AppData\Local\Temp\pct-sem-test-0_h4ps2o\data\tasnim\corpus\builds\v0001
+validate       : PASS
+DONE.
+=== BUILD SEMANTIC (PCM-20.5 GATE 1) ===
+version        : v0002
+base           : v0001 (cdc7621ecbb21294c85887e1138684fa8fdbacfc82e376e3fe97c8b7848bf0b4)
+pages          : 10
+context records: 3 (hidden, verbatim)
+class census   : {'CONTENT_PAGE': 3, 'CHAPTER_HEADING': 1, 'SECTION_HEADING': 3, 'SHORT_CONTENT': 1, 'EMPTY_PAGE': 1, 'UNKNOWN_STRUCTURE': 1}
+basis census   : {'definitive': 5, 'guessed': 5}
+content sha256 : 8454f7deba033705ca977aab28436124b71bc6d0ebffd64291d039ed41264934
+build dir      : C:\Users\SD4AD~1.TAB\AppData\Local\Temp\pct-sem-test-0_h4ps2o\data\tasnim\corpus\builds\v0002
+validate       : PASS
+DONE.
+ERROR: base corpus build not found: v0099
+ERROR: base corpus already has a semantic layer (not a valid base): corpus/builds/v0002
+ERROR: corpus build not found: v0099
+=== VALIDATE CORPUS: C:\Users\SD4AD~1.TAB\AppData\Local\Temp\pct-sem-test-0_h4ps2o\data\tasnim\corpus\builds\v0002 ===
+RESULT: PASS
+=== VALIDATE CORPUS: C:\Users\SD4AD~1.TAB\AppData\Local\Temp\pct-sem-test-0_h4ps2o\data\tasnim\corpus\builds\v0001 ===
+RESULT: PASS
+.
+----------------------------------------------------------------------
+Ran 27 tests in 6.000s
+
+OK

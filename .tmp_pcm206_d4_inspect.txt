@@ -1,0 +1,42 @@
+model_id: /models/Qwen3.8-27B-FP8
+summary: {"total": 37, "evaluated": 37, "skipped": 0, "blocked": 0, "counts": {"PASS": 0, "NEAR": 0, "FAIL": 37, "BLOCKED": 0, "skipped": 0}, "good": 0, "good_rate": 0.0, "decision": "STOP", "decision_reason": "good 0/37 < 0.80"}
+
+ok items: 37
+score distribution:
+  lines=0(False) persian=0.00(False) overlap=0.00(False)                 x37
+
+=== hctx:tasnim_hamta__hamta-2026__vol001__p14 (vol 1, SECTION_HEADING)
+heading: پیشگفتار مفسر
+next_text_len: 1932
+meta: {"attempt": 1, "latency_ms": 7006, "model_response": "/models/Qwen3.8-27B-FP8", "usage": {"prompt_tokens": 1025, "total_tokens": 1325, "completion_tokens": 300, "prompt_tokens_details": null, "completion_tokens_details": {"reasoning_tokens": 300}}}
+--- output ---
+
+--- score ---
+{"n_lines": 0, "lines_ok": false, "near_lines": false, "persian_ratio": 0.0, "persian_ok": false, "word_overlap": 0.0, "overlap_ok": false, "verdict": "FAIL"}
+
+=== hctx:tasnim_hamta__hamta-2026__vol012__p11186 (vol 12, SECTION_HEADING)
+heading: اشارات و لطایف
+next_text_len: 30
+meta: {"attempt": 1, "latency_ms": 6812, "model_response": "/models/Qwen3.8-27B-FP8", "usage": {"prompt_tokens": 354, "total_tokens": 654, "completion_tokens": 300, "prompt_tokens_details": null, "completion_tokens_details": {"reasoning_tokens": 300}}}
+--- output ---
+
+--- score ---
+{"n_lines": 0, "lines_ok": false, "near_lines": false, "persian_ratio": 0.0, "persian_ok": false, "word_overlap": 0.0, "overlap_ok": false, "verdict": "FAIL"}
+
+=== hctx:tasnim_hamta__hamta-2026__vol012__p11191 (vol 12, SECTION_HEADING)
+heading: بحث روایی
+next_text_len: 20
+meta: {"attempt": 1, "latency_ms": 7883, "model_response": "/models/Qwen3.8-27B-FP8", "usage": {"prompt_tokens": 349, "total_tokens": 649, "completion_tokens": 300, "prompt_tokens_details": null, "completion_tokens_details": {"reasoning_tokens": 300}}}
+--- output ---
+
+--- score ---
+{"n_lines": 0, "lines_ok": false, "near_lines": false, "persian_ratio": 0.0, "persian_ok": false, "word_overlap": 0.0, "overlap_ok": false, "verdict": "FAIL"}
+
+=== hctx:tasnim_hamta__hamta-2026__vol012__p11196 (vol 12, SECTION_HEADING)
+heading: 3. معنای احصان کنیز
+next_text_len: 939
+meta: {"attempt": 1, "latency_ms": 7042, "model_response": "/models/Qwen3.8-27B-FP8", "usage": {"prompt_tokens": 684, "total_tokens": 984, "completion_tokens": 300, "prompt_tokens_details": null, "completion_tokens_details": {"reasoning_tokens": 300}}}
+--- output ---
+
+--- score ---
+{"n_lines": 0, "lines_ok": false, "near_lines": false, "persian_ratio": 0.0, "persian_ok": false, "word_overlap": 0.0, "overlap_ok": false, "verdict": "FAIL"}

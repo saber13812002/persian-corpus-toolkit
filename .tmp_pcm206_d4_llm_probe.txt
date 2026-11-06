@@ -1,0 +1,9 @@
+=== A_no_thinking ===
+content: 'شب و روز دو آیه\u200cی زنده\u200cی آفرینش\u200cاند که در سکوت و روشنایی، قدرت بی\u200cکران خالق را به رخ می\u200cکشند.\nاین چرخه\u200cی بی\u200cوقفه، نشانه\u200cای آشکار از نظم دقیق و اراده\u200cی الهی در جهان هستی است.\nمفسر با تأمل در این دو پدیده، به عظمت و حکمت خداوند در تدبیر کائنات اشاره می\u200cکند.'
+reasoning: ''
+usage: {"prompt_tokens": 110, "total_tokens": 221, "completion_tokens": 111, "prompt_tokens_details": null, "completion_tokens_details": {"reasoning_tokens": 0}}
+
+=== B_big_budget ===
+content: '\n\nشب و روز دو آیه\u200cاند\nاز قدرت خدا در آسمان\nنشانه\u200cای پنهان در گردش زمان'
+reasoning: ''
+usage: {"prompt_tokens": 150, "total_tokens": 1280, "completion_tokens": 1130, "prompt_tokens_details": null, "completion_tokens_details": {"reasoning_tokens": 1100}}

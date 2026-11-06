@@ -1,0 +1,15 @@
+TRUNC live keys: ['base', 'blocked', 'checked', 'checks', 'live_also_at_cap', 'max_checks', 'status']
+TRUNC gate1_5 ref: None
+TRUNC contract: truncation-report-1
+V3 manifest kind/version: corpus / v0003
+V3 content_sha256: 40f45e0b2c393a65569846aeaac4d45dcee4bd58a7f158b1554adf3755ca78e4
+V3 data.base: {"content_sha256": "12a93e218bbc7a38d450749eca5ce25d0833b537cc13446048d430eade54f4a5", "path_rel": "corpus/builds/v0002", "version": "v0002"}
+V3 data.config: {"built_by": "corpus.tasnim/1.0.0", "policy_id": "tasnim-p1-ascii-digits", "work_name": "تفسیر تسنیم"}
+V3 data.files: {}
+V3 data.gaps: {}
+V3 data.source: {"json_path": "C:\\Users\\s.tabatabaei\\Documents\\saberprojects\\persian-corpus-toolkit\\data\\tasnim\\pcm20_4\\source-snapshot\\tasnim-corpus.json", "jsonl_path": "C:\\Users\\s.tabatabaei\\Documents\\saberprojects\\persian-corpus-toolkit\\data\\tasnim\\pcm20_4\\source-snapshot\\tasnim-corpus.jsonl", "jsonl_sha256": "fd927b663733fe0530afdf76d6deb6b42f3b40d807297e60722fe3b0e79e96b5", "snapshot": "sfd927b663733", "summary_sha256": "1b96b1b07c1acca11ebfcd75e3cd8f5f706c76955e6023e30923f6dc7a2fc733"}
+V3 data.stats: {"page_count": 45844}
+V3 heading-records.jsonl: 10739 lines
+V3 hidden-context-records.jsonl: 10728 lines
+V3 context-records.jsonl: 10728 lines
+V3 pages.jsonl: 45844 lines

@@ -1,0 +1,57 @@
+heading records: 10739
+keys: ['children_page_ids', 'heading_hash', 'heading_text', 'item_index', 'next_page_id', 'page_id', 'parent_heading_page_id', 'provenance', 'record_id', 'record_kind', 'source_class', 'visibility', 'volume_id', 'volume_no', 'volume_title']
+{
+ "children_page_ids": [
+  "tasnim_hamta__hamta-2026__vol001__p19",
+  "tasnim_hamta__hamta-2026__vol001__p24",
+  "tasnim_hamta__hamta-2026__vol001__p25",
+  "tasnim_hamta__hamta-2026__vol001__p26"
+ ],
+ "heading_hash": "09fddd652faf37949343cb38bee8ea0134280ce5c2ee7779fa61b749a614305c",
+ "heading_text": "پیشگفتار مفسر",
+ "item_index": 14,
+ "next_page_id": "tasnim_hamta__hamta-2026__vol001__p19",
+ "page_id": "tasnim_hamta__hamta-2026__vol001__p14",
+ "parent_heading_page_id": null,
+ "provenance": {
+  "captured_at": "2026-10-25 16:51:28",
+  "content_hash": "68baeadb72c09527c91aaba44df81bd04939208a562172dfe1ed9308bbca603e",
+  "source_page_id": 11711
+ },
+ "record_id": "hctx:tasnim_hamta__hamta-2026__vol001__p14",
+ "record_kind": "heading",
+ "source_class": "SECTION_HEADING",
+ "visibility": "hidden_context",
+ "volume_id": "tasnim_hamta__hamta-2026__vol001",
+ "volume_no": 1,
+ "volume_title": "جلد 1"
+}
+with next-page ref: 10736
+type census: {'?': 10739}
+--- sample with next page ---
+{
+ "children_page_ids": [
+  "tasnim_hamta__hamta-2026__vol001__p19",
+  "tasnim_hamta__hamta-2026__vol001__p24",
+  "tasnim_hamta__hamta-2026__vol001__p25",
+  "tasnim_hamta__hamta-2026__vol001__p26"
+ ],
+ "heading_hash": "09fddd652faf37949343cb38bee8ea0134280ce5c2ee7779fa61b749a614305c",
+ "heading_text": "پیشگفتار مفسر",
+ "item_index": 14,
+ "next_page_id": "tasnim_hamta__hamta-2026__vol001__p19",
+ "page_id": "tasnim_hamta__hamta-2026__vol001__p14",
+ "parent_heading_page_id": null,
+ "provenance": {
+  "captured_at": "2026-10-25 16:51:28",
+  "content_hash": "68baeadb72c09527c91aaba44df81bd04939208a562172dfe1ed9308bbca603e",
+  "source_page_id": 11711
+ },
+ "record_id": "hctx:tasnim_hamta__hamta-2026__vol001__p14",
+ "record_kind": "heading",
+ "source_class": "SECTION_HEADING",
+ "visibility": "hidden_context",
+ "volume_id": "tasnim_hamta__hamta-2026__vol001",
+ "volume_no": 1,
+ "volume_title": "جلد 1"
+}

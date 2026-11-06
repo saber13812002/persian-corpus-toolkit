@@ -1,0 +1,379 @@
+{
+ "mission": "PCM-20.6 baseline - Part D local data verification",
+ "mode": "read-only",
+ "data_modified": false,
+ "checks": [
+  {
+   "kind": "file_sha",
+   "path": "C:\\Users\\s.tabatabaei\\Documents\\saberprojects\\persian-corpus-toolkit\\data/tasnim/pcm20_4/source-snapshot\\tasnim-corpus.jsonl",
+   "expected": "fd927b663733fe0530afdf76d6deb6b42f3b40d807297e60722fe3b0e79e96b5",
+   "actual": "fd927b663733fe0530afdf76d6deb6b42f3b40d807297e60722fe3b0e79e96b5",
+   "match": true,
+   "size": 72906133,
+   "size_match": true
+  },
+  {
+   "kind": "file_sha",
+   "path": "C:\\Users\\s.tabatabaei\\Documents\\saberprojects\\persian-corpus-toolkit\\data/tasnim/pcm20_4/source-snapshot\\tasnim-corpus.json",
+   "expected": "cee2c08aae1862d0bde029868af29f1512a0faec8ac9a5c3b41d70d8260f1676",
+   "actual": "cee2c08aae1862d0bde029868af29f1512a0faec8ac9a5c3b41d70d8260f1676",
+   "match": true,
+   "size": 72959214,
+   "size_match": true
+  },
+  {
+   "kind": "file_sha",
+   "path": "C:\\Users\\s.tabatabaei\\Documents\\saberprojects\\persian-corpus-toolkit\\data/tasnim/pcm20_4/source-snapshot\\export-summary.json",
+   "expected": "1b96b1b07c1acca11ebfcd75e3cd8f5f706c76955e6023e30923f6dc7a2fc733",
+   "actual": "1b96b1b07c1acca11ebfcd75e3cd8f5f706c76955e6023e30923f6dc7a2fc733",
+   "match": true,
+   "size": 408016,
+   "size_match": true
+  },
+  {
+   "kind": "file_sha",
+   "path": "C:\\Users\\s.tabatabaei\\Documents\\saberprojects\\persian-corpus-toolkit\\data/tasnim/pcm20_4/source-snapshot\\pcm20_2_audit.json",
+   "expected": "db6c30f415372c6ae7cb9709286e0d4f0ac42db78c5b7aa38de2e7996c7260d7",
+   "actual": "db6c30f415372c6ae7cb9709286e0d4f0ac42db78c5b7aa38de2e7996c7260d7",
+   "match": true,
+   "size": 63188,
+   "size_match": true
+  },
+  {
+   "kind": "corpus_file_sha",
+   "path": "C:\\Users\\s.tabatabaei\\Documents\\saberprojects\\persian-corpus-toolkit\\data\\tasnim\\pcm20_4\\corpus\\builds\\v0001\\corpus.json",
+   "expected": "97bc4d9a74fcf8a401f9144c2a892638266ae3e5352f31ecc168a24499bb4830",
+   "actual": "97bc4d9a74fcf8a401f9144c2a892638266ae3e5352f31ecc168a24499bb4830",
+   "match": true
+  },
+  {
+   "kind": "corpus_file_sha",
+   "path": "C:\\Users\\s.tabatabaei\\Documents\\saberprojects\\persian-corpus-toolkit\\data\\tasnim\\pcm20_4\\corpus\\builds\\v0001\\pages.jsonl",
+   "expected": "0b31533a2a05d8e9cc7cd817d8fa536699ab5fe061c6590729135e1d828b87f0",
+   "actual": "0b31533a2a05d8e9cc7cd817d8fa536699ab5fe061c6590729135e1d828b87f0",
+   "match": true
+  },
+  {
+   "kind": "corpus_file_sha",
+   "path": "C:\\Users\\s.tabatabaei\\Documents\\saberprojects\\persian-corpus-toolkit\\data\\tasnim\\pcm20_4\\corpus\\builds\\v0002\\corpus.json",
+   "expected": "c8ced8df298282e1a8b91a7f81f89248440ac290bd4abac02125418dae03bee0",
+   "actual": "c8ced8df298282e1a8b91a7f81f89248440ac290bd4abac02125418dae03bee0",
+   "match": true
+  },
+  {
+   "kind": "corpus_file_sha",
+   "path": "C:\\Users\\s.tabatabaei\\Documents\\saberprojects\\persian-corpus-toolkit\\data\\tasnim\\pcm20_4\\corpus\\builds\\v0002\\pages.jsonl",
+   "expected": "b0ad5291356c35f12fa9cc26f2600f24c243739183ce9eac2af03c53e9a6242a",
+   "actual": "b0ad5291356c35f12fa9cc26f2600f24c243739183ce9eac2af03c53e9a6242a",
+   "match": true
+  },
+  {
+   "kind": "corpus_file_sha",
+   "path": "C:\\Users\\s.tabatabaei\\Documents\\saberprojects\\persian-corpus-toolkit\\data\\tasnim\\pcm20_4\\corpus\\builds\\v0003\\corpus.json",
+   "expected": "b0a9a4e31c5139918a2665fa5292a61d37a6bf745ff66beea736903e32dae9eb",
+   "actual": "b0a9a4e31c5139918a2665fa5292a61d37a6bf745ff66beea736903e32dae9eb",
+   "match": true
+  },
+  {
+   "kind": "corpus_file_sha",
+   "path": "C:\\Users\\s.tabatabaei\\Documents\\saberprojects\\persian-corpus-toolkit\\data\\tasnim\\pcm20_4\\corpus\\builds\\v0003\\pages.jsonl",
+   "expected": "6a7d48c8ff5acdac40485288c0af785460da11d6f2fbc7913ff751883b0b2478",
+   "actual": "6a7d48c8ff5acdac40485288c0af785460da11d6f2fbc7913ff751883b0b2478",
+   "match": true
+  },
+  {
+   "kind": "corpus_file_sha",
+   "path": "C:\\Users\\s.tabatabaei\\Documents\\saberprojects\\persian-corpus-toolkit\\data\\tasnim\\pcm20_5\\corpus\\builds\\v0001\\corpus.json",
+   "expected": "97bc4d9a74fcf8a401f9144c2a892638266ae3e5352f31ecc168a24499bb4830",
+   "actual": "97bc4d9a74fcf8a401f9144c2a892638266ae3e5352f31ecc168a24499bb4830",
+   "match": true
+  },
+  {
+   "kind": "corpus_file_sha",
+   "path": "C:\\Users\\s.tabatabaei\\Documents\\saberprojects\\persian-corpus-toolkit\\data\\tasnim\\pcm20_5\\corpus\\builds\\v0001\\pages.jsonl",
+   "expected": "0b31533a2a05d8e9cc7cd817d8fa536699ab5fe061c6590729135e1d828b87f0",
+   "actual": "0b31533a2a05d8e9cc7cd817d8fa536699ab5fe061c6590729135e1d828b87f0",
+   "match": true
+  },
+  {
+   "kind": "corpus_file_sha",
+   "path": "C:\\Users\\s.tabatabaei\\Documents\\saberprojects\\persian-corpus-toolkit\\data\\tasnim\\pcm20_5\\corpus\\builds\\v0002\\context-records.jsonl",
+   "expected": "a1ac04216c38243a26ca40e1857ec210965cfdecb464bc70f06afcb54805a949",
+   "actual": "a1ac04216c38243a26ca40e1857ec210965cfdecb464bc70f06afcb54805a949",
+   "match": true
+  },
+  {
+   "kind": "corpus_file_sha",
+   "path": "C:\\Users\\s.tabatabaei\\Documents\\saberprojects\\persian-corpus-toolkit\\data\\tasnim\\pcm20_5\\corpus\\builds\\v0002\\corpus.json",
+   "expected": "6c9b1003ed781430051b3b0ab578c5982d089c082d414e3f9bc58d6d1004b1a1",
+   "actual": "6c9b1003ed781430051b3b0ab578c5982d089c082d414e3f9bc58d6d1004b1a1",
+   "match": true
+  },
+  {
+   "kind": "corpus_file_sha",
+   "path": "C:\\Users\\s.tabatabaei\\Documents\\saberprojects\\persian-corpus-toolkit\\data\\tasnim\\pcm20_5\\corpus\\builds\\v0002\\pages.jsonl",
+   "expected": "9e00bf6215d1a3ce83130218915a4455f254b61fd47fe23796d4117fad56afcf",
+   "actual": "9e00bf6215d1a3ce83130218915a4455f254b61fd47fe23796d4117fad56afcf",
+   "match": true
+  },
+  {
+   "kind": "dataset_manifest_sha",
+   "path": "C:\\Users\\s.tabatabaei\\Documents\\saberprojects\\persian-corpus-toolkit\\data/tasnim/pcm20_4/datasets\\1pct\\v0001\\manifest.json",
+   "expected": "d7fd9f9356f57cab0b9e9e1fdd2ce893f732ceaebee52e4e9b4b857272ac8f68",
+   "actual": "d7fd9f9356f57cab0b9e9e1fdd2ce893f732ceaebee52e4e9b4b857272ac8f68",
+   "match": true
+  },
+  {
+   "kind": "dataset_manifest_sha",
+   "path": "C:\\Users\\s.tabatabaei\\Documents\\saberprojects\\persian-corpus-toolkit\\data/tasnim/pcm20_4/datasets\\10pct\\v0001\\manifest.json",
+   "expected": "cdf2868abc15681e1bc764e94284422444a2c6ac52c60706f458171fa73bdcc0",
+   "actual": "cdf2868abc15681e1bc764e94284422444a2c6ac52c60706f458171fa73bdcc0",
+   "match": true
+  },
+  {
+   "kind": "dataset_manifest_sha",
+   "path": "C:\\Users\\s.tabatabaei\\Documents\\saberprojects\\persian-corpus-toolkit\\data/tasnim/pcm20_4/datasets\\10pct\\v0002\\manifest.json",
+   "expected": "90177de207170c6136c92cd3939d417410fe328bcf1f4afddb27b64a4d30e8d1",
+   "actual": "90177de207170c6136c92cd3939d417410fe328bcf1f4afddb27b64a4d30e8d1",
+   "match": true
+  },
+  {
+   "kind": "dataset_manifest_sha",
+   "path": "C:\\Users\\s.tabatabaei\\Documents\\saberprojects\\persian-corpus-toolkit\\data/tasnim/pcm20_4/datasets\\50pct\\v0001\\manifest.json",
+   "expected": "bd511ae8104ac2a6636a3634cfd77ca56faac368863165eda1a5129e7423cb2b",
+   "actual": "bd511ae8104ac2a6636a3634cfd77ca56faac368863165eda1a5129e7423cb2b",
+   "match": true
+  },
+  {
+   "kind": "dataset_manifest_sha",
+   "path": "C:\\Users\\s.tabatabaei\\Documents\\saberprojects\\persian-corpus-toolkit\\data/tasnim/pcm20_4/datasets\\90pct\\v0001\\manifest.json",
+   "expected": "c7002f7b76066cb0140b44207474dfdd3fd33bc6eb07477ddbdc44178f8d0aa9",
+   "actual": "c7002f7b76066cb0140b44207474dfdd3fd33bc6eb07477ddbdc44178f8d0aa9",
+   "match": true
+  },
+  {
+   "kind": "dataset_manifest_sha",
+   "path": "C:\\Users\\s.tabatabaei\\Documents\\saberprojects\\persian-corpus-toolkit\\data/tasnim/pcm20_4/datasets\\100pct\\v0001\\manifest.json",
+   "expected": "402bb01adfef4591df5740a28e2c991281450f2448bc417622e8121ff8782c79",
+   "actual": "402bb01adfef4591df5740a28e2c991281450f2448bc417622e8121ff8782c79",
+   "match": true
+  },
+  {
+   "kind": "dump_file_sha",
+   "path": "C:\\Users\\s.tabatabaei\\Documents\\saberprojects\\persian-corpus-toolkit\\data/tasnim/pcm20_4/dumps\\10pct\\v0001\\books.json",
+   "expected": "01771e8426d10f9c7b73ff6d3fe87688c5877ff173cdffccecd2b8cdca8fd5e3",
+   "actual": "01771e8426d10f9c7b73ff6d3fe87688c5877ff173cdffccecd2b8cdca8fd5e3",
+   "match": true
+  },
+  {
+   "kind": "dump_file_sha",
+   "path": "C:\\Users\\s.tabatabaei\\Documents\\saberprojects\\persian-corpus-toolkit\\data/tasnim/pcm20_4/dumps\\10pct\\v0001\\dump-check.json",
+   "expected": "d492593d6bcfa2c20d82387b4b1ea1a907ab3c5d15ab88c5d42b3eef5d2aa028",
+   "actual": "d492593d6bcfa2c20d82387b4b1ea1a907ab3c5d15ab88c5d42b3eef5d2aa028",
+   "match": true
+  },
+  {
+   "kind": "dump_file_sha",
+   "path": "C:\\Users\\s.tabatabaei\\Documents\\saberprojects\\persian-corpus-toolkit\\data/tasnim/pcm20_4/dumps\\10pct\\v0001\\product.json",
+   "expected": "e68fc51e07278e48793ec46a1ff676e9390af3f53ff5803b952ab8524e55ce2c",
+   "actual": "e68fc51e07278e48793ec46a1ff676e9390af3f53ff5803b952ab8524e55ce2c",
+   "match": true
+  },
+  {
+   "kind": "dump_file_sha",
+   "path": "C:\\Users\\s.tabatabaei\\Documents\\saberprojects\\persian-corpus-toolkit\\data/tasnim/pcm20_4/dumps\\10pct\\v0002\\books.json",
+   "expected": "2823572b0cb97645c6520eb1b746acf7d3d8f197e9dd9b93fa1792283b5d720b",
+   "actual": "2823572b0cb97645c6520eb1b746acf7d3d8f197e9dd9b93fa1792283b5d720b",
+   "match": true
+  },
+  {
+   "kind": "dump_file_sha",
+   "path": "C:\\Users\\s.tabatabaei\\Documents\\saberprojects\\persian-corpus-toolkit\\data/tasnim/pcm20_4/dumps\\10pct\\v0002\\dump-check.json",
+   "expected": "f8b368a978401706036bd1b64eab1171f467a2f6d90997a060595613a679f720",
+   "actual": "f8b368a978401706036bd1b64eab1171f467a2f6d90997a060595613a679f720",
+   "match": true
+  },
+  {
+   "kind": "dump_file_sha",
+   "path": "C:\\Users\\s.tabatabaei\\Documents\\saberprojects\\persian-corpus-toolkit\\data/tasnim/pcm20_4/dumps\\10pct\\v0002\\product.json",
+   "expected": "e68fc51e07278e48793ec46a1ff676e9390af3f53ff5803b952ab8524e55ce2c",
+   "actual": "e68fc51e07278e48793ec46a1ff676e9390af3f53ff5803b952ab8524e55ce2c",
+   "match": true
+  },
+  {
+   "kind": "dump_file_sha",
+   "path": "C:\\Users\\s.tabatabaei\\Documents\\saberprojects\\persian-corpus-toolkit\\data/tasnim/pcm20_4/dumps\\100pct\\v0001\\books.json",
+   "expected": "313984cfed3c65e7c4ad2b2064e77b467f65823727fb770b3daf003a1e5d4766",
+   "actual": "313984cfed3c65e7c4ad2b2064e77b467f65823727fb770b3daf003a1e5d4766",
+   "match": true
+  },
+  {
+   "kind": "dump_file_sha",
+   "path": "C:\\Users\\s.tabatabaei\\Documents\\saberprojects\\persian-corpus-toolkit\\data/tasnim/pcm20_4/dumps\\100pct\\v0001\\dump-check.json",
+   "expected": "2592d4bb9c7713b00d34a6971c29612b39248e3737c018c41511f438a40bf52b",
+   "actual": "2592d4bb9c7713b00d34a6971c29612b39248e3737c018c41511f438a40bf52b",
+   "match": true
+  },
+  {
+   "kind": "dump_file_sha",
+   "path": "C:\\Users\\s.tabatabaei\\Documents\\saberprojects\\persian-corpus-toolkit\\data/tasnim/pcm20_4/dumps\\100pct\\v0001\\product.json",
+   "expected": "e68fc51e07278e48793ec46a1ff676e9390af3f53ff5803b952ab8524e55ce2c",
+   "actual": "e68fc51e07278e48793ec46a1ff676e9390af3f53ff5803b952ab8524e55ce2c",
+   "match": true
+  },
+  {
+   "kind": "registry_sha",
+   "path": "C:\\Users\\s.tabatabaei\\Documents\\saberprojects\\persian-corpus-toolkit\\data/tasnim\\pcm20_4\\manifests/registry.json",
+   "expected": "83abe05c0d465c823a3972a796815c03f2d50358ab51b4daaf4958c4af0ed2d4",
+   "actual": "83abe05c0d465c823a3972a796815c03f2d50358ab51b4daaf4958c4af0ed2d4",
+   "match": true
+  },
+  {
+   "kind": "registry_sha",
+   "path": "C:\\Users\\s.tabatabaei\\Documents\\saberprojects\\persian-corpus-toolkit\\data/tasnim\\pcm20_5\\manifests/registry.json",
+   "expected": "e8474e4bbfbfc4a10bd26eb74bccc92ecfe5e35d91312ac856bc4bdd4390b297",
+   "actual": "e8474e4bbfbfc4a10bd26eb74bccc92ecfe5e35d91312ac856bc4bdd4390b297",
+   "match": true
+  },
+  {
+   "kind": "registry_sha",
+   "path": "C:\\Users\\s.tabatabaei\\Documents\\saberprojects\\persian-corpus-toolkit\\data/tasnim\\pcm20_5_crossroot\\manifests/registry.json",
+   "expected": "df056d01484d55300f6e9dda3aa87a318e33ad929632e147054b13ecaf3abfd2",
+   "actual": "df056d01484d55300f6e9dda3aa87a318e33ad929632e147054b13ecaf3abfd2",
+   "match": true
+  }
+ ],
+ "gap_recompute": {
+  "source": "C:\\Users\\s.tabatabaei\\Documents\\saberprojects\\persian-corpus-toolkit\\data/tasnim/pcm20_4/source-snapshot/tasnim-corpus.jsonl",
+  "total_lines": 45844,
+  "distinct_item_index": 45835,
+  "min_item_index": 0,
+  "max_item_index": 91077,
+  "span_inclusive": 91078,
+  "coverage_gap_recomputed": 45243,
+  "note": "45243 = values in [min..max] not present = span - distinct (not missing fields: every row carries an item_index)",
+  "declared_missing": 45243,
+  "match_declared": true,
+  "declared_runs": [
+   [
+    3649,
+    11182
+   ],
+   [
+    11205,
+    39003
+   ],
+   [
+    44957,
+    49956
+   ],
+   [
+    55699,
+    55701
+   ],
+   [
+    55715,
+    59590
+   ],
+   [
+    89280,
+    90310
+   ]
+  ],
+  "recomputed_runs": [
+   [
+    3649,
+    11182
+   ],
+   [
+    11205,
+    39003
+   ],
+   [
+    44957,
+    49956
+   ],
+   [
+    55699,
+    55701
+   ],
+   [
+    55715,
+    59590
+   ],
+   [
+    89280,
+    90310
+   ]
+  ],
+  "runs_match_declared": true,
+  "runs_sum": 45243
+ },
+ "truncation_evidence": {
+  "path": "C:\\Users\\s.tabatabaei\\Documents\\saberprojects\\persian-corpus-toolkit\\data/tasnim/pcm20_4/validation/gate1_5_truncation_conclusion.json",
+  "sha256": "b0f45e9381db78da8a16b8e577038e2de8a8897f0c59c38b01cf1dc192d5158d",
+  "keys": [
+   "conclusion",
+   "decision",
+   "evidence",
+   "gate",
+   "live_probe",
+   "residual",
+   "verdict"
+  ],
+  "summary": {
+   "conclusion": "PASS",
+   "evidence": [
+    {
+     "id": "E1-pipeline-code",
+     "claim": "در هیچ حلقه‌ای از مسیر داده کد truncation وجود ندارد",
+     "detail": [
+      "extension/content_picker.js: textOf(el) = (el.innerText||el.textContent).replace(/\\s+/g,' ').trim() — بدون هیچ سقف طول؛ applyField() برای transform 'text' بدون cap است (سلیس‌ها فقط در پیش‌نمایش UI: 24/60/80/180/240).",
+      "backend/projects.py:save_page() — payload = json.dumps(values, ensure_ascii=False, sort_keys=True) و ذخیره کامل در project_pages.values_json؛ content_hash = sha256(payload). فقط sample[:240] و last_message[:500] برای فیلدهای دیگر.",
+      "deploy/pcm20_tasnim_export.py — dump خام DB (SELECT ... values_json)؛ هیچ برش متنی؛ تنها text_head:t[:200] در ممیزی نمایشی PCM-20.2.",
+      "corpus/tasnim/* — factory فقط پرچم truncated_at_2000 را می‌زند، هرگز متن را حذف/کوتاه نمی‌کند."
+     ]
+    },
+    {
+     "id": "E2-boundary-statistics",
+     "claim": "توزیع طول‌ها حول مرز ۲۰۰۰ «انباشت» (pile-up) ندارد — یعنی اثر هارد-کات نیست",
+     "detail": [
+      "total=45844 max=2000 min=0 p50=64 p90=1710 p95=1885 p99=1985",
+      "bucket 1800-1899: 133..160 → 1900-1999: 146..290 (افزایش تدریجی) → 1990-1999: 288 → دقیقاً 2000: فقط 28 (0.06%).",
+      "در قطع سخت معمولاً فراوانی در مرز بیش از ده برابر همسایه است؛ اینجا برعکس: 28 در 2000 در مقابل 288 در 1990-1999 (افت ~10x). انتظار از توزیع به‌تنهایی ~165 در همان نقطه؛ مشاهده 28 یعنی حتی کمتر از تصادفی."
+     ]
+    },
+    {
+     "id": "E3-tail-characteristics",
+     "claim": "شکل پایانِ رکوردهای دقیقاً ۲۰۰۰ با گروه کنترل (<2000) از نظر آماری هم‌توزیع است",
+     "detail": [
+      "class آخرین کاراکتر در رکوردهای at-2000 (n=28): {punct:10, other:18} (~36% punctuation)",
+      "گروه کنترل (n=45781, len<2000): {punct:18962, other:26819} (~41% punctuation)",
+      "پایان‌های واقعی at-2000: فهرست‌های فصل/محتوا که روی شماره صفحه تمام می‌شوند (\"...بحث روایی 112\")، جملات کامل، و یک مورد که در میانهٔ آیه قطع می‌شود (\"...﴿\") — همان چیزی که انتظار می‌رود اگر منبع خود متن را در ۲۰۰۰ بسته باشد."
+     ]
+    },
+    {
+     "id": "E4-live-source-comparison",
+     "claim": "مقایسه زنده با API سایت: متن اسنپ‌شات = متن زنده منبع (به‌جز فشرده‌سازی whitespace مستند crawler)",
+     "detail": [
+      "Endpoint کشف‌شده از bundle سایت (tasnim.hamtaa.org /assets/index-Cve6St2q.js): GET /api/v1/files/tasnim/chunk-detail?item_index=N → {original_text, section, metadata}.",
+      "5 آیتم مقایسه شد: 2 دقیقاً-۲۰۰۰ (item_index 39137, 66532) + 3 کنترل (41, 67125, 91028).",
+      "39137: snap_len=2000 live_len=2000 — فقط تفاوت '\\n'→' ' (دقیقاً همان policy textOf crawler).",
+      "66532: snap_len=2000 live_len=2000 — الگوی یکسان (340\\nاعطای → 340 اعطای).",
+      "41 و 91028: exact_match=True (snap_len==live_len==متن یکسان بایت‌به‌بایت).",
+      "67125 (192): فقط یک '\\n'→' '.",
+      "نتیجه: حتی برای آیتم‌های مرزیِ ۲۰۰۰، original_text زنده هم ۲۰۰۰ است → سقف ۲۰۰۰ در سمت منبع (chunk_text شاخص RAG سایت) است، نه در Export/Crawl ما."
+     ]
+    }
+   ]
+  }
+ },
+ "v0002_stats": {
+  "pages_lines": 45844,
+  "context_lines": 10728,
+  "pages_sha": "9e00bf6215d1a3ce83130218915a4455f254b61fd47fe23796d4117fad56afcf",
+  "ctx_sha": "a1ac04216c38243a26ca40e1857ec210965cfdecb464bc70f06afcb54805a949"
+ },
+ "result": "ALL_MATCH",
+ "mismatches": []
+}
