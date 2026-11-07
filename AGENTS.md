@@ -5,7 +5,7 @@
 
 ## ۱. محدوده‌ی مجاز (scope)
 
-- **فقط** زیرسیستم پیکره: `backend/`, `dashboard/`, `extension/`, `corpus/`, `deploy/`, `docs/`.
+- **فقط** زیرسیستم پیکره: `backend/`, `dashboard/`, `extension/`, `corpus/`, `deploy/`, `docs/`, `tasnim/`.
 - **هرگز** روی NotebookLM، RAG indexer (جزء زیرمجموعه‌ی دیگر)، یا QA Bank دست نزنید.
 - هرگز DB production (`backend/thesaurus.db` روی s52) را خارج از بکاپ‌برده‌شده لمس نکنید.
 
@@ -25,6 +25,21 @@
    کل‌جدول‌بارگذاری در APIها ممنوع.
 8. خروج‌های DOM در کلاینت از `escHtml` (XSS)؛ هیچ HTML خام بدون sanitize.
 9. عدد آمار/درصد ساختگی ندهید — فقط شمارنده‌های واقعی DB، با تعریف مکتوب.
+10. **read model‌های Tasnim اشیای immutable/نسخه‌شده‌اند** — هر نسخه یک دایرکتوری
+    مستقل (`tasnim/data/readmodel/vNNNN/`) است؛ بعد از انتشار، هیچ تغییری در `v0003`
+    و بعدش نمی‌شود؛ نسخهٔ جدید = دایرکتوری جدید + `build.sha256` جدید. دایرکتوری‌های
+    `tasnim/data/` و `data/` gitignored‌اند (بکاپ/بازیابی: `docs/tasnim/BACKUP-RESTORE.md`).
+11. **context پنهان هرگز خارج نمی‌شود (HP-1):** `hidden-context-records.jsonl` و
+    `context-records.jsonl` در read model/API/UI ممنوع‌اند — 4 لایهٔ محافظ: builder
+    guard + `strict_pick` (whitelist در serializer) + تست‌های T-HC-1..4 + canary در
+    چک 15 smoke؛ فیلد تازه باید به whitelist اضافه شود.
+12. **کلیدهای دادهٔ Tasnim ثابت‌اند:** `page_id` کلید منحصربه‌فرد صفحه و `item_index`
+    کلید ترتیب است (barg فقط نمایشی و ممکن است null باشد)؛ coverها SVG placeholder
+    با شمارهٔ واقعی جلد‌اند — عکس/کاور جعلی بارگذاری نمی‌شود.
+13. **پورت‌ها و نام‌های رزرو:** 5070 (nginx) و 5071 (API) + نام containerهای
+    `tasnim-*` فقط برای زیرسیستم تسنیم (مطابق `docs/tasnim/DEPLOYMENT.md`).
+14. **بازیابی صفحات گمشده (Gate B) فقط با تأیید صریح انسان:** `BACKFILL_APPROVED=approved`
+    + runbook (`docs/tasnim/OPS-RUNBOOK.md`)؛ policy bf-2 (PCM-20.6.3)؛ اجرای زنده فقط روی s52.
 
 ## ۳. دپلوی (s52 = 172.20.1.52)
 
@@ -94,6 +109,12 @@ cd backend && python -m unittest test_api test_projects test_dashboard \
   نمونه کلاینت؛ **بدون job deploy**؛ `deploy/pcm19_openapi_check.py`).
 - داشبورد: HTML+JS تک‌صفحه‌ای بدون framework در `dashboard/index.html`؛ همه‌ی
   fetchها `credentials: same-origin` و 401 → overlay ورود.
+- **Tasnim Web V1 (PCM-20.6.4):** `tasnim/web/` — اپ Flask+Jinja (SSR، RTL) روی
+  read model نسخه‌شده: 12 endpoint خواندنی `/api/v1/tasnim/...` + FTS5 (`tokenize_fa/1.0`)
+  + OpenAPI 3.1 · `tasnim/web/build_cli.py` — builder read model (HP-1؛ بدون DB/ES/شبکه) ·
+  `tasnim/e2e/` — smoke 15-item + E2E · `tasnim/sdk/{python,javascript}` — SDKهای بدون
+  وابستگی · `tasnim/{Dockerfile,docker-compose.tasnim.yml,nginx/tasnim.conf}` ·
+  مستندات: `docs/tasnim/INDEX.md` (15 سند) + `docs/PCM-20.6.4-ARCHITECTURE.md`.
 
 ## ۶. نقشه‌ی راه (ترتیب اجرا)
 
@@ -123,6 +144,8 @@ cd backend && python -m unittest test_api test_projects test_dashboard \
 | **PCM-20.2** ممیزی عمیق خروجی واقعی + تطبیق با AI Dump Builder (`deploy/pcm20_2_tasnim_audit.py`) | ✅ (باگ parse_barg اثبات شد؛ adapter بدون تغییر کد Builder ممکن است؛ بدون deploy) |
 | **PCM-20.3** Tasnim Corpus Factory: `corpus/tasnim/` (13 ماژول) + 16 تست T — audit gate + پیکره‌ی canonical (RAW/NORMALIZED جدا) + V01–V08 + dataset‌های 1/10/50/90/100 + adapter Dump سازگار با builder + diff + زنجیره‌ی manifest/provenance (immutable، append-only) | ✅ (16 تست + رگرسیون کامل 200؛ بدون deploy؛ سند: docs/PCM-20.3-TASNIM-FORFACTORY.md؛ embedding/Neo4j = مأموریت بعدی) |
 | **PCM-20.4** پذیرش واقعی end-to-end تسنیم: snapshot واقعی 45,844 صفحه (SHA verify + GATE 1.5 truncation) → پیکره‌ی canonical v0001 → 6 دیتاست نسخه‌شده (شامل 1 جلد + fixture افزایشی با diff/immutable) → 3 خروجی Dump + **3 build واقعی ai-dump-builder** (mock embedding؛ بدون LiteLLM/Neo4j/collection عملیاتی) + زنجیره‌ی registry 17-entry + 216 تست سبز (200 رگرسیون + 16 T؛ 0 skip) | ✅ (acceptance PASS؛ بدون deploy؛ سند: docs/PCM-20.4-TASNIM-ACCEPTANCE.md؛ embedding/Neo4j واقعی = PCM-20.5) |
+| **PCM-20.6.3** backfill صفحات گمشده: policy bf-2 + `corpus/tasnim/backfill/` (gap-report/plan/run) + 28 تست BF01–BF22b (audit gate؛ بدون اجرای زنده) | ✅ طراحی/READY_FOR_APPROVAL (اجرا در انتظار تأیید صریح انسان؛ s52 آفلاین؛ 45,243 صفحه ≈ 188.5 ساعت) |
+| **PCM-20.6.4** Tasnim Web V1 — کتابخانه‌ی دیجیتال: read model v0003 (immutable/نسخه‌شده) + SSR/RTL + 12 endpoint خواندنی + FTS5 فارسی + OpenAPI 3.1 + SDK Python/JS + استک nginx/Docker + smoke 15-item + 15 سند `docs/tasnim/` | ✅ V1 تحویل‌شده (296 تست: 293 سبز + 3 skip داده‌ای؛ اجرای مستقیم تأیید شده؛ provision دامنه/اجرای Docker/GitLab در انتظار) |
 
 گزارش‌ها: `گزارش-PCM-0X.md` (۱۱ بخش: وضعیت قبل، طراحی، مهاجرت، فایل/API، تست،
 نتیجه production، SHA+لینک، git status، بکاپ/rollback، موارد باقی‌مانده، روش تست دستی).

@@ -24,8 +24,39 @@
 | 8e | **قرارداد API + CI + کلاینت** (PCM-19): تست‌های قرارداد CT-01..CT-06 (OpenAPI spec ↔ app زنده) + GitLab CI test-only (`.gitlab-ci.yml`) + چک‌کن OpenAPI + نمونه کلاینت REST (فقط stdlib) | ✅ (18 تست CT + 200/200 — بدون deploy) |
 | 8f | **Tasnim Corpus Factory — قرارداد `c-20.3`** (PCM-20.3): خط لوله «تفسیر تسنیم همتا» — Work→Edition→Volume→Page با شناسه‌های قطعی + RAW/NORMALIZED جدا + flag به‌جای حذف + QC + idempotency/دترمینیسم + دیتاست‌های 1/10/50/90/100% (`stratified-even-blocks`) + diff/manifest/registry + خروجی Dump سازگار با ai-dump-builder — بدون DB/ES/شبکه | ✅ (16 تست T + 200/200 — بدون deploy) |
 | 8g | **پذیرش واقعی Tasnim — زنجیره end-to-end** (PCM-20.4): snapshot واقعی 45,844 صفحه (SHA verify + GATE 1.5 truncation) → پیکره canonical v0001 → 6 دیتاست نسخه‌شده (شامل 1 جلد + fixture افزایشی) → 3 خروجی Dump → **3 build واقعی ai-dump-builder** (mock embedding؛ Neo4j/شبکه درگیر نشد) + زنجیره‌ی manifest/provenance + 216 تست سبز | ✅ (acceptance PASS — بدون deploy) |
+| 8h | **تفسیر تسنیم — کتابخانه‌ی دیجیتال** (PCM-20.6.4): وب‌اپ خواندنی RTL فارسی (Flask SSR + Jinja + vanilla JS) روی read model نسخه‌شده v0003 (45,844 صفحه / 6 جلد / 1,080 موضوع) + 12 endpoint خواندنی `/api/v1/tasnim/...` + جستجوی تمام‌متنی FTS5 (`tokenize_fa/1.0`) + OpenAPI 3.1 + SDKهای Python/JS بدون وابستگی + stack nginx/Docker + smoke 15-item — بدون endpoint نوشتنی/حساب کاربری/DB/ES/شبکه | ✅ (296 تست: 293 سبز + 3 skip داده‌ای؛ اجرای مستقیم روی Windows؛ domain/Docker/GitLab در انتظار) |
 | 9 | پایپلاین پیکره + دیتaset + آپلود HuggingFace | ✅ در دسترس |
 | 10 | ایندکسر RAG | 🚧 در دست توسعه |
+
+## تفسیر تسنیم — کتابخانه‌ی دیجیتال (PCM-20.6.4)
+
+**Tasnim Web V1** یک کتابخانه‌ی دیجیتال **خواندنی** (بدون endpoint نوشتنی، بدون حساب کاربری) برای پیکره‌ی «تفسیر تسنیم» (نسخه‌ی همتا) است: وب‌اپ Flask + Jinja (SSR) با رابط RTL فارسی، مستقیم روی **read model نسخه‌شده v0003** (`tasnim/data/readmodel/v0003/`) — 45,844 صفحه، 6 جلد، 1,080 موضوع، 10,739 سربرگ (heading)؛ از این میان 45,243 صفحه «در دست بازیابی» (GATE 0-D)‌اند و به همین شکل در UI نمایش می‌یابند. دارای 12 endpoint خواندنی REST (`/api/v1/tasnim/...`)، جستجوی تمام‌متنی FTS5 با نرمال‌سازی فارسی `tokenize_fa/1.0`، OpenAPI 3.1 + Swagger، SDKهای Python و JavaScript (بدون وابستگی)، استک nginx/Docker برای production و smoke suite با 15 چک است. context پنهان (10,728 رکورد) توسط مکانیزم 4لایه‌ی HP-1 از خروجی خارج می‌ماند (canary scan در چک 15).
+
+### شروع سریع (۳ دستور)
+
+```bash
+# ۱) اجرای وب‌اپ روی read model (پورت پیش‌فرض 5071)
+python -X utf8 -m tasnim.web.app --db tasnim/data/readmodel/v0003/tasnim_readmodel.db --port 5071
+
+# ۲) smoke 15-item (پیش‌فرض هدف = nginx روی 5070؛ برای اجرای مستقیم: --base http://127.0.0.1:5071)
+python -X utf8 -m tasnim.e2e.smoke
+
+# ۳) تست کامل: 10 suite، 296 تست (293 سبز + 3 skip داده‌ای)
+python -X utf8 -m unittest test_corpus_backfill test_corpus_gap_report test_corpus_semantic \
+  test_corpus_semantic_v3 test_corpus_tasnim test_corpus_truncation_report \
+  test_tasnim_api test_tasnim_frontend test_tasnim_readmodel test_tasnim_sdk -v
+```
+
+**مستندات:** [docs/tasnim/INDEX.md](docs/tasnim/INDEX.md) — مجموعه‌ی 15‌سند: README، معماری، قرارداد داده، مرجع API، OpenAPI، استقرار، Docker، راهنمای توسعه، راهنمای کاربر (فارسی)، runbook عملیات، بکاپ/بازیابی، گزارش تست، امنیت، نقشه‌ی راه و وارد کردن به Wiki.
+
+**وضعیت تست:** 296 تست → 293 سبز / 3 skip (نبود داده‌ی واقعی v0003 در worktree) · smoke 15/15 · E2E 12/12 · SDK Python 23/23 · SDK JS 22/22.
+
+| آیتم | وضعیت |
+|------|-------|
+| اجرای محلی + تست + OpenAPI + SDKها + مستندات | ✅ آماده (اجرای مستقیم روی Windows تأیید شده) |
+| دامنه‌ی `tasnim.ai.ismc.ir` (DNS آماده؛ ingress/گواهی provision نشده) | ⛔ در انتظار تأیید مالک ingress (پلن: `docs/tasnim/DEPLOYMENT.md`) |
+| اجرای Docker (`tasnim/Dockerfile` + `docker-compose.tasnim.yml`) | ⛔ Docker روی host نصب نیست (شواهد تازه 2026-11-07) |
+| GitLab (push/CI) | ⛔ دسترس‌ناپذیر (2222 TIMEOUT) |
 
 ### سیستم پروژه (هسته v3.5)
 

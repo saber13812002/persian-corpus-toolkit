@@ -36,3 +36,11 @@ backend/wf-out/
 corpus/books/
 *.docx
 *.doc
+
+# PCM-20.6.4 — Tasnim Web V1: transient probes + read-model build output (never commit)
+.tmp_*
+tasnim/data/
+
+# PCM-20.6.4 — e2e screenshot captures (regenerated, never commit)
+tasnim/e2e/screenshots/
+tasnim/e2e/e2e-evidence.json

@@ -1,0 +1,110 @@
+# =============================================================================
+# PCM-20.6.4 (B12) — Tasnim Web V1: standalone compose stack
+# -----------------------------------------------------------------------------
+# THIS IS A STANDALONE PROJECT. It is intentionally NOT merged into the
+# repository-root docker-compose.yml (different ports, different lifecycle,
+# must never be taken down with the thesaurus stack). Run from the repo root:
+#
+#   docker compose -f tasnim/docker-compose.tasnim.yml up -d --build
+#   docker compose -f tasnim/docker-compose.tasnim.yml ps
+#   docker compose -f tasnim/docker-compose.tasnim.yml stop     # NEVER down -v
+#
+# Port plan (docs/PCM-20.6.4-ARCHITECTURE.md §7):
+#   5070  PUBLIC  — nginx edge (tasnim-web) — the only published port
+#   5071  INTERNAL— API container (tasnim-api) — NOT published to the host.
+#           Local development without Docker uses the same 5071 directly:
+#             python -X utf8 -m tasnim.web.app --db tasnim/data/readmodel/v0003/tasnim_readmodel.db
+#           (so the module entrypoint and the container speak the same port).
+#
+# Volume plan:
+#   tasnim_readmodel  — BIND, read-only: tasnim/data/readmodel/v0003 -> /data/readmodel
+#                       (swap read-model versions by pointing the bind at v0004;
+#                        the app reads nothing but this dir)
+#   tasnim_runtime    — NAMED, writable: the ONLY mutable runtime state —
+#                       the rate-limit DB at /var/tasnim/ratelimit.db.
+#                       `docker volume rm tasnim_runtime` only resets limits;
+#                       it never touches corpus data (and `down -v` is banned).
+# =============================================================================
+
+name: tasnim-web-v1
+
+services:
+  tasnim-api:
+    build:
+      context: ./tasnim
+      dockerfile: Dockerfile
+      tags:
+        - tasnim-api:pcm2064
+    image: tasnim-api:pcm2064
+    container_name: tasnim-api
+    restart: unless-stopped
+    # The ONLY environment variable the app consumes. (Also baked into the
+    # image ENV; the CMD repeats the same path explicitly.)
+    environment:
+      TASNIM_DB_PATH: /data/readmodel/tasnim_readmodel.db
+    volumes:
+      # Read model: versioned, read-only, hot-swappable.
+      - type: bind
+        source: ./tasnim/data/readmodel/v0003
+        target: /data/readmodel
+        read_only: true
+      # Writable runtime state: rate-limit DB (wired via --rate-db in CMD).
+      - tasnim_runtime:/var/tasnim
+    networks:
+      - tasnim-net
+    # NOTE: no `ports:` on purpose — 5071 stays container-internal. The edge
+    # reaches it over tasnim-net; the host never binds it.
+    depends_on: {}
+    healthcheck:
+      # Real health endpoint: read-only DB query (rate-limit exempt).
+      test:
+        - CMD
+        - python
+        - -X
+        - utf8
+        - -c
+        - "import sys, urllib.request; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:5071/api/v1/tasnim/health', timeout=8).status == 200 else 1)"
+      interval: 30s
+      timeout: 10s
+      start_period: 20s
+      retries: 3
+
+  tasnim-web:
+    image: nginx:1.27-alpine
+    container_name: tasnim-web
+    restart: unless-stopped
+    # Thin edge: vhost defined in ./tasnim/nginx/tasnim.conf (server{} only —
+    # nginx:1.27-alpine's stock /etc/nginx/nginx.conf includes conf.d/*.conf
+    # inside http{}). Volume-mounted rather than baked into a custom image:
+    # the config is reviewed in git, and re-deploying a one-line proxy change
+    # should not require a rebuild.
+    volumes:
+      - ./tasnim/nginx/tasnim.conf:/etc/nginx/conf.d/tasnim.conf:ro
+    ports:
+      - "5070:5070"   # the single public port of this service
+    networks:
+      - tasnim-net
+    depends_on:
+      tasnim-api:
+        condition: service_healthy
+    healthcheck:
+      # Probe THROUGH the proxy at the health endpoint (exempt from rate
+      # limiting), so this validates edge -> api end-to-end.
+      test:
+        - CMD
+        - wget
+        - -q
+        - --spider
+        - http://127.0.0.1:5070/api/v1/tasnim/health
+      interval: 30s
+      timeout: 10s
+      start_period: 15s
+      retries: 3
+
+networks:
+  tasnim-net:
+    name: tasnim-net
+
+volumes:
+  tasnim_runtime:
+    name: tasnim_runtime

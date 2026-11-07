@@ -1,0 +1,16 @@
+# Keep the image minimal: only the `tasnim` Python package is needed.
+# The build context is this directory (tasnim/).
+data/
+e2e/
+nginx/
+sdk/
+Dockerfile
+.dockerignore
+docker-compose.tasnim.yml
+*.pyc
+__pycache__/
+*.pyo
+*.db
+*.db-journal
+*.db-wal
+*.db-shm
