@@ -12,7 +12,11 @@
 #   docker compose -f tasnim/docker-compose.tasnim.yml stop     # NEVER down -v
 #
 # Port plan (docs/PCM-20.6.4-ARCHITECTURE.md §7):
-#   5070  PUBLIC  — nginx edge (tasnim-web) — the only published port
+#   5070  nginx edge (tasnim-web) — the only published port.
+#         PCM-20.7B: bound to 127.0.0.1 ONLY (host-internal). The public
+#         entrypoint is the host nginx vhost on :443 (TLS, rag pattern);
+#         while that vhost is not installed, the app must not be served
+#         insecurely over the wire, so 5070 is not published to 0.0.0.0.
 #   5071  INTERNAL— API container (tasnim-api) — NOT published to the host.
 #           Local development without Docker uses the same 5071 directly:
 #             python -X utf8 -m tasnim.web.app --db tasnim/data/readmodel/v0003/tasnim_readmodel.db
@@ -83,7 +87,7 @@ services:
     volumes:
       - ./nginx/tasnim.conf:/etc/nginx/conf.d/tasnim.conf:ro
     ports:
-      - "5070:5070"   # the single public port of this service
+      - "127.0.0.1:5070:5070"   # host-internal only; public via :443 vhost (TLS)
     networks:
       - tasnim-net
     depends_on:
