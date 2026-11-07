@@ -26,10 +26,17 @@
 
 FROM python:3.12-slim
 
+# Optional build-time PyPI mirror (docs/tasnim/DOCKER.md §6: hosts that cannot
+# reach pypi.org directly — e.g. SSL-blocked networks — pass
+#   --build-arg PIP_INDEX_URL=https://pypi.tuna.tsinghua.edu.cn/simple
+# Default is the official index (no mirror required when it is reachable).
+ARG PIP_INDEX_URL=https://pypi.org/simple
+
 # Runtime environment. TASNIM_DB_PATH is the ONLY app-relevant env var;
 # the CMD below passes the same path explicitly (belt and braces).
 ENV PIP_NO_CACHE_DIR=1 \
     PIP_DISABLE_PIP_VERSION_CHECK=1 \
+    PIP_INDEX_URL=${PIP_INDEX_URL} \
     PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
     TASNIM_DB_PATH=/data/readmodel/tasnim_readmodel.db
