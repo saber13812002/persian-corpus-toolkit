@@ -3,7 +3,9 @@
 # -----------------------------------------------------------------------------
 # THIS IS A STANDALONE PROJECT. It is intentionally NOT merged into the
 # repository-root docker-compose.yml (different ports, different lifecycle,
-# must never be taken down with the thesaurus stack). Run from the repo root:
+# must never be taken down with the thesaurus stack). Run from the repo root
+# (the file-relative path resolution below is the compose-spec behavior for
+# docker compose v2, so this also works from any cwd):
 #
 #   docker compose -f tasnim/docker-compose.tasnim.yml up -d --build
 #   docker compose -f tasnim/docker-compose.tasnim.yml ps
@@ -31,7 +33,7 @@ name: tasnim-web-v1
 services:
   tasnim-api:
     build:
-      context: ./tasnim
+      context: .
       dockerfile: Dockerfile
       tags:
         - tasnim-api:pcm2064
@@ -45,7 +47,7 @@ services:
     volumes:
       # Read model: versioned, read-only, hot-swappable.
       - type: bind
-        source: ./tasnim/data/readmodel/v0003
+        source: ./data/readmodel/v0003
         target: /data/readmodel
         read_only: true
       # Writable runtime state: rate-limit DB (wired via --rate-db in CMD).
@@ -79,7 +81,7 @@ services:
     # the config is reviewed in git, and re-deploying a one-line proxy change
     # should not require a rebuild.
     volumes:
-      - ./tasnim/nginx/tasnim.conf:/etc/nginx/conf.d/tasnim.conf:ro
+      - ./nginx/tasnim.conf:/etc/nginx/conf.d/tasnim.conf:ro
     ports:
       - "5070:5070"   # the single public port of this service
     networks:
