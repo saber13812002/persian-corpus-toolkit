@@ -1,0 +1,21 @@
+{% extends "base.html" %}
+{% from "macros.html" import badge, volume_card, crumbs %}
+{% block nav_volumes %}is-active{% endblock %}
+{% block title %}جلدها — {{ site.work_name }}{% endblock %}
+
+{% block content %}
+{{ crumbs([{"label": "خانه", "url": "/"}, {"label": "جلدها"}]) }}
+<header class="page-head">
+  <h1 class="page-head__title">جلدها</h1>
+  <p class="page-head__sub">{{ m.work_name }} — {{ m.edition_name }}
+    · {{ m.total }} جلد ثبت‌شده</p>
+</header>
+
+<div class="volume-grid">
+  {% for v in m["items"] %}
+  {{ volume_card(v) }}
+  {% endfor %}
+</div>
+<p class="page-foot-note">پوشش هر جلد روی صفحهٔ آن مشاهده می‌شود؛ جلدی که
+  شمارهٔ رسمی ندارد با badge «در حال بازیابی شمارهٔ جلد» نشان داده می‌شود.</p>
+{% endblock %}

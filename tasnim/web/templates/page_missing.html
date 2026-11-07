@@ -1,0 +1,45 @@
+{% extends "base.html" %}
+{% from "macros.html" import badge, gap_chip, nav_link, crumbs %}
+{% block title %}صفحه {{ m.item_index }} — در دست بازیابی{% endblock %}
+
+{% block content %}
+{{ crumbs([{"label": "خانه", "url": "/"},
+           {"label": "صفحه %d"|format(m.item_index)}]) }}
+
+<article class="reader recovery" data-missing="true">
+  <header class="reader__head">
+    <div class="reader__meta">
+      <span class="reader__num">item_index: <code>{{ m.item_index }}</code></span>
+    </div>
+  </header>
+
+  <h1 class="reader__heading">این صفحه در دست بازیابی است</h1>
+
+  <div class="banner banner--warning" role="status">
+    <strong>وضعیت:</strong> صفحه‌ای با item_index
+    <code>{{ m.item_index }}</code> در پیکره موجود نیست؛ این شکاف بخشی از
+    بازه‌های ثبت‌شدهٔ «در دست بازیابی» است (backfill) و به‌مراتب تکمیل
+    خواهد شد.
+  </div>
+
+  {% if m.range %}
+  <p class="recovery__range">
+    {{ m.range[1] - m.range[0] + 1 }} صفحه در بازهٔ
+    <code>{{ m.range[0] }}</code> تا <code>{{ m.range[1] }}</code>
+    در دست بازیابی است.
+  </p>
+  {% endif %}
+
+  <p class="recovery__hint">به‌جای حدس زدن، از نزدیک‌ترین صفحهٔ موجود
+    ادامه دهید؛ شماره‌شکنی صورت نمی‌گیرد.</p>
+</article>
+
+<nav class="reader-nav" aria-label="صفحات قبلی و بعدی">
+  <div class="reader-nav__side">
+    {{ nav_link('prev', m.prev, m.item_index) }}
+  </div>
+  <div class="reader-nav__side">
+    {{ nav_link('next', m.next, m.item_index) }}
+  </div>
+</nav>
+{% endblock %}

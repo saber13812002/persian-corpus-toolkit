@@ -1,0 +1,116 @@
+{% extends "base.html" %}
+{% from "macros.html" import badge, crumbs %}
+{% block title %}دربارهٔ پیکره — {{ site.work_name }}{% endblock %}
+
+{% block content %}
+{{ crumbs([{"label": "خانه", "url": "/"}, {"label": "دربارهٔ پیکره"}]) }}
+<header class="page-head">
+  <h1 class="page-head__title">دربارهٔ پیکره</h1>
+  <p class="page-head__sub">منبع‌شناسی، وضعیت کیفیت و محدودیت‌های نسخهٔ
+    {{ m.meta.corpus_version }}</p>
+</header>
+
+<section class="section" id="provenance" aria-labelledby="about-prov">
+  <h2 id="about-prov" class="section__title">منبع‌شناسی (provenance)</h2>
+  <table class="table">
+    <caption class="visually-hidden">مشخصات نسخهٔ read model</caption>
+    <tbody>
+      <tr><th scope="row">work_id</th><td><code>{{ m.work.get("work_id") }}</code></td></tr>
+      <tr><th scope="row">نام اثر</th><td>{{ m.work.get("work_name") }}</td></tr>
+      <tr><th scope="row">edition_id</th><td><code>{{ m.edition.get("edition_id") }}</code></td></tr>
+      <tr><th scope="row">نسخه</th><td>{{ m.edition.get("edition_name") }}</td></tr>
+      <tr><th scope="row">نسخهٔ پیکره</th><td><code>{{ m.meta.corpus_version }}</code></td></tr>
+      <tr><th scope="row">SHA-256 محتوا</th><td><code>{{ m.meta.content_sha256 }}</code></td></tr>
+      <tr><th scope="row">SHA-256 read model (DB)</th><td><code>{{ m.meta.db_sha256 }}</code></td></tr>
+      <tr><th scope="row">ساخت‌شده در</th><td><code>{{ m.meta.built_at }}</code></td></tr>
+      <tr><th scope="row">schema version</th><td><code>{{ m.meta.schema_version }}</code></td></tr>
+      <tr><th scope="row">topic normalization</th><td><code>{{ m.meta.topic_norm_version }}</code></td></tr>
+      <tr><th scope="row">tokenizer</th><td><code>{{ m.meta.tokenizer_version }}</code></td></tr>
+    </tbody>
+  </table>
+</section>
+
+<section class="section" aria-labelledby="about-counts">
+  <h2 id="about-counts" class="section__title">شمارنده‌ها (فقط از read model)</h2>
+  <div class="coverage-grid">
+    <div class="stat-card"><span class="stat-card__num">{{ m.counts.pages }}</span>
+      <span class="stat-card__label">صفحهٔ موجود</span></div>
+    <div class="stat-card"><span class="stat-card__num">{{ m.counts.volumes }}</span>
+      <span class="stat-card__label">جلد</span></div>
+    <div class="stat-card"><span class="stat-card__num">{{ m.counts.topics }}</span>
+      <span class="stat-card__label">موضوع (خودکار)</span></div>
+    <div class="stat-card"><span class="stat-card__num">{{ m.counts.headings }}</span>
+      <span class="stat-card__label">هدر</span></div>
+    <div class="stat-card stat-card--warning">
+      <span class="stat-card__num">{{ m.counts.missing_item_index }}</span>
+      <span class="stat-card__label">صفحه در دست بازیابی</span></div>
+  </div>
+</section>
+
+<section class="section" aria-labelledby="about-quality">
+  <h2 id="about-quality" class="section__title">وضعیت کیفیت صفحات</h2>
+  <table class="table">
+    <caption class="visually-hidden">توزیع وضعیت کیفیت صفحات</caption>
+    <thead><tr><th scope="col">وضعیت</th><th scope="col">توضیح</th><th scope="col">تعداد</th></tr></thead>
+    <tbody>
+      <tr><td><code>ok</code></td><td>متن کامل</td><td>{{ m.quality.get("ok", 0) }}</td></tr>
+      <tr><td><code>short</code></td><td>صفحهٔ کوتاه (کمتر از آستانه)</td><td>{{ m.quality.get("short", 0) }}</td></tr>
+      <tr><td><code>empty</code></td><td>بدون متن (در دست بازیابی)</td><td>{{ m.quality.get("empty", 0) }}</td></tr>
+      <tr><td><code>truncated_at_2000</code></td><td>متن در منبع قطع است (۲۰۰۰ نویسه)</td><td>{{ m.quality.get("truncated_at_2000", 0) }}</td></tr>
+      <tr><td><code>dup_item_index</code></td><td>تکرار شماره (چند نسخه برای یک شماره)</td><td>{{ m.quality.get("dup_item_index", 0) }}</td></tr>
+    </tbody>
+  </table>
+  <p class="prose">توزیع طول متن (نویسه):
+    p50 = {{ m.meta.text_length_stats.get("p50") }} ·
+    p90 = {{ m.meta.text_length_stats.get("p90") }} ·
+    p99 = {{ m.meta.text_length_stats.get("p99") }} ·
+    max = {{ m.meta.text_length_stats.get("max") }}</p>
+</section>
+
+<section class="section" id="backfill" aria-labelledby="about-backfill">
+  <h2 id="about-backfill" class="section__title">بازه‌های در دست بازیابی (backfill)</h2>
+  <p class="prose">این بازه‌ها از جدول <code>coverage</code> (scope=global)
+    خوانده می‌شوند و هیچ عددی به‌صورت دستی وارد نشده است.</p>
+  <table class="table">
+    <caption class="visually-hidden">بازه‌های عددی بدون صفحه</caption>
+    <thead><tr><th scope="col">از</th><th scope="col">تا</th><th scope="col">تعداد</th>
+      <th scope="col">وضعیت</th><th scope="col">یادداشت</th></tr></thead>
+    <tbody>
+      {% for r in m.backfill_ranges %}
+      <tr>
+        <td><code>{{ r.lo }}</code></td>
+        <td><code>{{ r.hi }}</code></td>
+        <td>{{ r.count }}</td>
+        <td>{{ r.status }}</td>
+        <td>{{ r.note or "—" }}</td>
+      </tr>
+      {% else %}
+      <tr><td colspan="5">بازهٔ ثبت‌شده‌ای نیست.</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</section>
+
+<section class="section" aria-labelledby="about-limits">
+  <h2 id="about-limits" class="section__title">محدودیت‌های شناخته‌شده</h2>
+  <ul class="prose-list">
+    <li>ایندکس RAG: <strong>متصل نیست</strong> (وضعیت: {{ m.meta.rag_status }}) —
+      این وب فقط read model بصری/SSR است.</li>
+    <li>فهرست سوره‌ها: <strong>{{ m.meta.surah_status }}</strong> —
+      پوشش canonical 0/114؛ <a href="/surahs">تفصیل در صفحهٔ سوره‌ها</a>.</li>
+    <li>جستجو: بدون ریشه‌یابی (no stemming) — {{ m.meta.fts_note }}</li>
+    <li>تصاویر: هیچ تصویر اسکن‌شده‌ای در read model نیست؛ جلد‌ها
+      SVG نمایه‌ای محلی‌اند و «جلد رسمی نیست».</li>
+    <li>تعلق‌دهی ابهام‌دار: صفحاتی که در چند جلد ثبت شده‌اند؛ روی صفحهٔ
+      خواندن با badge «تعلق‌دهی ابهام‌دار» نشان داده می‌شوند.</li>
+  </ul>
+</section>
+
+<section class="section" aria-labelledby="about-license">
+  <h2 id="about-license" class="section__title">مجوزها</h2>
+  <p class="prose">فونت‌های Vazirmatn و Noto Naskh Arabic تحت مجوز OFL ارائه
+    می‌شوند (<a href="{{ url_for('static', filename='fonts/README.md') }}">
+    مستندات و SHA-256 فونت‌ها</a>). متن پیکره متعلق به منبع اصلی است و این
+    سامانه فقط نمایه‌سازی/نمایش آن را انجام می‌دهد.</p>
+</section>
+{% endblock %}

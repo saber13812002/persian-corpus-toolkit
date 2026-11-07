@@ -1,0 +1,32 @@
+{% extends "base.html" %}
+{% from "macros.html" import badge, crumbs %}
+{% block title %}سوره‌ها — {{ site.work_name }}{% endblock %}
+
+{% block content %}
+{{ crumbs([{"label": "خانه", "url": "/"}, {"label": "سوره‌ها"}]) }}
+<header class="page-head">
+  <h1 class="page-head__title">سوره‌ها</h1>
+  <p class="page-head__badges">
+    {{ badge('warning', m.banner) }}
+    {{ badge('muted', 'پوشش canonical: ' + m.coverage) }}
+  </p>
+</header>
+
+<section class="section" aria-labelledby="surahs-reason">
+  <h2 id="surahs-reason" class="section__title">چرا هنوز؟</h2>
+  <p class="prose">{{ m.reason }}</p>
+  <p class="prose"><strong>برنامه:</strong> {{ m.planned }}</p>
+</section>
+
+<section class="section" aria-labelledby="surahs-evidence">
+  <h2 id="surahs-evidence" class="section__title">شواهد از read model</h2>
+  <ul class="evidence-list">
+    {% for ev in m.evidence %}
+    <li>{{ ev }}</li>
+    {% endfor %}
+  </ul>
+</section>
+
+<p class="page-foot-note">هیچ دادهٔ سوره‌ای ساخته نمی‌شود؛ فهرست سوره‌ها فقط
+  پس از شواهد قابل دفاع در نسخهٔ بعدی پیکره اضافه می‌شود.</p>
+{% endblock %}

@@ -1,0 +1,136 @@
+{% extends "base.html" %}
+{% from "macros.html" import badge, quality_badge, gap_chip, pager, crumbs %}
+{% block nav_volumes %}is-active{% endblock %}
+{% block title %}{{ m.label }} — {{ site.work_name }}{% endblock %}
+
+{% block content %}
+{{ crumbs([{"label": "خانه", "url": "/"},
+           {"label": "جلدها", "url": "/volumes"},
+           {"label": m.label}]) }}
+
+<div class="volume-detail">
+  <aside class="volume-detail__cover">
+    {{ m.cover_svg }}
+    <p class="volume-detail__cover-note">نمایهٔ اختصاصی — جلد رسمی نیست</p>
+  </aside>
+
+  <div class="volume-detail__body">
+    <header class="page-head">
+      <h1 class="page-head__title">{{ m.title or m.label }}</h1>
+      <p class="page-head__sub">{{ m.label }}
+        {%- if m.unknown %} — {{ "شمارهٔ جلد در پیکره ثبت نشده است" }}{% endif -%}
+        {%- if m.strategy %} · استراتژی: {{ m.strategy }}{% endif -%}
+      </p>
+      <div class="volume-detail__badges">
+        {% if m.unknown %}{{ badge('warning', 'در حال بازیابی شمارهٔ جلد') }}{% endif %}
+        {% if m.ambiguity_flag %}{{ badge('info', 'تعلق‌دهی ابهام‌دار') }}{% endif %}
+        {% if m.overlap_note %}{{ badge('muted', 'هم‌پوشانی با جلد دیگر') }}{% endif %}
+      </div>
+    </header>
+
+    <div class="coverage-grid coverage-grid--compact">
+      <div class="stat-card">
+        <span class="stat-card__num">{{ m.page_count }}</span>
+        <span class="stat-card__label">صفحه</span>
+      </div>
+      <div class="stat-card">
+        <span class="stat-card__num">
+          {{ m.ii_min if m.ii_min is not none else "—" }} –
+          {{ m.ii_max if m.ii_max is not none else "—" }}</span>
+        <span class="stat-card__label">بازهٔ item_index</span>
+      </div>
+      <div class="stat-card stat-card--warning">
+        <span class="stat-card__num">{{ m.missing_count }}</span>
+        <span class="stat-card__label">در دست بازیابی</span>
+      </div>
+    </div>
+
+    {% if m.first_page %}
+    <a class="btn btn--primary volume-detail__start"
+       href="/page/{{ m.first_page.item_index }}">شروع مطالعه</a>
+    {% endif %}
+
+    {% if m.missing_ranges %}
+    <section class="volume-section" aria-label="بازه‌های گم‌شده">
+      <h2 class="volume-section__title">بازه‌های در دست بازیابی</h2>
+      <ul class="range-list">
+        {% for r in m.missing_ranges %}
+        <li class="range-item">
+          {{ r.count }} صفحه در بازهٔ {{ r.lo }} تا {{ r.hi }}
+          {% if r.status %}<span class="badge badge--muted">{{ r.status }}</span>{% endif %}
+          {% if r.note %}<span class="range-item__note">{{ r.note }}</span>{% endif %}
+        </li>
+        {% endfor %}
+      </ul>
+    </section>
+    {% endif %}
+
+    {% if m.top_headings %}
+    <section class="volume-section" aria-labelledby="vh-title">
+      <h2 id="vh-title" class="volume-section__title">هدرهای پرتکرار</h2>
+      <ul class="chip-list">
+        {% for h in m.top_headings %}
+        <li><span class="topic-chip topic-chip--static">
+          <span class="topic-chip__name">{{ h.text }}</span>
+          <span class="topic-chip__count">{{ h.c }} بار</span>
+        </span></li>
+        {% endfor %}
+      </ul>
+    </section>
+    {% endif %}
+
+    {% if m.top_topics %}
+    <section class="volume-section" aria-labelledby="vt-title">
+      <h2 id="vt-title" class="volume-section__title">موضوعات این جلد</h2>
+      <ul class="chip-list">
+        {% for t in m.top_topics %}
+        <li><a class="topic-chip" href="/topics/{{ t.topic_id }}">
+          <span class="topic-chip__name">{{ t.display_text }}</span>
+          <span class="topic-chip__count">{{ t.c }} بار</span>
+        </a></li>
+        {% endfor %}
+      </ul>
+    </section>
+    {% endif %}
+  </div>
+</div>
+
+<section class="volume-section volume-section--full" aria-labelledby="pi-title">
+  <h2 id="pi-title" class="volume-section__title">فهرست صفحات
+    <span class="volume-section__count">{{ m.page_index.pager.total }} صفحه</span>
+  </h2>
+  <ul class="page-index">
+    {% for it in m.page_index["items"] %}
+      {% if it.gap is defined and it.gap is not none %}
+      <li class="page-index__gap" role="note">{{ gap_chip(it.gap) }}</li>
+      {% else %}
+      <li>
+        <a class="page-index__item" href="/page/{{ it.item_index }}">
+          <span class="page-index__num">{{ it.item_index }}</span>
+          {% if it.barg is not none %}<span class="page-index__barg">برگ {{ it.barg }}</span>{% endif %}
+          <span class="page-index__quality">{{ it.quality }}</span>
+        </a>
+      </li>
+      {% endif %}
+    {% endfor %}
+  </ul>
+  {{ pager(m.page_index.pager) }}
+</section>
+
+<section class="volume-section volume-section--full" aria-labelledby="hd-title">
+  <h2 id="hd-title" class="volume-section__title">هدرهای این جلد
+    <span class="volume-section__count">{{ m.headings.pager.total }} هدر</span>
+  </h2>
+  <ul class="heading-list">
+    {% for h in m.headings["items"] %}
+    <li>
+      <a class="heading-list__item" href="/page/{{ h.item_index }}">
+        <span class="heading-list__text">{{ h.heading_text }}</span>
+        <span class="heading-list__num">صفحه {{ h.item_index }}</span>
+      </a>
+    </li>
+    {% endfor %}
+  </ul>
+  {{ pager(m.headings.pager) }}
+</section>
+{% endblock %}

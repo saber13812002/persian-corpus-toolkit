@@ -1,0 +1,85 @@
+{# Tasnim Web V1 — shared Jinja macros (design system §7) #}
+
+{% macro badge(cls, label) -%}
+<span class="badge badge--{{ cls }}">{{ label }}</span>
+{%- endmacro %}
+
+{% macro quality_badge(quality) -%}
+{{ badge(quality.cls, quality.label) }}
+{%- endmacro %}
+
+{# Gap chip: «N صفحه در بازهٔ lo تا hi در دست بازیابی است» (ASCII digits) #}
+{% macro gap_chip(gap) -%}
+<span class="gap-chip" role="note"
+      title="در دست بازیابی (backfill)">{{ gap.count }} صفحه در بازهٔ {{ gap.lo }} تا {{ gap.hi }} در دست بازیابی است</span>
+{%- endmacro %}
+
+{# Prev/next navigation, gap-aware; missing side shows an honest chip #}
+{% macro nav_link(direction, nav, item_index) -%}
+{%- if nav.exists -%}
+<a class="nav-page nav-page--{{ direction }}" rel="{{ 'prev' if direction == 'prev' else 'next' }}"
+   href="/page/{{ nav.item_index }}{% if item_index is defined and item_index > 0 and direction == 'next' and nav.gap %}{% endif %}">
+  {%- if direction == 'prev' -%}
+    <span class="nav-page__dir" aria-hidden="true">→</span>
+    <span class="nav-page__label">صفحهٔ قبلی</span>
+    <span class="nav-page__num">{{ nav.item_index }}</span>
+  {%- else -%}
+    <span class="nav-page__label">صفحهٔ بعدی</span>
+    <span class="nav-page__num">{{ nav.item_index }}</span>
+    <span class="nav-page__dir" aria-hidden="true">←</span>
+  {%- endif -%}
+</a>
+{%- if nav.gap %}
+<div class="nav-gap" role="note">{{ gap_chip(nav.gap) }}</div>
+{%- endif -%}
+{%- else -%}
+<div class="nav-page nav-page--end" role="note">
+  {%- if direction == 'prev' -%} ابتدای پیکره {%- else -%} انتهای پیکره {%- endif -%}
+</div>
+{%- endif -%}
+{%- endmacro %}
+
+{# Pagination: pager dict from pages._pager #}
+{% macro pager(p, label_prefix="صفحه") -%}
+{%- if p.total_pages > 1 -%}
+<nav class="pager" aria-label="صفحه‌بندی">
+  <span class="pager__status">{{ label_prefix }} {{ p.page }} از {{ p.total_pages }} · {{ p.total }} مورد</span>
+  <span class="pager__links">
+    {%- if p.prev_url %}<a class="pager__btn" href="{{ p.prev_url }}">قبلی</a>{% else %}<span class="pager__btn pager__btn--off" aria-disabled="true">قبلی</span>{% endif %}
+    {%- if p.next_url %}<a class="pager__btn" href="{{ p.next_url }}">بعدی</a>{% else %}<span class="pager__btn pager__btn--off" aria-disabled="true">بعدی</span>{% endif %}
+  </span>
+</nav>
+{%- endif -%}
+{%- endmacro %}
+
+{# Breadcrumbs (IA rule: no volume claim when attribution is ambiguous) #}
+{% macro crumbs(items) -%}
+<nav class="crumbs" aria-label="مسیر">
+  <ol>
+    {%- for c in items %}
+    <li>
+      {%- if c.url and not loop.last %}<a href="{{ c.url }}">{{ c.label }}</a>
+      {%- else %}<span aria-current="page">{{ c.label }}</span>{% endif -%}
+    </li>
+    {%- endfor %}
+  </ol>
+</nav>
+{%- endmacro %}
+
+{# Volume card for grids #}
+{% macro volume_card(v) -%}
+<a class="volume-card" href="/volumes/{{ v.volume_id }}">
+  <span class="volume-card__cover" aria-hidden="true">{{ v.cover_svg }}</span>
+  <span class="volume-card__body">
+    <span class="volume-card__title">{{ v.title or v.label }}</span>
+    <span class="volume-card__meta">
+      {{ v.page_count }} صفحه
+      {%- if v.missing_count %} · {{ v.missing_count }} در دست بازیابی{% endif -%}
+    </span>
+    <span class="volume-card__badges">
+      {%- if v.unknown %}{{ badge('warning', 'در حال بازیابی شمارهٔ جلد') }}{% endif -%}
+      {%- if v.ambiguity_flag %}{{ badge('info', 'تعلق‌دهی ابهام‌دار') }}{% endif -%}
+    </span>
+  </span>
+</a>
+{%- endmacro %}

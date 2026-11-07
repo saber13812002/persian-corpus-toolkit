@@ -1,0 +1,49 @@
+{% extends "base.html" %}
+{% from "macros.html" import badge, crumbs, pager %}
+{% block nav_topics %}is-active{% endblock %}
+{% block title %}{{ m.display_text }} — موضوعات — {{ site.work_name }}{% endblock %}
+
+{% block content %}
+{{ crumbs([{"label": "خانه", "url": "/"}, {"label": "موضوعات", "url": "/topics"},
+            {"label": m.display_text}]) }}
+<header class="page-head">
+  <h1 class="page-head__title">{{ m.display_text }}</h1>
+  <p class="page-head__sub">
+    {{ m.page_count }} صفحه · {{ m.volume_count }} جلد
+    {%- if m.first_item_index is not none %} · اولین: صفحه {{ m.first_item_index }}{% endif -%}
+  </p>
+  <p class="page-head__badges">
+    {{ badge('info', m.disclaimer) }}
+  </p>
+</header>
+
+{% if m.parent_topic %}
+<p class="topic-parent">
+  موضوع والد (بیشتر هدرها زیر):
+  <a href="/topics/{{ m.parent_topic.topic_id }}">{{ m.parent_topic.display_text }}</a>
+  ({{ m.parent_topic.count }} هدر)
+</p>
+{% endif %}
+
+<section class="section" aria-labelledby="occ-title">
+  <h2 id="occ-title" class="section__title">وقوع‌ها ({{ m.occurrences_total }})</h2>
+  <ul class="occ-list">
+    {% for o in m.occurrences %}
+    <li>
+      <a class="occ-item" href="/page/{{ o.item_index }}{% if o.is_heading_page %}#heading{% endif %}">
+        <span class="occ-item__num">صفحه {{ o.item_index }}</span>
+        <span class="occ-item__vol">{{ o.volume_label }}</span>
+        {% if o.heading_text %}
+        <span class="occ-item__heading">{{ o.heading_text }}</span>
+        {% endif %}
+        {%- if o.is_heading_page %}{{ badge('ok', 'هدر') }}{% endif -%}
+      </a>
+    </li>
+    {% endfor %}
+  </ul>
+  {{ pager(m.pager) }}
+</section>
+
+<p class="page-foot-note">این موضوع «تأیید انسانی نشده — استخراج خودکار» است؛
+  برای اطمینان، هدرها را در صفحه‌ها ببینید.</p>
+{% endblock %}

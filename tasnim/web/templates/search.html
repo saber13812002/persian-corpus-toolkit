@@ -1,0 +1,55 @@
+{% extends "base.html" %}
+{% from "macros.html" import badge, crumbs %}
+{% block title %}جستجو: {{ m.q }} — {{ site.work_name }}{% endblock %}
+{% block search_q %}{{ m.q }}{% endblock %}
+
+{% block content %}
+{{ crumbs([{"label": "خانه", "url": "/"}, {"label": "جستجو"}]) }}
+<header class="page-head">
+  <h1 class="page-head__title">جستجو در متن تفسیر</h1>
+  <p class="page-head__sub">
+    {%- if m.estimated %}
+      نتایج «{{ m.q }}» — تعداد دقیق شمارش نشده (بیش از ۳ توکن)
+    {%- elif m.total > 0 %}
+      {{ m.total }} نتیجه برای «{{ m.q }}»
+    {%- else %}
+      نتیجه‌ای یافت نشد برای «{{ m.q }}»
+    {%- endif %}
+  </p>
+</header>
+
+<div class="search-results" {% if m.results %}aria-label="نتایج جستجو"{% endif %}>
+  {% for r in m.results %}
+  <article class="search-hit">
+    <h2 class="search-hit__head">
+      <a href="/page/{{ r.item_index }}">{{ r.heading or ('صفحه ' ~ r.item_index) }}</a>
+      <span class="search-hit__meta">{{ r.volume_label }}
+        {%- if r.ambiguous %} · تعلق‌دهی ابهام‌دار{% endif -%}</span>
+    </h2>
+    <p class="search-hit__snippet">
+      {% for seg, marked in r.snippet %}{% if marked %}<mark>{{ seg }}</mark>{% else %}{{ seg }}{% endif %}{% endfor %}
+    </p>
+    <p class="search-hit__foot">
+      <a class="btn btn--small" href="/page/{{ r.item_index }}">مشاهدهٔ صفحه</a>
+      <span class="badge badge--muted">{{ r.quality }}</span>
+    </p>
+  </article>
+  {% else %}
+  <div class="empty-state">
+    <p class="empty-state__title">نتیجه‌ای یافت نشد</p>
+    <p class="empty-state__hint">جستجو روی متن فعلی read model است؛ اگر معنایی
+      جویا هستید، شاید واژهٔ دیگری در پیکره آمده باشد.</p>
+    {% if m.suggestions %}
+    <p class="empty-state__hint">موضوعات پرکاربرد:
+      {% for s in m.suggestions %}
+      <a href="/topics?q={{ s|urlencode }}">{{ s }}</a>{% if not loop.last %}،{% endif %}
+      {% endfor %}
+    </p>
+    {% endif %}
+  </div>
+  {% endfor %}
+</div>
+
+<p class="page-foot-note">جستجو بدون ریشه‌یابی (no stemming) است؛ فاصله‌ها و
+  تشدیدها نرمال‌سازی می‌شوند ولی صرف و نحو در نظر گرفته نمی‌شود.</p>
+{% endblock %}

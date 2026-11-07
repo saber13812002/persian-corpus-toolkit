@@ -1,0 +1,144 @@
+{% extends "base.html" %}
+{% from "macros.html" import badge, quality_badge, nav_link, crumbs %}
+{% block title %}صفحه {{ m.item_index }} — {{ site.work_name }}{% endblock %}
+{% block meta_description %}صفحهٔ {{ m.item_index }} از {{ site.work_name }}{% endblock %}
+
+{% block content %}
+{% set crumbs_items = [{"label": "خانه", "url": "/"},
+                       {"label": "صفحه %d"|format(m.item_index)}] %}
+{% if not m.volume.ambiguous and not m.volume.unknown %}
+{% set crumbs_items = [{"label": "خانه", "url": "/"},
+    {"label": m.volume.label, "url": "/volumes/" ~ m.volume.volume_id},
+    {"label": "صفحه %d"|format(m.item_index)}] %}
+{% endif %}
+{{ crumbs(crumbs_items) }}
+
+<article class="reader" data-item-index="{{ m.item_index }}"
+         data-dup-rank="{{ m.dup_rank }}">
+  <header class="reader__head">
+    <div class="reader__meta">
+      <span class="reader__vol">
+        <a href="/volumes/{{ m.volume.volume_id }}">{{ m.volume.label }}</a>
+        {%- if m.barg is not none %} · برگ {{ m.barg }}{% endif -%}
+      </span>
+      <span class="reader__num">item_index: <code>{{ m.item_index }}</code></span>
+    </div>
+    <div class="reader__tools" role="group" aria-label="ابزارهای خوانش">
+      <button type="button" class="btn btn--ghost font-size-btn"
+              id="font-minus" aria-label="کوچک‌کردن متن">A−</button>
+      <button type="button" class="btn btn--ghost font-size-btn"
+              id="font-reset" aria-label="اندازهٔ پیش‌فرض متن">A</button>
+      <button type="button" class="btn btn--ghost font-size-btn"
+              id="font-plus" aria-label="بزرگ‌کردن متن">A+</button>
+      <button type="button" class="btn btn--ghost"
+              aria-expanded="false" aria-controls="metadata-drawer"
+              id="meta-toggle">متادیتا</button>
+    </div>
+  </header>
+
+  {% if m.heading %}
+  <h1 class="reader__heading">{{ m.heading.text }}</h1>
+  {% else %}
+  <h1 class="reader__heading reader__heading--muted">
+    صفحه {{ m.item_index }}
+    {% if m.volume.ambiguous %} (تعلق جلدی ثبت‌شده نیست){% endif %}
+  </h1>
+  {% endif %}
+
+  <div class="reader__badges">
+    {{ quality_badge(m.quality) }}
+    {% if m.volume.ambiguous %}
+      {{ badge('info', 'شماره در چند جلد ثبت شده — تعلق ابهام‌دار') }}
+    {% endif %}
+    {% for cls, label in m.quality.flags %}
+      {% if label != m.quality.label %}{{ badge(cls, label) }}{% endif %}
+    {% endfor %}
+  </div>
+
+  {% if m.truncated_banner %}
+  <div class="banner banner--danger" role="alert" id="truncated-banner">
+    این صفحه در منبعِ اصلی حداکثر ۲۰۰۰ نویسه ثبت شده است؛ ادامهٔ متن موجود نیست.
+  </div>
+  {% endif %}
+
+  {% if m.duplicates %}
+  <div class="banner banner--warning" role="note" id="dup-notice">
+    <strong>تکرار شماره:</strong> این item_index در چند نسخهٔ کراول ثبت شده است؛
+    شما نسخهٔ <code>dup_rank={{ m.dup_rank }}</code> (نسخهٔ پیش‌فرض) می‌خوانید.
+    نسخه‌های دیگر:
+    <span class="dup-links">
+      {% for d in m.duplicates %}
+      <a href="/page/{{ m.item_index }}?dup_rank={{ d.dup_rank }}">
+        نسخهٔ {{ d.dup_rank }} ({{ d.volume_label }})
+      </a>
+      {% endfor %}
+    </span>
+  </div>
+  {% endif %}
+
+  {% if m.quality.status == "empty" %}
+  <div class="banner banner--muted" role="note">
+    این صفحه در کراول بدون متن ثبت شده است (در دست بازیابی).
+  </div>
+  {% endif %}
+
+  <div class="reader__text" lang="fa">
+    {{ m.text }}
+  </div>
+  <p class="reader__chars" dir="ltr">{{ m.char_count }} characters</p>
+
+  <section class="reader__involume" aria-label="جایگاه در جلد">
+    {% if m.in_volume %}
+    <a class="in-volume" href="/volumes/{{ m.volume.volume_id }}">
+      صفحه {{ m.in_volume.seq }} از {{ m.in_volume.total }} در
+      {{ m.volume.label }} — فهرست صفحات جلد
+    </a>
+    {% endif %}
+    {% if m.volume.ambiguous %}
+    <p class="in-volume__note">به‌دلیل هم‌پوشانی، تعلق این صفحه به جلد
+      «{{ m.volume.label }}» ثبت‌شده است (attributed evidence).</p>
+    {% endif %}
+  </section>
+
+  <details class="drawer" id="metadata-drawer">
+    <summary class="drawer__summary">متادیتای صفحه</summary>
+    <dl class="drawer__body">
+      <div><dt>page_id</dt><dd><code>{{ m.metadata.page_id }}</code></dd></div>
+      <div><dt>content_sha256</dt><dd><code dir="ltr">{{ m.metadata.content_sha256 }}</code></dd></div>
+      <div><dt>section</dt><dd>{{ m.metadata.section or "—" }}</dd></div>
+      <div><dt>source_page_id</dt><dd><code dir="ltr">{{ m.metadata.source_page_id }}</code></dd></div>
+      <div><dt>captured_at</dt><dd><code dir="ltr">{{ m.metadata.captured_at }}</code></dd></div>
+      {% if m.metadata.heading_record_id %}
+      <div><dt>heading_record_id</dt><dd><code dir="ltr">{{ m.metadata.heading_record_id }}</code>
+        <span class="drawer__hint">(شناسهٔ ساختاری؛ محتوای رکورد نمایش داده نمی‌شود)</span></dd></div>
+      {% endif %}
+      {% if m.metadata.source_url %}
+      <div><dt>source_url</dt><dd><a href="{{ m.metadata.source_url }}" rel="nofollow noopener">{{ m.metadata.source_url }}</a></dd></div>
+      {% endif %}
+    </dl>
+  </details>
+
+  {% if m.related_topics %}
+  <section class="reader__related" aria-labelledby="rel-title">
+    <h2 id="rel-title" class="reader__related-title">موضوعات مرتبط</h2>
+    <ul class="chip-list">
+      {% for t in m.related_topics %}
+      <li><a class="topic-chip" href="/topics/{{ t.topic_id }}">
+        <span class="topic-chip__name">{{ t.display_text }}</span>
+        <span class="topic-chip__count">{{ t.page_count }} صفحه</span>
+      </a></li>
+      {% endfor %}
+    </ul>
+  </section>
+  {% endif %}
+</article>
+
+<nav class="reader-nav" aria-label="صفحات قبلی و بعدی">
+  <div class="reader-nav__side">
+    {{ nav_link('prev', m.prev, m.item_index) }}
+  </div>
+  <div class="reader-nav__side">
+    {{ nav_link('next', m.next, m.item_index) }}
+  </div>
+</nav>
+{% endblock %}

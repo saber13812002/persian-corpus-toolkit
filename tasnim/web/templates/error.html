@@ -1,0 +1,18 @@
+{% extends "base.html" %}
+{% from "macros.html" import crumbs %}
+{% block title %}{{ title }} — {{ site.work_name }}{% endblock %}
+
+{% block content %}
+<div class="error-page">
+  {{ crumbs([{"label": "خانه", "url": "/"}, {"label": title}]) }}
+  <div class="error-card">
+    <p class="error-card__code" dir="ltr">{{ status }}</p>
+    <h1 class="error-card__title">{{ title }}</h1>
+    <p class="error-card__message">{{ message }}</p>
+    <p class="error-card__actions">
+      <a class="btn btn--primary" href="/">بازگشت به خانه</a>
+      <a class="btn" href="/volumes">جلدها</a>
+    </p>
+  </div>
+</div>
+{% endblock %}

@@ -1,0 +1,100 @@
+{% extends "base.html" %}
+{% from "macros.html" import badge, volume_card, gap_chip, crumbs %}
+{% block nav_home %}is-active{% endblock %}
+{% block title %}{{ m.work.name }} — کتابخانهٔ دیجیتال{% endblock %}
+
+{% block content %}
+<section class="hero" aria-labelledby="hero-title">
+  <div class="hero__inner">
+    <p class="hero__kicker">کتابخانهٔ دیجیتال · پیکرهٔ {{ m.meta.corpus_version }}</p>
+    <h1 id="hero-title" class="hero__title">{{ m.work.name }}</h1>
+    <p class="hero__edition">نسخهٔ «{{ m.edition.name }}» — تفسیری بر قرآن کریم
+      از روایات امامان علیهم‌السلام</p>
+
+    <form class="hero__search" action="/search" method="get" role="search">
+      <label class="visually-hidden" for="hero-q">جستجو در متن تفسیر</label>
+      <input id="hero-q" class="search-box" type="search" name="q" dir="auto"
+             minlength="2" maxlength="64" placeholder="در متن تفسیر جستجو کنید…">
+      <button class="btn btn--primary" type="submit">جستجو</button>
+    </form>
+  </div>
+</section>
+
+<section class="section" aria-labelledby="coverage-title">
+  <h2 id="coverage-title" class="section__title">وضعیت پوشش داده</h2>
+  <p class="section__note">شمارنده‌های زندهٔ read model — بدون عدد ساختگی.</p>
+  <div class="coverage-grid">
+    <div class="stat-card">
+      <span class="stat-card__num">{{ m.counts.pages }}</span>
+      <span class="stat-card__label">صفحهٔ موجود</span>
+    </div>
+    <div class="stat-card">
+      <span class="stat-card__num">{{ m.counts.volumes }}</span>
+      <span class="stat-card__label">جلد</span>
+    </div>
+    <div class="stat-card">
+      <span class="stat-card__num">{{ m.counts.topics }}</span>
+      <span class="stat-card__label">موضوع</span>
+    </div>
+    <div class="stat-card">
+      <span class="stat-card__num">{{ m.counts.headings }}</span>
+      <span class="stat-card__label">هدر</span>
+    </div>
+    <div class="stat-card stat-card--warning">
+      <span class="stat-card__num">{{ m.counts.missing_item_index }}</span>
+      <span class="stat-card__label">صفحه در دست بازیابی</span>
+    </div>
+    <div class="stat-card">
+      <span class="stat-card__num">{{ "%.1f"|format(m.counts.present_ratio * 100) }}٪</span>
+      <span class="stat-card__label">نرخ موجودی
+        <span class="stat-card__hint">({{ m.counts.present_ratio_definition }})</span></span>
+    </div>
+  </div>
+</section>
+
+<section class="section" aria-labelledby="volumes-title">
+  <div class="section__head">
+    <h2 id="volumes-title" class="section__title">جلدها</h2>
+    <a class="section__more" href="/volumes">مشاهدهٔ همهٔ جلد&larr;</a>
+  </div>
+  <div class="volume-grid">
+    {% for v in m.volumes %}
+    {{ volume_card(v) }}
+    {% endfor %}
+  </div>
+</section>
+
+<section class="section" aria-labelledby="topics-title">
+  <div class="section__head">
+    <h2 id="topics-title" class="section__title">موضوعات برتر</h2>
+    <a class="section__more" href="/topics">فهرست موضوعات&larr;</a>
+  </div>
+  <p class="section__note">هر موضوع «تأیید انسانی نشده — استخراج خودکار» است.</p>
+  <ul class="topic-strip">
+    {% for t in m.top_topics %}
+    <li>
+      <a href="/topics/{{ t.topic_id }}" class="topic-chip">
+        <span class="topic-chip__name">{{ t.display_text }}</span>
+        <span class="topic-chip__count">{{ t.page_count }} صفحه</span>
+      </a>
+    </li>
+    {% endfor %}
+  </ul>
+</section>
+
+<section class="section" aria-labelledby="latest-title">
+  <h2 id="latest-title" class="section__title">آخرین صفحات قابل مطالعه</h2>
+  <p class="section__note">بالاترین item_index موجود در read model.</p>
+  <ul class="latest-list">
+    {% for lp in m.latest_pages %}
+    <li>
+      <a class="latest-item" href="/page/{{ lp.item_index }}">
+        <span class="latest-item__num">صفحه {{ lp.item_index }}</span>
+        <span class="latest-item__vol">{{ lp.volume_label }}</span>
+        <span class="latest-item__quality">{{ lp.quality }}</span>
+      </a>
+    </li>
+    {% endfor %}
+  </ul>
+</section>
+{% endblock %}

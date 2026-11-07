@@ -1,0 +1,50 @@
+{% extends "base.html" %}
+{% from "macros.html" import badge, crumbs, pager %}
+{% block nav_topics %}is-active{% endblock %}
+{% block title %}موضوعات — {{ site.work_name }}{% endblock %}
+
+{% block content %}
+{{ crumbs([{"label": "خانه", "url": "/"}, {"label": "موضوعات"}]) }}
+<header class="page-head">
+  <h1 class="page-head__title">موضوعات</h1>
+  <p class="page-head__sub">هر موضوع «تأیید انسانی نشده — استخراج خودکار» است.</p>
+</header>
+
+<form class="topic-filter" action="/topics" method="get" role="search">
+  <label class="visually-hidden" for="topic-q">فیلتر موضوعات</label>
+  <input id="topic-q" type="search" name="q" dir="auto" minlength="1" maxlength="64"
+         value="{{ m.q }}" placeholder="فیلتر موضوعات…">
+  <label for="topic-sort" class="visually-hidden">مرتب‌سازی موضوعات</label>
+  <select id="topic-sort" name="sort">
+    <option value="page_count" {% if m.sort == "page_count" %}selected{% endif %}>
+      بیشترین صفحه</option>
+    <option value="display_text" {% if m.sort == "display_text" %}selected{% endif %}>
+      الفبایی</option>
+  </select>
+  <button class="btn" type="submit">اعمال</button>
+  {% if m.q or m.sort != "page_count" %}
+  <a class="btn btn--ghost" href="/topics">پاک‌کردن فیلتر</a>
+  {% endif %}
+</form>
+
+<p class="page-foot-note">{{ m.total }} موضوع ثبت‌شده.</p>
+
+<ul class="topic-list">
+  {% for t in m["items"] %}
+  <li>
+    <a class="topic-row" href="/topics/{{ t.topic_id }}">
+      <span class="topic-row__name">{{ t.display_text }}</span>
+      <span class="topic-row__meta">{{ t.page_count }} صفحه · {{ t.volume_count }} جلد</span>
+      {% if t.first_item_index is not none %}
+      <a class="topic-row__first" href="/page/{{ t.first_item_index }}"
+         title="اولین صفحه با این موضوع">اولین: صفحه {{ t.first_item_index }}</a>
+      {% endif %}
+    </a>
+  </li>
+  {% else %}
+  <li class="empty-state">موضوعی با این فیلتر پیدا نشد.</li>
+  {% endfor %}
+</ul>
+
+{{ pager(m.pager) }}
+{% endblock %}

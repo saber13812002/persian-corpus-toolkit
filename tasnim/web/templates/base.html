@@ -1,0 +1,47 @@
+<!DOCTYPE html>
+<html lang="fa" dir="rtl" data-theme="light">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{% block title %}{{ site.work_name }} — کتابخانهٔ دیجیتال{% endblock %}</title>
+<meta name="description" content="{% block meta_description %}کتابخانهٔ دیجیتال «{{ site.work_name }}» — نسخهٔ {{ site.corpus_version }}{% endblock %}">
+<script>(function(){try{var t=null;try{t=localStorage.getItem("tasnim-theme")}catch(e){}if(!t){t=(window.matchMedia&&window.matchMedia("(prefers-color-scheme: dark)").matches)?"dark":"light"}document.documentElement.setAttribute("data-theme",t)}catch(e){document.documentElement.setAttribute("data-theme","light")}})();</script>
+<link rel="stylesheet" href="{{ url_for('static', filename='css/tasnim.css') }}">
+{% block head_extra %}{% endblock %}
+</head>
+<body>
+<a class="skip-link" href="#main">پرش به محتوای اصلی</a>
+<header class="site-header">
+  <div class="site-header__inner">
+    <a class="site-brand" href="/">{{ site.work_name }}</a>
+    <nav class="site-nav" aria-label="ناوبری اصلی">
+      <a href="/" class="{% block nav_home %}{% endblock %}">خانه</a>
+      <a href="/volumes" class="{% block nav_volumes %}{% endblock %}">جلدها</a>
+      <a href="/topics" class="{% block nav_topics %}{% endblock %}">موضوعات</a>
+      <a href="/surahs">سوره‌ها</a>
+      <a href="/about">دربارهٔ پیکره</a>
+    </nav>
+    <form class="site-search" action="/search" method="get" role="search">
+      <input type="search" name="q" dir="auto" minlength="2" maxlength="64"
+             placeholder="در متن تفسیر جستجو کنید…"
+             aria-label="جستجو در متن" value="{% block search_q %}{% endblock %}">
+      <button type="submit" aria-label="جستجو">جستجو</button>
+    </form>
+    <button type="button" class="theme-toggle" id="theme-toggle"
+            aria-label="تغییر تم تیره/روشن">🌓</button>
+  </div>
+</header>
+<main id="main" class="site-main">
+{% block content %}{% endblock %}
+</main>
+<footer class="site-footer">
+  <div class="site-footer__inner">
+    <p class="site-footer__id">{{ site.work_name }} — {{ site.edition_name }}
+      · پیکرهٔ {{ site.corpus_version }}</p>
+    <p class="site-footer__fonts">فونت‌ها: Vazirmatn, Noto Naskh Arabic, Amiri — تحت مجوز OFL</p>
+    <p class="site-footer__rag">ایندکس RAG: متصل نیست (وضعیت: {{ site.rag_status }})</p>
+  </div>
+</footer>
+<script src="{{ url_for('static', filename='js/tasnim.js') }}" defer></script>
+</body>
+</html>
