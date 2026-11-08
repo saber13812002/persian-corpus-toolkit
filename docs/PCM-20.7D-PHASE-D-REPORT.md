@@ -66,9 +66,9 @@ follow-up and has zero impact on the live portal (V2F direct path).
 
 | repo | branch | commits (newest first) | remote |
 |---|---|---|---|
-| `rag/graph-rag` | `pcm-20.7d-tasnim-loader` | `e094483` (Chunk.link = real URL) ← `498e0b0` (no-re-embed streaming loader + index finalize) ← `283ae50` (origin/main) | `http://172.20.1.52:81/rag/graph-rag.git` — pushed |
+| `rag/graph-rag` | `pcm-20.7d-tasnim-loader` | `e094483` (Chunk.link = real URL) ← `498e0b0` (no-re-embed streaming loader + index finalize) ← `283ae50` (origin/main) | `https://git.ai.ismc.ir/rag/graph-rag.git` — **pushed (new branch, 2026-11-08)**. Pushed via 53 relay: the dev-machine remote `http://172.20.1.52:81` was unreachable (connection timeout from both dev and 53); branch bundled + pushed from the 53 clone, whose origin is `git.ai.ismc.ir` (same project) |
 | `server52and53/_aidump` | `pcm-20.7d-embed-identity` | `9617707` (tasnim product + export adapter) ← `f2a6404` (embedding-identity hardening) ← `1c500a6` (main) | **no remote configured** — local SHAs only |
-| worktree `persian-corpus-toolkit` (`pcm-20.6-tasnim-web-v1`) | `pcm-20.6-tasnim-web-v1` | this doc family (4 new docs + ARCHITECTURE as-built corrections) | normal push, SHA recorded at commit time |
+| worktree `persian-corpus-toolkit` (`pcm-20.6-tasnim-web-v1`) | `pcm-20.6-tasnim-web-v1` | commit `3ecfef3` (this doc family: 4 new docs + `PCM-20.7D-ARCHITECTURE.md` with as-built corrections) | `https://github.com/saber13812002/persian-corpus-toolkit.git` — **pushed** `2365073..3ecfef3` |
 
 ---
 
