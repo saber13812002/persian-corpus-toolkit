@@ -68,7 +68,9 @@ from . import versioning as V
 
 SEMANTIC_SCHEMA_VERSION = "cs-20.5"
 SEMANTIC_SCHEMA_VERSION_V3 = "cs-20.6"   # قرارداد Semantic v0003 (PCM-20.6 SUBTASK 02)
-CONTRACTS = (SEMANTIC_SCHEMA_VERSION, SEMANTIC_SCHEMA_VERSION_V3)
+SEMANTIC_SCHEMA_VERSION_ENRICHED = "cs-20.7"  # retrieval-context enrichment (PCM-20.7C)
+CONTRACTS = (SEMANTIC_SCHEMA_VERSION, SEMANTIC_SCHEMA_VERSION_V3,
+             SEMANTIC_SCHEMA_VERSION_ENRICHED)
 RULE_SET = "semantic-rules/1.0"
 SUMMARY_METHOD = "verbatim-extract/1.0"
 MAX_SUMMARY_LINES = 3
@@ -1055,6 +1057,30 @@ def validate_semantic(build_dir: str, data_root: str = None) -> tuple:
             errors.append("S10: truncation.affected_pages != recomputed list")
         if s10 > 5:
             errors.append("S10: %d more truncation errors" % (s10 - 5))
+
+    if sem.get("schema_version") == SEMANTIC_SCHEMA_VERSION_ENRICHED:
+        # S11 — cs-20.7: enrichment افزایشی روی base cs-20.6 (PCM-20.7C)
+        for key in ("prev_contract", "hidden_context", "enrichment"):
+            if key not in sem:
+                errors.append("S11: semantic.%s missing (cs-20.7)" % key)
+        if sem.get("prev_contract") != SEMANTIC_SCHEMA_VERSION_V3:
+            errors.append("S11: semantic.prev_contract must be %r: got %r"
+                          % (SEMANTIC_SCHEMA_VERSION_V3, sem.get("prev_contract")))
+        root11 = data_root or M._find_data_root(build_dir)
+        base_rel11 = (sem.get("base_corpus") or {}).get("path_rel")
+        base_dir11 = None
+        if root11 and base_rel11:
+            cand = os.path.join(root11, base_rel11.replace("/", os.sep))
+            if os.path.isdir(cand):
+                base_dir11 = cand
+        if base_dir11 is None:
+            errors.append("S11: base cs-20.6 build not found: %r" % base_rel11)
+        else:
+            from . import enrich as E   # lazy: بدون import دوری
+            ok11, e11, w11 = E.validate_enriched(build_dir, base_dir11)
+            for e in e11:
+                errors.append("S11: %s" % e)
+            warnings.extend(w11)
 
     return (not errors), errors, warnings
 

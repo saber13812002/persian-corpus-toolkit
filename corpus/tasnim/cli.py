@@ -5,6 +5,7 @@
     audit            درگاه آشتیابی روی خروجی PCM-20 (فقط‌خواندن)
     build-corpus     ساخت پیکره‌ی رسمی (نسخه‌ای + manifest + validate)
     build-semantic   لایه‌ی معنایی روی یک build (PCM-20.5 GATE 1) — نسخه‌ی جدید
+    build-enriched   retrieval-context عنوان‌ها (cs-20.7؛ PCM-20.7C؛ base cs-20.6)
     validate-corpus  اعتبارسنجی یک build موجود (به‌صورت خودکار S01..S07 برای semantic)
     build-dataset    ساخت دیتاست pct٪ (لایه‌بندی‌شده، قطعی) [+ --volume N]
     export-dump      ساخت خروجی سازگار با ai-dump-builder (بدون embedding)
@@ -24,6 +25,7 @@ from . import common as C
 from . import dataset as D
 from . import diff as DFF
 from . import dump as DP
+from . import enrich as ENR
 from . import manifest as M
 from . import normalize as N
 from . import reconcile as R
@@ -252,6 +254,9 @@ def cmd_build_semantic(args) -> int:
     if not os.path.isdir(base_dir):
         return _fail("base corpus build not found: %s" % args.base, 2)
     contract = args.contract
+    if contract == SEM.SEMANTIC_SCHEMA_VERSION_ENRICHED:
+        return _fail("contract %s is produced by 'build-enriched' "
+                     "(needs a summaries checkpoint)" % contract, 2)
     try:
         if contract == SEM.SEMANTIC_SCHEMA_VERSION_V3:
             result = SEM.build_semantic_v3(base_dir)
@@ -333,6 +338,77 @@ def cmd_build_semantic(args) -> int:
     return 0
 
 
+def cmd_build_enriched(args) -> int:
+    C.force_utf8_stdio()
+    paths = V.root_paths(args.data_root)
+    builds = paths["corpus_builds"]
+    base_dir = os.path.join(builds, args.base)
+    if not os.path.isdir(base_dir):
+        return _fail("base corpus build not found: %s" % args.base, 2)
+    try:
+        prepared = ENR.enriched_content(base_dir, args.summaries)
+    except ValueError as e:
+        return _fail(str(e), 2)
+    corpus2 = prepared["corpus"]
+    files = prepared["files"]
+    csha = prepared["content_sha256"]
+    reuse = V.find_reusable_version(builds, None, csha)
+    if reuse:
+        _emit("REUSED %s — enriched content identical (same base + summaries). "
+              "No new version." % reuse)
+        return 0
+    base_manifest, base_rel = prepared["base_manifest"], prepared["base_rel"]
+    bdata = base_manifest.get("data") or {}
+    prev_entry = M.chain_entry(base_manifest, base_rel)
+    tag = V.version_tag(V.next_version_number(builds))
+    out_dir = V.version_dir(builds, tag)
+    written = ENR.write_enriched(out_dir, prepared)
+    if written["files"] != files:
+        return _fail("write verification failed (sha mismatch after write)")
+    manifest = M.build_manifest("corpus", tag, {
+        "content_sha256": csha,
+        "files": written["files"],
+        "source": bdata.get("source") or {},
+        "base": {"version": base_manifest.get("version"),
+                 "content_sha256": bdata.get("content_sha256"),
+                 "path_rel": base_rel},
+        "previous_version": base_manifest.get("version"),
+        "summaries_source": prepared["summaries_source"],
+        "config": corpus2.get("config") or {},
+        "stats": corpus2.get("stats") or {},
+        "gaps": SEM.gaps_ledger(corpus2),
+        "_prev": prev_entry,
+    })
+    M.write_manifest(out_dir, manifest)
+    V.update_registry(paths["manifests"], "corpus", tag,
+                      {"content_sha256": csha,
+                       "sha256": C.sha256_file(os.path.join(out_dir, "manifest.json"))})
+    ss = prepared["summaries_source"]
+    _emit("=== BUILD ENRICHED (contract=%s) ===" % ENR.ENRICH_SCHEMA_VERSION)
+    _emit("version        : %s" % tag)
+    _emit("base           : %s (%s)" % (args.base, bdata.get("content_sha256")))
+    _emit("summaries      : %s (%d entries, sha %s)"
+          % (ss.get("file"), ss.get("count"), ss.get("sha256")))
+    _emit("status census  : %s" % prepared["status_counts"])
+    _emit("pages          : %d (byte-identical to base)" % len(prepared["pages"]))
+    _emit("content sha256 : %s" % csha)
+    _emit("build dir      : %s" % out_dir)
+    ok, errors, warnings = VAL.validate_corpus(out_dir)
+    ok2, s_errors, s_warnings = SEM.validate_semantic(out_dir, args.data_root)
+    errors = list(errors) + ["S: %s" % e for e in s_errors]
+    warnings = list(warnings) + list(s_warnings)
+    ok = ok and ok2
+    _emit("validate       : %s" % ("PASS" if ok else "FAIL"))
+    for e in errors[:10]:
+        _emit("  ERROR: %s" % e)
+    for w in warnings[:10]:
+        _emit("  WARN: %s" % w)
+    if not ok:
+        return 1
+    _emit("DONE.")
+    return 0
+
+
 # --------------------------------------------------------------------------- build-dataset
 def _load_corpus_build(data_root: str, tag: str) -> tuple:
     paths = V.root_paths(data_root)
@@ -359,7 +435,8 @@ def cmd_build_dataset(args) -> int:
     except ValueError as e:
         return _fail(str(e), 2)
     try:
-        result = D.select_dataset(pages, args.percentage, args.volume, args.blocks)
+        result = D.select_dataset(pages, args.percentage, args.volume,
+                                  args.volume_id, args.blocks)
     except ValueError as e:
         return _fail(str(e), 2)
 
@@ -374,7 +451,7 @@ def cmd_build_dataset(args) -> int:
         return 0
 
     written = D.write_dataset(args.data_root, args.percentage, corpus_manifest,
-                              result, args.volume)
+                              result, args.volume, args.volume_id)
     _emit("=== BUILD DATASET ===")
     _emit("pct            : %d%%" % args.percentage)
     _emit("version        : %s" % written["version"])
@@ -516,6 +593,9 @@ def build_parser() -> argparse.ArgumentParser:
     sp.add_argument("--corpus", required=True, help="نسخه‌ی پیکره (vNNNN)")
     sp.add_argument("--percentage", type=int, required=True, choices=list(V.DATASET_PCTS))
     sp.add_argument("--volume", type=int, default=None, help="فقط یک جلد (number)")
+    sp.add_argument("--volume-id", default=None,
+                    help="فقط یک جلد به‌صورت volume_id (برای جلد بی‌شماره؛ PCM-20.7C) — "
+                         "تعارض با --volume")
     sp.add_argument("--blocks", type=int, default=D.DEFAULT_BLOCKS,
                     help="تعداد بلوک‌های انتخاب درون هر جلد (پیش‌فرض 5)")
     sp.set_defaults(func=cmd_build_dataset)
@@ -548,6 +628,16 @@ def build_parser() -> argparse.ArgumentParser:
     sp.add_argument("--from", dest="from_version", required=True, help="vNNNN قبلی")
     sp.add_argument("--to", dest="to_version", required=True, help="vNNNN جدید")
     sp.set_defaults(func=cmd_semantic_diff)
+
+    sp = sub.add_parser("build-enriched",
+                        help="cs-20.7: retrieval-context عنوان‌ها "
+                             "(PCM-20.7C؛ base cs-20.6 + checkpoint)")
+    sp.add_argument("--data-root", default="data/tasnim")
+    sp.add_argument("--base", required=True,
+                    help="نسخه‌ی base cs-20.6 (vNNNN؛ Semantic v0003)")
+    sp.add_argument("--summaries", required=True,
+                    help="checkpoint JSONL خلاصه‌ها (generate_summaries)")
+    sp.set_defaults(func=cmd_build_enriched)
     return p
 
 

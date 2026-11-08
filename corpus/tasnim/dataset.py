@@ -94,17 +94,29 @@ def _volume_order(pages, by_vol) -> list:
 
 
 def select_dataset(pages, pct: int, volume_no: int = None,
+                   volume_id: str = None,
                    blocks: int = DEFAULT_BLOCKS) -> dict:
-    """انتخاب صفحات یک دیتاست از صفحات پیکره (قطعی و تکرارپذیر)."""
+    """انتخاب صفحات یک دیتاست از صفحات پیکره (قطعی و تکرارپذیر).
+
+    انتخاب یک‌جلدی: یا `volume_no` (شماره‌ی جلد) یا `volume_id` (برای جلد بی‌شماره؛
+    PCM-20.7C — افزایشی). هر دو هم‌زمان مجاز نیست.
+    """
     pct = int(pct)
     if not 1 <= pct <= 100:
         raise ValueError("pct must be in 1..100")
+    if volume_no is not None and volume_id is not None:
+        raise ValueError("pass either volume_no or volume_id, not both")
 
     by_vol = {}
     if volume_no is not None:
         vol_pages = [p for p in pages if (p.get("volume") or {}).get("volume_no") == volume_no]
         if not vol_pages:
             raise ValueError("volume %d not found in corpus" % volume_no)
+        by_vol["__single__"] = vol_pages
+    elif volume_id is not None:
+        vol_pages = [p for p in pages if p.get("volume_id") == volume_id]
+        if not vol_pages:
+            raise ValueError("volume_id %s not found in corpus" % volume_id)
         by_vol["__single__"] = vol_pages
     else:
         for p in pages:
@@ -148,7 +160,8 @@ def select_dataset(pages, pct: int, volume_no: int = None,
         "within_volume": ("contiguous blocks in page order, evenly spaced across the "
                           "volume (continuity preserved; deterministic)"),
         "remainder_rule": "largest-remainder; tie -> smaller volume_no first (unknown last)",
-        "volume_scope": ("volume=%d" % volume_no) if volume_no is not None else "all volumes",
+        "volume_scope": ("volume=%d" % volume_no) if volume_no is not None
+        else ("volume_id=%s" % volume_id) if volume_id is not None else "all volumes",
         "note": "کوتاه/ناقص حذف نمی‌شوند؛ در آمار شمارش می‌شوند. 100 = همه‌ی صفحات.",
     }
     return {"pages": selected, "policy": policy, "stats": stats}
@@ -194,7 +207,8 @@ def dataset_meta(corpus_manifest: dict, result: dict, pct: int = None) -> dict:
 
 
 def write_dataset(data_root: str, pct: int, corpus_manifest: dict,
-                  result: dict, volume_no: int = None) -> dict:
+                  result: dict, volume_no: int = None,
+                  volume_id: str = None) -> dict:
     """نوشتن یک نسخه‌ی دیتاست (فقط افزایشی) + manifest + registry."""
     paths = V.root_paths(data_root)
     pdir = V.pct_dirname(pct)
@@ -219,7 +233,9 @@ def write_dataset(data_root: str, pct: int, corpus_manifest: dict,
                                paths["root"]).replace(os.sep, "/") + "/manifest.json"
     manifest = M.build_manifest("dataset", tag, {
         "percentage": pct,
-        "volume_scope": ({"volume_no": volume_no} if volume_no is not None else None),
+        "volume_scope": ({"volume_no": volume_no} if volume_no is not None
+                         else ({"volume_id": volume_id} if volume_id is not None
+                               else None)),
         "content_sha256": content_sha256,
         "files": files,
         "dataset_meta": meta,
