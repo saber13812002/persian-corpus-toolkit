@@ -129,6 +129,16 @@ class DocxParser(DocumentParser):
         outcome = ParseOutcome()
         body = doc.element.body
 
+        # PCM-20.8 (perf): `para.style` in python-docx is O(styles-part) per call
+        # and dominated parse time on large volumes (≈5.5 s for 4000 paragraphs).
+        # Key the cache by the raw `w:pStyle` val (or None) — exactly the input
+        # python-docx uses (`CT_P.style` → `styles.get_by_id(style_id, ...)`).
+        # First encounter per id resolves via python-docx itself (identical
+        # semantics, incl. default-style fallback); later paragraphs reuse the
+        # cached name. Output (names, blocks, losses) is unchanged.
+        _MISSING = object()
+        style_cache: dict = {}
+
         idx = 0
         for child in body.iterchildren():
             tag = child.tag
@@ -137,7 +147,12 @@ class DocxParser(DocumentParser):
                 raw = "".join(run.text for run in para.runs) or para.text or ""
                 # ساختارهای گمشده در این پاراگراف
                 self._count_para_losses(child, outcome)
-                style = para.style.name if para.style is not None else None
+                pstyle_el = child.find(f"{W}pPr/{W}pStyle")
+                sid = pstyle_el.get(f"{W}val") if pstyle_el is not None else None
+                style = style_cache.get(sid, _MISSING)
+                if style is _MISSING:
+                    style = para.style.name if para.style is not None else None
+                    style_cache[sid] = style
                 lvl = _heading_level(style)
                 b = Block(
                     block_index=idx,
