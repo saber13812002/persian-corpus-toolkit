@@ -18,7 +18,9 @@ Follows the PCM-12.3 rule: import pct_test_support FIRST, then server.
 """
 import hashlib
 import io
+import json
 import os
+import re
 import shutil
 import sqlite3
 import tempfile
@@ -46,6 +48,7 @@ CORRUPT_FILE = "فایل-خراب.docx"
 class Base(unittest.TestCase):
     def setUp(self):
         pct_test_support.reset_db()
+        self._cur_coll = None
         self._datadir = tempfile.mkdtemp(prefix="pct-pipeline-")
         self._old_dd = os.environ.get("PCT_KNOWLEDGE_DATA_DIR")
         os.environ["PCT_KNOWLEDGE_DATA_DIR"] = self._datadir
@@ -69,7 +72,9 @@ class Base(unittest.TestCase):
             json={"name": name, "slug": slug},
         )
         self.assertEqual(r.status_code, 201, r.get_data(as_text=True))
-        return r.get_json()["collection"]
+        coll = r.get_json()["collection"]
+        self._cur_coll = coll
+        return coll
 
     @staticmethod
     def sha256_file(path):
@@ -174,6 +179,35 @@ class Base(unittest.TestCase):
                 (coll_id,)).fetchall()]
         finally:
             conn.close()
+
+    # ── PCM-20.9 Stage D helpers ────────────────────────────────────────
+    def upload_and_process(self, path, name=None):
+        """Single DOCX upload + process (waits for the job). Returns the
+        final document row (dict) from GET documents."""
+        with open(path, "rb") as fh:
+            raw = fh.read()
+        r = self.client.post(
+            f"/api/knowledge/collections/"
+            f"{self._cur_coll_id()}/documents",
+            data={"file": (io.BytesIO(raw), name or os.path.basename(path))},
+            content_type="multipart/form-data")
+        self.assertEqual(r.status_code, 201, r.get_data(as_text=True))
+        doc_id = r.get_json()["document"]["document_id"]
+        r = self.client.post(f"/api/knowledge/documents/{doc_id}/process")
+        self.assertIn(r.status_code, (200, 202), r.get_data(as_text=True))
+        job = self.wait_job(r.get_json()["job"]["job_id"])
+        self.assertEqual(job["status"], "succeeded", job)
+        docs = self.client.get(
+            f"/api/knowledge/collections/{self._cur_coll_id()}/documents"
+        ).get_json()["documents"]
+        row = next(d for d in docs if d["document_id"] == doc_id)
+        self.assertIn(row["status"], ("parsed", "needs_review"), row)
+        return row
+
+    def _cur_coll_id(self):
+        # the last collection created in this test
+        assert self._cur_coll is not None, "make_collection() first"
+        return self._cur_coll["id"]
 
 
 class TestPF_A01_PlanPersistence(Base):
@@ -953,6 +987,427 @@ class TestPF_C03_SchemaDraftEdit(Base):
         kept = r.get_json()["schema"]
         self.assertEqual(len(kept["fields"]), 2)
         self.assertEqual(kept["description"], "ویرایش‌شده")
+
+
+# ---------------------------------------------------------------------------
+# PCM-20.9 Stage D — canonical corpus (c-1) + guarded ES index factory
+# ---------------------------------------------------------------------------
+
+
+def _corpus_build_paths(coll_pk, cid):
+    import knowledge_api
+    root = os.path.join(knowledge_api.knowledge_data_dir(),
+                        "corpus_builds", cid)
+    return root, os.path.join(root, "dumps"), os.path.join(root, "corpus")
+
+
+class _StageDPrep(Base):
+    """Shared setup: 2 processed Persian books in one collection."""
+
+    def _prep(self, n=2):
+        from factory._smoke_fixtures import make_docx
+        coll = self.make_collection()
+        tmp = tempfile.mkdtemp(prefix="pct-pf-d-")
+        self.addCleanup(shutil.rmtree, tmp, ignore_errors=True)
+        rows = []
+        for i in range(n):
+            p = os.path.join(tmp, f"کتاب-{i}.docx")
+            make_docx(p, [
+                ("Normal", f"عنوان: کتاب {i}"),
+                ("Normal", "نویسنده: نویسنده نمونه"),
+                ("Heading 1", "فصل اول"),
+                ("Normal", f"متن فارسی کتاب شماره {i + 1}."),
+                ("Heading 1", "فصل دوم"),
+                ("Normal", "پایان کتاب."),
+            ])
+            rows.append(self.upload_and_process(p))
+        return coll, rows
+
+    def corpus_build(self, coll_pk):
+        r = self.client.post(
+            f"/api/knowledge/collections/{coll_pk}/corpus/build")
+        self.assertIn(r.status_code, (200, 202), r.get_data(as_text=True))
+        j = r.get_json()
+        self.assertTrue(j["ok"])
+        job = self.wait_job(j["job"]["job_id"])
+        return r.status_code, j, job
+
+    def corpus_builds(self, coll_pk):
+        r = self.client.get(
+            f"/api/knowledge/collections/{coll_pk}/corpus/builds")
+        self.assertEqual(r.status_code, 200, r.get_data(as_text=True))
+        return r.get_json()["builds"]
+
+
+class TestPF_D01_CorpusBuildReal(_StageDPrep):
+    """PF-D01 — Stage D: the REAL build.
+
+    2 processed books -> POST corpus/build -> d-1 dump per document
+    (validated) -> c-1 canonical corpus on disk (4 JSONL + deterministic
+    zip + manifest) -> build row with content_sha256 (archive sha),
+    status 'succeeded', ES part honestly 'blocked' (no PCT_ES_URL).
+    GET /corpus/builds + GET /index-builds/<iv_id> (with manifest).
+    """
+
+    def test_corpus_build_end_to_end(self):
+        os.environ.pop("PCT_ES_URL", None)
+        from factory.dump import validate_dump
+        import knowledge_api
+        coll, rows = self._prep(2)
+        cid = coll["collection_id"]
+        blocks_total = sum(r["blocks_count"] for r in rows)
+        self.assertGreater(blocks_total, 0)
+
+        code, j, job = self.corpus_build(coll["id"])
+        self.assertEqual(code, 202)
+        self.assertEqual(j["documents"], 2)
+        self.assertTrue(j["queued"])
+        self.assertEqual(job["status"], "succeeded", job)
+
+        builds = self.corpus_builds(coll["id"])
+        self.assertEqual(len(builds), 1)
+        b = builds[0]
+        self.assertEqual(b["status"], "succeeded")
+        self.assertEqual(b["es_index_status"], "blocked")
+        self.assertEqual(b["es_index"], "none")
+        self.assertTrue(re.fullmatch(r"[0-9a-f]{64}", b["content_sha256"]))
+        self.assertEqual(b["chunk_count"], blocks_total)
+        iv_id = b["iv_id"]
+        self.assertTrue(iv_id.startswith("iv-"))
+
+        # on-disk: one validated d-1 dump per document + the c-1 corpus
+        root, dumps, corpus_dir = _corpus_build_paths(coll["id"], cid)
+        self.assertTrue(os.path.isdir(corpus_dir))
+        expected_files = [
+            "raw.jsonl", "normalized.jsonl",
+            "raw.unique.jsonl", "normalized.unique.jsonl",
+            "corpus-data.zip", "corpus-manifest.json",
+        ]
+        for name in expected_files:
+            self.assertTrue(
+                os.path.isfile(os.path.join(corpus_dir, name)), name)
+        dump_count = 0
+        for d in rows:
+            dd = os.path.join(dumps, d["file_id"])
+            self.assertTrue(os.path.isdir(dd), dd)
+            ok, errors, _ = validate_dump(dd)
+            self.assertTrue(ok, errors)
+            dump_count += 1
+        self.assertEqual(dump_count, 2)
+
+        # normalized stream = exactly the sum of the real blocks counts
+        with open(os.path.join(corpus_dir, "normalized.jsonl"),
+                  encoding="utf-8") as fh:
+            nlines = sum(1 for l in fh if l.strip())
+        self.assertEqual(nlines, blocks_total)
+
+        # manifest is self-consistent: archive sha == content_sha256
+        with open(os.path.join(corpus_dir, "corpus-manifest.json"),
+                  encoding="utf-8") as fh:
+            man = json.load(fh)
+        self.assertEqual(man["archive"]["sha256"], b["content_sha256"])
+        self.assertEqual(man["counts"]["blocks_total"], blocks_total)
+        self.assertEqual(man["counts"]["dumps"], 2)
+        self.assertEqual(man["corpus_contract_version"], "c-1")
+        # the archive sha matches the real zip on disk
+        h = hashlib.sha256()
+        with open(os.path.join(corpus_dir, "corpus-data.zip"), "rb") as f:
+            for chunk in iter(lambda: f.read(1 << 20), b""):
+                h.update(chunk)
+        self.assertEqual(h.hexdigest(), man["archive"]["sha256"])
+
+        # GET /index-builds/<iv_id> returns the row + the manifest
+        r = self.client.get(f"/api/knowledge/index-builds/{iv_id}")
+        self.assertEqual(r.status_code, 200, r.get_data(as_text=True))
+        item = r.get_json()["build"]
+        self.assertEqual(item["iv_id"], iv_id)
+        self.assertEqual(item["manifest"]["archive"]["sha256"],
+                         b["content_sha256"])
+
+        # blocked detail is honest Persian
+        detail = json.loads(b["es_detail"])
+        self.assertEqual(detail["status"], "blocked")
+        self.assertIn("PCT_ES_URL", detail["reason"])
+
+        # collection detail exposes the new columns too
+        det = self.client.get(
+            f"/api/knowledge/collections/{coll['id']}"
+        ).get_json()["collection"]
+        self.assertEqual(len(det["index_builds"]), 1)
+        self.assertEqual(det["index_builds"][0]["es_index_status"],
+                         "blocked")
+
+
+class TestPF_D02_CorpusBuildIdempotent(_StageDPrep):
+    """PF-D02 — Stage D: content idempotency (REUSED) + new content.
+
+    - rebuild with the SAME content -> job 'reused <iv_id>', still ONE
+      build row (no rewrite);
+    - add a 3rd book and rebuild -> NEW row, different content_sha256
+      (archive is deterministic per content).
+    """
+
+    def test_reused_then_new_content(self):
+        os.environ.pop("PCT_ES_URL", None)
+        coll, rows = self._prep(2)
+        _, _, job1 = self.corpus_build(coll["id"])
+        self.assertEqual(job1["status"], "succeeded", job1)
+        iv1 = self.corpus_builds(coll["id"])[0]["iv_id"]
+
+        # same content again -> REUSED (job re-runs in place; the worker
+        # short-circuits on the identical corpus archive sha), still 1 row
+        _, j2, job2 = self.corpus_build(coll["id"])
+        self.assertTrue(j2["queued"])
+        self.assertEqual(job2["status"], "succeeded", job2)
+        self.assertIn(iv1, job2.get("stage") or "", job2)
+        self.assertEqual(len(self.corpus_builds(coll["id"])), 1)
+
+        # a 3rd book changes the content -> a second, different row
+        from factory._smoke_fixtures import make_docx
+        tmp = tempfile.mkdtemp(prefix="pct-pf-d2-")
+        self.addCleanup(shutil.rmtree, tmp, ignore_errors=True)
+        p = os.path.join(tmp, "کتاب-سوم.docx")
+        make_docx(p, [
+            ("Normal", "عنوان: کتاب سوم"),
+            ("Heading 1", "فصل اول"),
+            ("Normal", "متن فارسی کتاب سوم."),
+        ])
+        self.upload_and_process(p)
+        _, _, job3 = self.corpus_build(coll["id"])
+        self.assertEqual(job3["status"], "succeeded", job3)
+        builds = self.corpus_builds(coll["id"])
+        self.assertEqual(len(builds), 2)
+        # two distinct content hashes, two distinct build rows
+        shas = {b["content_sha256"] for b in builds}
+        self.assertEqual(len(shas), 2)
+        self.assertEqual(len({b["iv_id"] for b in builds}), 2)
+        # newest first: the 3-doc build is on top, the 2-doc (iv1) row kept
+        self.assertEqual(builds[1]["iv_id"], iv1)
+        self.assertGreater(builds[0]["chunk_count"], builds[1]["chunk_count"])
+
+
+class TestPF_D03_CorpusBuildErrors(_StageDPrep):
+    """PF-D03 — Stage D: error paths.
+
+    empty collection -> 409 no_processed_documents; uploaded-but-unprocessed
+    document -> 409; unknown collection -> 404; unknown iv_id -> 404.
+    """
+
+    def test_error_paths(self):
+        os.environ.pop("PCT_ES_URL", None)
+        # empty collection
+        coll = self.make_collection()
+        r = self.client.post(
+            f"/api/knowledge/collections/{coll['id']}/corpus/build")
+        self.assertEqual(r.status_code, 409, r.get_data(as_text=True))
+        self.assertEqual(r.get_json()["code"], "no_processed_documents")
+
+        # uploaded but NOT processed -> still 409
+        from factory._smoke_fixtures import make_docx
+        tmp = tempfile.mkdtemp(prefix="pct-pf-d3-")
+        self.addCleanup(shutil.rmtree, tmp, ignore_errors=True)
+        p = os.path.join(tmp, "کتاب-بدون-پردازش.docx")
+        make_docx(p, [("Normal", "متن")])
+        with open(p, "rb") as fh:
+            raw = fh.read()
+        r = self.client.post(
+            f"/api/knowledge/collections/{coll['id']}/documents",
+            data={"file": (io.BytesIO(raw), "کتاب-بدون-پردازش.docx")},
+            content_type="multipart/form-data")
+        self.assertEqual(r.status_code, 201, r.get_data(as_text=True))
+        r = self.client.post(
+            f"/api/knowledge/collections/{coll['id']}/corpus/build")
+        self.assertEqual(r.status_code, 409, r.get_data(as_text=True))
+        self.assertEqual(r.get_json()["code"], "no_processed_documents")
+
+        # unknown collection -> 404
+        r = self.client.post(
+            "/api/knowledge/collections/999999/corpus/build")
+        self.assertEqual(r.status_code, 404, r.get_data(as_text=True))
+        r = self.client.get(
+            "/api/knowledge/collections/999999/corpus/builds")
+        self.assertEqual(r.status_code, 404, r.get_data(as_text=True))
+        # unknown build -> 404
+        r = self.client.get("/api/knowledge/index-builds/iv-00000000")
+        self.assertEqual(r.status_code, 404, r.get_data(as_text=True))
+
+
+class TestPF_D04_ESFactoryMocked(_StageDPrep):
+    """PF-D04 — Stage D: the ES index factory, mocked at _es_request.
+
+    With PCT_ES_URL set and an approved schema:
+    - success: versioned index knowledge_<slug>_v0001, mapping built from
+      the approved schema (es_field keys, index:false when not
+      searchable), one ATOMIC /_aliases call, alias holder == the new
+      index, docs == sum of blocks;
+    - rebuild with same content -> REUSED, no v0002;
+    - count mismatch -> job failed, es_index_status 'failed', NO alias
+      switch (rollback: the alias never moved).
+    """
+
+    def setUp(self):
+        super().setUp()
+        os.environ["PCT_ES_URL"] = "http://es.fake:9200"
+        self.addCleanup(lambda: os.environ.pop("PCT_ES_URL", None))
+
+    def _approve_default_schema(self, cid):
+        r = self.client.post(
+            f"/api/knowledge/collections/{cid}/schema", json={})
+        self.assertEqual(r.status_code, 201, r.get_data(as_text=True))
+        sv = r.get_json()["schema"]
+        r = self.client.post(
+            f"/api/knowledge/collections/{cid}/schema/{sv['schema_id']}"
+            "/validate")
+        self.assertEqual(r.status_code, 200, r.get_data(as_text=True))
+        r = self.client.post(
+            f"/api/knowledge/collections/{cid}/schema/{sv['schema_id']}"
+            "/approve")
+        self.assertEqual(r.status_code, 200, r.get_data(as_text=True))
+
+    class _FakeES:
+        def __init__(self, count_override=None, bulk_errors=False):
+            self.indices = {}       # name -> mapping props (PUT'd)
+            self.bulk_docs = 0
+            self.bulk_errors = bulk_errors
+            self.count_override = count_override
+            self.alias_holders = {}
+            self.alias_calls = []   # each /_aliases actions list
+            self.refreshes = 0
+
+        def __call__(self, es_url, method, path, body=None, ndjson=False):
+            # body arrives as a list of objects: alternating
+            # {"index": {...}} action lines and payload dicts (the real
+            # _es_request serializes; the seam is patched above it).
+            if method == "PUT":  # PUT /<new_index> {mappings}
+                name = path[1:]
+                self.indices[name] = (body or {}).get("mappings", {}).get(
+                    "properties", {})
+                return {}
+            if method == "POST" and path == "/_bulk":
+                n = 0
+                for line in body:
+                    if isinstance(line, dict) and "index" in line:
+                        n += 1
+                self.bulk_docs += n
+                if self.bulk_errors:
+                    return {"errors": True, "items": [
+                        {"index": {"error": {"type": "boom"}}}]}
+                return {"errors": False}
+            if method == "POST" and path.endswith("/_refresh"):
+                self.refreshes += 1
+                return {}
+            if method == "GET" and path.endswith("/_count"):
+                c = (self.count_override if self.count_override is not None
+                     else self.bulk_docs)
+                return {"count": c}
+            if method == "GET":  # /<index>/_count handled above; /<alias>
+                name = path[1:]
+                if name in self.indices:
+                    return {name: {}}
+                return self.alias_holders.get(name, {})
+            if method == "POST" and path == "/_aliases":
+                self.alias_calls.append(body["actions"])
+                for a in body["actions"]:
+                    if "remove" in a:
+                        nm = a["remove"]["index"]
+                        al = a["remove"]["alias"]
+                        if al in self.alias_holders:
+                            del self.alias_holders[al]
+                    if "add" in a:
+                        self.alias_holders[a["add"]["alias"]] = \
+                            a["add"]["index"]
+                return {}
+            raise AssertionError(f"unexpected ES call {method} {path}")
+
+    def test_es_success_reuse_and_rollback(self):
+        import unittest.mock
+        import knowledge_api
+        coll, rows = self._prep(2)
+        cid = coll["collection_id"]
+        blocks_total = sum(r["blocks_count"] for r in rows)
+        self._approve_default_schema(cid)
+
+        fake = self._FakeES()
+        with unittest.mock.patch.object(
+                knowledge_api, "_es_request", side_effect=fake):
+            _, _, job = self.corpus_build(coll["id"])
+        self.assertEqual(job["status"], "succeeded", job)
+        builds = self.corpus_builds(coll["id"])
+        self.assertEqual(len(builds), 1)
+        b = builds[0]
+        self.assertEqual(b["status"], "succeeded")
+        self.assertEqual(b["es_index_status"], "success")
+        self.assertEqual(b["es_index"],
+                         f"knowledge_{coll['slug']}_v0001")
+        self.assertEqual(b["chunk_count"], blocks_total)
+        # mapping came from the approved schema
+        props = fake.indices[b["es_index"]]
+        self.assertEqual(props["normalized_text"], {"type": "text"})
+        self.assertEqual(props["block_id"], {"type": "keyword"})
+        self.assertEqual(props["type"], {"type": "keyword"})
+        self.assertEqual(props["norm_version"],
+                         {"type": "keyword", "index": False})
+        # one ATOMIC alias call; alias now holds exactly the new index
+        self.assertEqual(len(fake.alias_calls), 1)
+        self.assertEqual(fake.alias_holders.get(coll["es_alias"]),
+                         b["es_index"])
+        self.assertEqual(fake.bulk_docs, blocks_total)
+        self.assertGreaterEqual(fake.refreshes, 1)
+        # collection flagged ready with this build
+        det = self.client.get(
+            f"/api/knowledge/collections/{coll['id']}"
+        ).get_json()["collection"]
+        self.assertEqual(det["indexing_status"], "ready")
+        self.assertEqual(det["current_index_build"], b["iv_id"])
+        # detail carries the ES info
+        detail = json.loads(b["es_detail"])
+        self.assertEqual(detail["docs"], blocks_total)
+        self.assertEqual(detail["alias"], coll["es_alias"])
+
+        # same content again -> REUSED: no v0002, no second alias switch
+        with unittest.mock.patch.object(
+                knowledge_api, "_es_request", side_effect=fake):
+            _, _, job2 = self.corpus_build(coll["id"])
+        self.assertEqual(job2["status"], "succeeded", job2)
+        self.assertEqual(len(self.corpus_builds(coll["id"])), 1)
+        self.assertEqual(len(fake.indices), 1)
+        self.assertEqual(len(fake.alias_calls), 1)
+
+        # --- rollback: count mismatch -> job failed, alias NOT touched ---
+        from factory._smoke_fixtures import make_docx
+        tmp = tempfile.mkdtemp(prefix="pct-pf-d4-")
+        self.addCleanup(shutil.rmtree, tmp, ignore_errors=True)
+        p = os.path.join(tmp, "کتاب-چهارم.docx")
+        make_docx(p, [
+            ("Normal", "عنوان: کتاب چهارم"),
+            ("Normal", "متن فارسی کتاب چهارم."),
+        ])
+        self.upload_and_process(p)
+        fake2 = self._FakeES(count_override=-1)
+        with unittest.mock.patch.object(
+                knowledge_api, "_es_request", side_effect=fake2):
+            _, _, job3 = self.corpus_build(coll["id"])
+        self.assertEqual(job3["status"], "failed", job3)
+        builds = self.corpus_builds(coll["id"])
+        self.assertEqual(len(builds), 2)
+        b3 = builds[0]  # newest = the failed ES attempt
+        self.assertEqual(b3["es_index_status"], "failed")
+        self.assertIn("count mismatch", json.loads(b3["es_detail"])["error"])
+        # the alias never moved (rollback); es_index never assigned
+        self.assertEqual(fake2.alias_calls, [])
+        self.assertEqual(b3["es_index"], "none")
+        # retrying the SAME job kind re-runs the ES part on the same row
+        with unittest.mock.patch.object(
+                knowledge_api, "_es_request", side_effect=self._FakeES()):
+            _, _, job4 = self.corpus_build(coll["id"])
+        self.assertEqual(job4["status"], "succeeded", job4)
+        builds = self.corpus_builds(coll["id"])
+        # still 2 rows total (failed->retried row updated in place)
+        self.assertEqual(len(builds), 2)
+        top = builds[0]
+        self.assertEqual(top["es_index_status"], "success")
+        self.assertRegex(top["es_index"],
+                         r"^knowledge_" + coll["slug"] + r"_v\d{4}$")
 
 
 if __name__ == "__main__":

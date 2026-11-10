@@ -392,6 +392,7 @@ def ensure_knowledge_schema(db):
     db.commit()
     _ensure_document_columns(db)
     _ensure_registry_columns(db)
+    _ensure_build_columns(db)
 
 
 def _ensure_registry_columns(db):
@@ -609,6 +610,33 @@ def _ensure_document_columns(db):
 STUCK_AFTER_MOD = "-10 minutes"  # a live worker always updates within 10 min
 
 
+def _ensure_build_columns(db):
+    """PCM-20.9 Stage D — additive columns for knowledge_index_builds.
+
+    Pre-20.9 rows keep NULL (legacy builds had no canonical corpus / ES
+    factory outcome). Guarded PRAGMA-probe + ALTER, never alters an
+    existing column (AGENTS.md rule 2).
+    """
+    existing = {r[1] for r in db.execute(
+        "PRAGMA table_info(knowledge_index_builds)").fetchall()}
+    wanted = [
+        # SHA-256 of the canonical corpus archive (c-1) — the content
+        # idempotency key (same content -> REUSED, no second build).
+        ("content_sha256", "TEXT"),
+        # corpus dir, relative to the knowledge data dir
+        ("out_dir", "TEXT"),
+        # ES factory outcome: pending / blocked / success / failed
+        ("es_index_status", "TEXT"),
+        # JSON detail of the ES factory outcome (reason / error / info)
+        ("es_detail", "TEXT"),
+    ]
+    for col, decl in wanted:
+        if col not in existing:
+            db.execute(
+                f"ALTER TABLE knowledge_index_builds ADD COLUMN {col} {decl}")
+    db.commit()
+
+
 def _recover_interrupted(db):
     """PCM-13/14 §13 (+PCM-15): after a restart, make stuck state resumable.
 
@@ -763,8 +791,11 @@ def _job_worker(db_path, job_id):
         # PCM-15: a batch job that stops early (user pause) sets its own
         # 'interrupted' state — never overwrite a terminal state set by the
         # kind fn itself.
+        # Keep the kind fn's final stage ('reused <iv>', 'es <index>', ...);
+        # 'done' only when the kind fn never set one.
         conn.execute(
-            "UPDATE knowledge_jobs SET status='succeeded', stage='done', "
+            "UPDATE knowledge_jobs SET status='succeeded', "
+            "stage=COALESCE(stage, 'done'), "
             "updated_at=?, completed_at=? WHERE job_id=? AND status='running'",
             (_now(), _now(), job_id))
         conn.commit()
@@ -1183,6 +1214,204 @@ def _schema_validate_report(conn, collection_id, fields, limit=200000):
     return report
 
 
+# ---------------------------------------------------------------------------
+# PCM-20.9 Stage D — canonical corpus build + guarded ES index factory
+# ---------------------------------------------------------------------------
+
+# corpus schema field type -> Elasticsearch mapping type
+_ES_TYPE_MAP = {
+    "string": "keyword", "text": "text", "integer": "long",
+    "float": "float", "boolean": "boolean", "keyword": "keyword",
+}
+
+
+def _es_url():
+    """ES base URL for the index factory (empty = ES factory disabled).
+
+    CONFIG-GUARDED: without PCT_ES_URL the corpus build completes
+    corpus-only and the ES part is recorded as 'blocked' — the server
+    never touches a cluster it was not configured for (stop rule: no
+    operational index rewrite from unconfigured code).
+    """
+    return os.environ.get("PCT_ES_URL", "").strip()
+
+
+def _es_request(es_url, method, path, body=None, ndjson=False):
+    """The single ES HTTP seam (stdlib urllib — no new dependency).
+
+    `path` is absolute ('/_bulk', '/<idx>/_refresh', '/_aliases', ...).
+    `body` is a JSON-serializable dict, or a list of objects serialized as
+    NDJSON when ndjson=True. Returns the parsed JSON response ({} when the
+    response body is empty). Tests patch THIS ONE function to simulate a
+    whole cluster.
+    """
+    import urllib.request
+    url = es_url.rstrip("/") + path
+    headers = {"Accept": "application/json"}
+    data = None
+    if body is not None:
+        if ndjson:
+            data = ("\n".join(json.dumps(x, ensure_ascii=False)
+                              for x in body) + "\n").encode("utf-8")
+            headers["Content-Type"] = "application/x-ndjson"
+        else:
+            data = json.dumps(body, ensure_ascii=False).encode("utf-8")
+            headers["Content-Type"] = "application/json"
+    req = urllib.request.Request(url, data=data, headers=headers,
+                                 method=method)
+    with urllib.request.urlopen(req, timeout=60) as resp:
+        raw = resp.read()
+    if not raw:
+        return {}
+    return json.loads(raw.decode("utf-8"))
+
+
+def _es_next_index_name(conn, collection_id, slug):
+    """Versioned physical index name: knowledge_<slug>_vNNNN.
+
+    NNNN = (max existing version of this collection) + 1, zero-padded to
+    4. Old indexes are never overwritten or deleted — each build gets a
+    fresh name (rollback = the alias simply stays on the previous one).
+    """
+    prefix = "knowledge_" + slug + "_"
+    pat = re.compile(re.escape(prefix) + r"v(\d{4})$")
+    n = 0
+    for r in conn.execute(
+            "SELECT es_index FROM knowledge_index_builds "
+            "WHERE collection_id=? AND es_index IS NOT NULL "
+            "AND es_index != 'none'", (collection_id,)).fetchall():
+        m = pat.match(r["es_index"] or "")
+        if m:
+            n = max(n, int(m.group(1)))
+    return prefix + f"v{n + 1:04d}"
+
+
+def _document_metadata(conn, collection_id, doc_row):
+    """Merged custom metadata {field_key: value} for one document.
+
+    Scope priority: document > work > edition > volume > collection
+    (first value per field_key wins); only enabled fields. The merged
+    metadata is embedded in every ES doc so search can filter on it.
+    """
+    rows = conn.execute(
+        """SELECT m.field_key, v.value,
+                  CASE m.scope
+                    WHEN 'document' THEN 0
+                    WHEN 'work' THEN 1
+                    WHEN 'edition' THEN 2
+                    WHEN 'volume' THEN 3
+                    ELSE 4 END AS prio,
+                  v.edited_at
+             FROM knowledge_metadata_values v
+             JOIN knowledge_metadata_fields m ON m.field_id = v.field_id
+            WHERE m.enabled = 1
+              AND (
+                    (m.scope='collection' AND v.collection_id=?)
+                 OR (m.scope='document' AND v.document_id=?)
+                 OR (m.scope='work'     AND v.work_id=?)
+                 OR (m.scope='edition'  AND v.edition_id=?)
+                 OR (m.scope='volume'   AND v.volume_id=?)
+              )
+            ORDER BY prio, v.edited_at DESC""",
+        (collection_id, doc_row["document_id"],
+         doc_row["work_id"] or "", doc_row["edition_id"] or "",
+         doc_row["volume_id"] or "")).fetchall()
+    meta = {}
+    for r in rows:
+        if r["field_key"] not in meta:
+            meta[r["field_key"]] = r["value"]
+    return meta
+
+
+def _es_build_index(conn, coll, fields, corpus_dir):
+    """Build the versioned ES index for a corpus + ATOMIC alias switch.
+
+    Safe-rollback flow (the alias only moves when everything verified):
+      1. PUT the new index knowledge_<slug>_vNNNN with the schema mapping
+      2. bulk-index the NORMALIZED stream (one ES doc per block, plus the
+         merged custom metadata)
+      3. refresh, then GET /_count — must equal the number of docs sent,
+         otherwise raise (the alias is NOT touched => rollback)
+      4. ONE atomic /_aliases call: remove previous holder(s) + add the
+         new index.
+    Any failure before step 4 leaves the alias on the previous index; the
+    (possibly partial) new index is kept for audit and never aliased.
+    """
+    es_url = _es_url()
+    if not es_url:
+        raise RuntimeError("PCT_ES_URL is not set")
+    slug = coll["slug"]
+    es_index = _es_next_index_name(conn, coll["collection_id"], slug)
+    alias = coll["es_alias"]
+
+    # --- 1. new index, mapping from the (approved or default) schema -----
+    props = {}
+    for f in fields:
+        key = f.get("es_field") or f["name"]
+        p = {"type": _ES_TYPE_MAP.get(f.get("type"), "keyword")}
+        if not f.get("searchable", True):
+            p["index"] = False
+        props[key] = p
+    _es_request(es_url, "PUT", "/" + es_index,
+                {"mappings": {"properties": props}})
+
+    # --- 2. bulk the normalized stream -----------------------------------
+    docs_by_file = {
+        d["file_id"]: d for d in conn.execute(
+            "SELECT * FROM knowledge_collection_documents "
+            "WHERE collection_id=? AND file_id IS NOT NULL",
+            (coll["collection_id"],)).fetchall()}
+    lines = []
+    with open(os.path.join(corpus_dir, "normalized.jsonl"),
+              encoding="utf-8") as fh:
+        for line in fh:
+            line = line.strip()
+            if not line:
+                continue
+            rec = json.loads(line)
+            fid = (rec.get("provenance") or {}).get("factory_file_id")
+            payload = dict(rec)
+            doc_row = docs_by_file.get(fid)
+            if doc_row is not None:
+                payload["metadata"] = _document_metadata(
+                    conn, coll["collection_id"], doc_row)
+            lines.append({"index": {"_index": es_index,
+                                    "_id": rec.get("record_id") or
+                                    rec.get("block_id")}})
+            lines.append(payload)
+    sent = len(lines) // 2
+    for i in range(0, len(lines), 1000):  # 500 docs per bulk round-trip
+        resp = _es_request(es_url, "POST", "/_bulk", lines[i:i + 1000],
+                           ndjson=True)
+        if resp.get("errors"):
+            bad = [a for a in (resp.get("items") or [])
+                   if (a.get("index") or {}).get("error")]
+            raise RuntimeError("bulk indexing errors: "
+                               + json.dumps(bad[:3], ensure_ascii=False))
+
+    # --- 3. verify the count BEFORE touching the alias (rollback) --------
+    _es_request(es_url, "POST", "/" + es_index + "/_refresh")
+    cnt = _es_request(es_url, "GET", "/" + es_index + "/_count")
+    got = cnt.get("count")
+    if got != sent:
+        raise RuntimeError(
+            f"ES count mismatch after bulk: sent {sent}, counted {got} — "
+            f"index {es_index} kept, alias NOT switched (rollback)")
+
+    # --- 4. ONE atomic alias switch --------------------------------------
+    prev = []
+    try:
+        holders = _es_request(es_url, "GET", "/" + alias)
+        prev = [ix for ix in (holders or {}) if ix != es_index]
+    except Exception:  # noqa: BLE001 — first build: alias does not exist yet
+        prev = []
+    actions = [{"remove": {"index": ix, "alias": alias}} for ix in prev]
+    actions.append({"add": {"index": es_index, "alias": alias}})
+    _es_request(es_url, "POST", "/_aliases", {"actions": actions})
+    return {"es_index": es_index, "docs": sent, "alias": alias,
+            "previous_index": prev[-1] if prev else None}
+
+
 def _batch_scope_clause(conn, batch_id, alias=None):
     """PCM-20.9 Stage A — scoping clause for document/queue queries.
 
@@ -1514,9 +1743,200 @@ def _job_kind_process_batch_retry(conn, job_id):
     conn.commit()
 
 
+def _job_kind_corpus_build(conn, job_id):
+    """PCM-20.9 Stage D — canonical corpus (c-1) + guarded ES factory.
+
+    Per processed document: factory.dump.generate_dump (d-1; the stored
+    original is re-hashed when present, else the WF manifest sha is
+    trusted). Then factory.corpus.build_corpus (c-1, fail-fast: no file
+    is written unless every dump validates). The build row is keyed by
+    the CORPUS ARCHIVE sha256: same content -> REUSED (no rewrite, no
+    second row). The ES part is config-guarded (PCT_ES_URL): absent ->
+    es_index_status='blocked'; present -> versioned index + atomic alias
+    switch (see _es_build_index); ES failure keeps the alias untouched.
+    """
+    r = conn.execute(
+        "SELECT job_key, collection_id FROM knowledge_jobs WHERE job_id=?",
+        (job_id,)).fetchone()
+    _, coll_id = r["job_key"].split(":", 1)
+    coll = conn.execute(
+        "SELECT * FROM knowledge_collections WHERE collection_id=?",
+        (coll_id,)).fetchone()
+    if not coll:
+        raise RuntimeError(f"collection {coll_id} not found")
+    coll = dict(coll)
+
+    docs = conn.execute(
+        """SELECT * FROM knowledge_collection_documents
+           WHERE collection_id=? AND out_dir IS NOT NULL
+             AND status IN ('parsed','needs_review','approved','indexed')
+           ORDER BY id""", (coll_id,)).fetchall()
+    total = len(docs)
+    if not total:
+        raise RuntimeError("no processed documents in the collection "
+                           "(need status parsed/needs_review/approved/"
+                           "indexed with factory output)")
+
+    root = os.path.join(knowledge_data_dir(), "corpus_builds", coll_id)
+    dumps_root = os.path.join(root, "dumps")
+    corpus_dir = os.path.join(root, "corpus")
+    os.makedirs(dumps_root, exist_ok=True)
+
+    from factory.dump import generate_dump, validate_dump
+    from factory.corpus import build_corpus
+
+    # --- 1. one canonical d-1 dump per processed document ----------------
+    # Reuse an existing, valid dump when the input + factory versions still
+    # match the current WF output: generate_dump rewrites
+    # dump-manifest.json with a fresh generated_at, which would change the
+    # archive sha on every rebuild and break content idempotency (REUSED).
+    def _dump_is_reusable(wf_dir, dump_dir, sha):
+        try:
+            with open(os.path.join(wf_dir, "manifest.json"),
+                      encoding="utf-8") as fh:
+                m = json.load(fh)
+        except Exception:  # noqa: BLE001 — missing/corrupt WF output
+            return False
+        if not isinstance(m, dict):
+            return False
+        if (m.get("file") or {}).get("sha256") != sha:
+            return False
+        ok, _e, _w = validate_dump(dump_dir)
+        if not ok:
+            return False
+        try:
+            with open(os.path.join(dump_dir, "dump-manifest.json"),
+                      encoding="utf-8") as fh:
+                dm = json.load(fh)
+        except Exception:  # noqa: BLE001
+            return False
+        if not isinstance(dm, dict):
+            return False
+        v2 = dm.get("versions") or {}
+        # dump.py derives versions from: manifest_version + schema_version +
+        # m["versions"]{parser, normalizer, normalizer_policy, factory}
+        if v2.get("manifest") != m.get("manifest_version"):
+            return False
+        if v2.get("schema") != m.get("schema_version"):
+            return False
+        v1 = m.get("versions") or {}
+        return all(v2.get(k) == v1.get(k) for k in
+                   ("parser", "normalizer", "normalizer_policy", "factory"))
+
+    dump_dirs = []
+    for i, d in enumerate(docs, 1):
+        d_out = os.path.join(knowledge_data_dir(), d["out_dir"])
+        dump_dir = os.path.join(dumps_root, d["file_id"])
+        stored = _stored_file_path(
+            d["sha256"], "f-" + d["sha256"][:8],
+            os.path.splitext(d["file_name"] or "book.docx")[1])
+        if not _dump_is_reusable(d_out, dump_dir, d["sha256"]):
+            generate_dump(wf_dir=d_out, dump_dir=dump_dir,
+                          source_docx=stored if os.path.isfile(stored)
+                          else None)
+        dump_dirs.append(dump_dir)
+        _job_progress(conn, job_id, i, total, f"dump {d['file_id']}")
+
+    # --- 2. canonical corpus c-1 (fail-fast, deterministic archive) ------
+    _job_progress(conn, job_id, total, total, "corpus build (c-1)")
+    manifest = build_corpus(dump_dirs, corpus_dir)
+    content_sha = manifest["archive"]["sha256"]
+
+    # --- 3. build row, content-idempotent (REUSED on same archive sha) ---
+    reuse = conn.execute(
+        """SELECT iv_id, es_index_status FROM knowledge_index_builds
+           WHERE collection_id=? AND content_sha256=?""",
+        (coll_id, content_sha)).fetchone()
+    if reuse and (reuse["es_index_status"] or "pending") != "failed":
+        # same corpus content, ES part already settled (success or
+        # blocked) -> nothing to do (no rewrite, no second row)
+        iv_id = reuse["iv_id"]
+        conn.execute(
+            "UPDATE knowledge_index_builds SET status='succeeded', "
+            "completed_at=? WHERE iv_id=?", (_now(), iv_id))
+        conn.commit()
+        _job_progress(conn, job_id, total, total, f"reused {iv_id}")
+        return
+
+    iv_id = "iv-" + hashlib.sha256(
+        (coll_id + content_sha).encode("utf-8")).hexdigest()[:8]
+    now = _now()
+    rel_out = os.path.relpath(corpus_dir, knowledge_data_dir())
+    rel_out = rel_out.replace(os.sep, "/")
+    if reuse:
+        # same content but the previous ES attempt FAILED: the corpus on
+        # disk is unchanged — keep the same row and re-run the ES part
+        # below (never a second row for the same content).
+        conn.execute(
+            """UPDATE knowledge_index_builds
+               SET status='succeeded', completed_at=?, content_sha256=?,
+                   out_dir=?, es_index='none', es_index_status='pending',
+                   es_detail=NULL, schema_version=?, chunk_count=?
+               WHERE iv_id=?""",
+            (now, content_sha, rel_out, coll["schema_version"],
+             manifest["counts"]["blocks_total"], iv_id))
+    else:
+        conn.execute(
+            """INSERT INTO knowledge_index_builds
+               (iv_id, collection_id, es_index, es_alias, schema_version,
+                norm_version, chunking_version, chunk_count, status,
+                created_at, completed_at, content_sha256, out_dir,
+                es_index_status)
+               VALUES (?, ?, 'none', ?, ?, ?, ?, ?, 'succeeded',
+                       ?, ?, ?, ?, 'pending')""",
+            (iv_id, coll_id, coll["es_alias"], coll["schema_version"],
+             coll["normalization_version"], coll["chunking_version"],
+             manifest["counts"]["blocks_total"], now, now, content_sha,
+             rel_out))
+    conn.commit()
+    _job_progress(conn, job_id, total, total, "corpus built (c-1)")
+
+    # --- 4. ES index factory (config-guarded; rollback-safe) -------------
+    if not _es_url():
+        conn.execute(
+            "UPDATE knowledge_index_builds "
+            "SET es_index_status=?, es_detail=? WHERE iv_id=?",
+            ("blocked", json.dumps(
+                {"status": "blocked",
+                 "reason": "PCT_ES_URL تنظیم نیست — ES factory غیرفعال "
+                           "(build corpus-only)"},
+                ensure_ascii=False), iv_id))
+        conn.commit()
+        return
+
+    schema_row = _collection_approved_schema(conn, coll_id)
+    fields = (json.loads(schema_row["fields"]) if schema_row
+              else _default_schema_fields())
+    try:
+        info = _es_build_index(conn, coll, fields, corpus_dir)
+    except Exception as e:  # noqa: BLE001 — alias stays on the prev index
+        conn.execute(
+            "UPDATE knowledge_index_builds "
+            "SET es_index_status=?, es_detail=? WHERE iv_id=?",
+            ("failed", json.dumps(
+                {"status": "failed",
+                 "error": f"{type(e).__name__}: {e}"},
+                ensure_ascii=False), iv_id))
+        conn.commit()
+        raise
+    conn.execute(
+        "UPDATE knowledge_index_builds SET es_index=?, es_index_status=?, "
+        "es_detail=? WHERE iv_id=?",
+        (info["es_index"], "success", json.dumps(info, ensure_ascii=False),
+         iv_id))
+    # the alias now serves this index: mark the collection accordingly
+    conn.execute(
+        "UPDATE knowledge_collections SET current_index_build=?, "
+        "indexing_status='ready', updated_at=? WHERE collection_id=?",
+        (iv_id, _now(), coll_id))
+    conn.commit()
+    _job_progress(conn, job_id, total, total, f"es {info['es_index']}")
+
+
 _JOB_KINDS["process_document"] = _job_kind_process_document
 _JOB_KINDS["process_batch"] = _job_kind_process_batch
 _JOB_KINDS["process_batch_retry"] = _job_kind_process_batch_retry
+_JOB_KINDS["corpus_build"] = _job_kind_corpus_build
 
 
 # ---------------------------------------------------------------------------
@@ -1660,11 +2080,12 @@ def register_knowledge_routes(app, get_db):
             dict(r) for r in db.execute(
                 """SELECT iv_id, es_index, es_alias, schema_version,
                           norm_version, chunking_version, chunk_count,
-                          status, created_at, completed_at
+                          status, created_at, completed_at,
+                          content_sha256, out_dir, es_index_status, es_detail
                    FROM knowledge_index_builds
                    WHERE collection_id = ?
                    ORDER BY created_at DESC, iv_id DESC""",
-                (row["collection_id"],))
+                 (row["collection_id"],))
         ]
         item["metadata_fields"] = _meta_fields(db, row["collection_id"])
         # PCM-20.9 Stage C — approved corpus schema (null until approved)
@@ -1727,11 +2148,12 @@ def register_knowledge_routes(app, get_db):
             dict(r) for r in db.execute(
                 """SELECT iv_id, es_index, es_alias, schema_version,
                           norm_version, chunking_version, chunk_count,
-                          status, created_at, completed_at
+                          status, created_at, completed_at,
+                          content_sha256, out_dir, es_index_status, es_detail
                    FROM knowledge_index_builds
                    WHERE collection_id = ?
                    ORDER BY created_at DESC, iv_id DESC""",
-                (row["collection_id"],))
+                 (row["collection_id"],))
         ]
         return jsonify({"ok": True,
                         "collection_id": row["collection_id"],
@@ -2817,6 +3239,93 @@ def register_knowledge_routes(app, get_db):
         db.commit()
         return jsonify({"ok": True, "schema_id": schema_id,
                         "version": sv["version"], "approved_at": now})
+
+    # ── PCM-20.9 Stage D — canonical corpus build + ES index factory ────
+
+    @app.route("/api/knowledge/collections/<int:coll_id>/corpus/build",
+               methods=["POST"])
+    @require_auth
+    def knowledge_corpus_build(coll_id):
+        """Start the Stage D build: per-doc d-1 dumps -> c-1 corpus ->
+        guarded ES factory. Idempotent: job keyed corpus_build:<cid>
+        (force_retry) and the build row keyed by the corpus archive
+        SHA-256 (same content -> REUSED, no rewrite)."""
+        db = get_db()
+        ensure_knowledge_schema(db)
+        row = _collection_row(db, coll_id)
+        if not row:
+            return jsonify({"ok": False, "message": "کالکشن پیدا نشد"}), 404
+        cid = row["collection_id"]
+        n = db.execute(
+            """SELECT COUNT(*) AS n FROM knowledge_collection_documents
+               WHERE collection_id=? AND out_dir IS NOT NULL
+                 AND status IN ('parsed','needs_review','approved',
+                                'indexed')""",
+            (cid,)).fetchone()["n"]
+        if not n:
+            return jsonify({"ok": False, "code": "no_processed_documents",
+                            "message": "هیچ سند پردازش‌شده‌ای برای ساخت "
+                                       "پیکره در این کالکشن نیست"}), 409
+        job, started = _submit_job(
+            db, job_key=f"corpus_build:{cid}", kind="corpus_build",
+            collection_id=cid, batch_id=None, total=n,
+            idempotency_key=f"corpus_build:{cid}", force_retry=True)
+        return jsonify({"ok": True, "queued": started, "job": job,
+                        "documents": n}), (202 if started else 200)
+
+    @app.route("/api/knowledge/collections/<int:coll_id>/corpus/builds",
+               methods=["GET"])
+    @require_auth
+    def knowledge_corpus_builds(coll_id):
+        """List the canonical corpus builds of a collection (newest
+        first). Only builds produced by the Stage D factory (they carry
+        a content_sha256); legacy index-build rows are not mixed in."""
+        db = get_db()
+        ensure_knowledge_schema(db)
+        row = _collection_row(db, coll_id)
+        if not row:
+            return jsonify({"ok": False, "message": "کالکشن پیدا نشد"}), 404
+        builds = [
+            dict(r) for r in db.execute(
+                """SELECT iv_id, es_index, es_alias, schema_version,
+                          norm_version, chunking_version, chunk_count,
+                          status, created_at, completed_at,
+                          content_sha256, out_dir, es_index_status, es_detail
+                   FROM knowledge_index_builds
+                   WHERE collection_id = ?
+                     AND content_sha256 IS NOT NULL
+                   ORDER BY created_at DESC, iv_id DESC""",
+                 (row["collection_id"],))
+        ]
+        return jsonify({"ok": True,
+                        "collection_id": row["collection_id"],
+                        "builds": builds})
+
+    @app.route("/api/knowledge/index-builds/<iv_id>", methods=["GET"])
+    @require_auth
+    def knowledge_index_build_detail(iv_id):
+        """One build row + its canonical corpus manifest (read from the
+        on-disk out_dir, when present)."""
+        db = get_db()
+        ensure_knowledge_schema(db)
+        r = db.execute(
+            "SELECT * FROM knowledge_index_builds WHERE iv_id=?",
+            (iv_id,)).fetchone()
+        if not r:
+            return jsonify({"ok": False, "message": "بیلد پیدا نشد"}), 404
+        item = dict(r)
+        manifest = None
+        if item.get("out_dir"):
+            mp = os.path.join(knowledge_data_dir(), item["out_dir"],
+                              "corpus-manifest.json")
+            if os.path.isfile(mp):
+                try:
+                    with open(mp, encoding="utf-8") as fh:
+                        manifest = json.load(fh)
+                except (OSError, json.JSONDecodeError):
+                    manifest = None
+        item["manifest"] = manifest
+        return jsonify({"ok": True, "build": item})
 
     @app.route("/api/knowledge/queue/summary", methods=["GET"])
     @require_auth
