@@ -1444,6 +1444,7 @@ async function loadQueue() {
           const acts =
             '<div class="batch-actions">' +
             (b.status !== 'done' ? '<button type="button" class="btn btn-primary btn-sm" data-batch="' + escHtml(b.batch_id) + '" data-act="process">پردازش</button>' : '') +
+            ((b.failed_count || 0) > 0 ? '<button type="button" class="btn btn-ghost btn-sm" data-batch="' + escHtml(b.batch_id) + '" data-act="retry">تلاش مجدد ناموفق‌ها</button>' : '') +
             (b.paused ? '<button type="button" class="btn btn-ghost btn-sm" data-batch="' + escHtml(b.batch_id) + '" data-act="resume">ادامه</button>'
                       : '<button type="button" class="btn btn-ghost btn-sm" data-batch="' + escHtml(b.batch_id) + '" data-act="pause">توقف</button>') +
             '</div>';
@@ -1467,9 +1468,11 @@ async function loadQueue() {
 }
 async function batchAction(batchId, act) {
   try {
-    const j = await fetchAPI('/api/knowledge/import/batches/' + batchId + '/' + act, { method: 'POST' });
+    const seg = act === 'retry' ? 'retry-failed' : act;
+    const j = await fetchAPI('/api/knowledge/import/batches/' + batchId + '/' + seg, { method: 'POST' });
     if (!j) return;
     if (act === 'process') toast('شروع پردازش: ' + faNum(j.files_queued) + ' فایل در صف');
+    else if (act === 'retry') toast('تلاش مجدد: ' + faNum(j.files_queued) + ' فایل ناموفق دوباره در صف (فایل‌های موفق دست‌نخورده)');
     else if (act === 'pause') toast('صف متوقف شد — فایل جاری تا پایان می‌رسد و بقیه در انتظار می‌مانند');
     else if (act === 'resume') toast('توقف لغو شد — برای ادامهٔ پردازش دوباره «پردازش» بزنید');
     refreshJobs();

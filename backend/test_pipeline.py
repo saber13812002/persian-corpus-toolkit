@@ -162,6 +162,19 @@ class Base(unittest.TestCase):
         self.assertEqual(r.status_code, 200, r.get_data(as_text=True))
         return r.get_json()
 
+    def retry_failed(self, batch_id):
+        return self.client.post(
+            f"/api/knowledge/import/batches/{batch_id}/retry-failed")
+
+    def _queue_rows(self, coll_id):
+        conn = self._db()
+        try:
+            return [dict(x) for x in conn.execute(
+                "SELECT * FROM knowledge_file_queue WHERE collection_id=?",
+                (coll_id,)).fetchall()]
+        finally:
+            conn.close()
+
 
 class TestPF_A01_PlanPersistence(Base):
     """PF-A01 — the plan is persisted, one row per file, with per-file state."""
@@ -507,6 +520,191 @@ class TestPF_A05_LegacyFlow(Base):
         finally:
             conn.close()
         self.assertEqual(n, 3)
+
+
+class TestPF_B01_RetryOnlyFailed(Base):
+    """PF-B01 — Stage B: retry-failed re-runs ONLY the failed files.
+
+    Succeeded files must stay untouched (checkpoint/resume): same attempts,
+    same status, no error. The failed file is re-executed (attempts 1 -> 2).
+    Batch counters are re-applied from the real document states.
+    """
+
+    def test_retry_touches_failed_only(self):
+        coll = self.make_collection()
+        paths = self.make_persian_set()
+        good, corrupt = paths[:5], paths[5]
+
+        plan = self.make_batch(
+            coll["collection_id"],
+            [self._file_entry(p) for p in good + [corrupt]])
+        batch_id = plan["batch"]["batch_id"]
+        for p in good + [corrupt]:
+            r = self.batch_upload(batch_id, p)
+            self.assertEqual(r.status_code, 201, r.get_data(as_text=True))
+
+        body = self.process_batch(batch_id)
+        self.wait_job(body["job"]["job_id"])
+
+        before = self._queue_rows(coll["collection_id"])
+        failed = [q for q in before if q["status"] == "failed"]
+        ok = [q for q in before if q["status"] == "succeeded"]
+        self.assertEqual(len(failed), 1)
+        self.assertEqual(len(ok), 5)
+        snap_ok = {q["file_key"]: (q["attempts"], q["status"],
+                                   q["last_error"]) for q in ok}
+
+        r = self.retry_failed(batch_id)
+        self.assertEqual(r.status_code, 202, r.get_data(as_text=True))
+        jbody = r.get_json()
+        self.assertEqual(jbody["files_queued"], 1)
+        self.assertFalse(jbody["resubmitted"])
+        job = self.wait_job(jbody["job"]["job_id"])
+        self.assertEqual(job["status"], "succeeded", job)
+
+        after = self._queue_rows(coll["collection_id"])
+        # the 5 succeeded files are bit-for-bit untouched
+        for q in after:
+            if q["file_key"] in snap_ok:
+                self.assertEqual(
+                    (q["attempts"], q["status"], q["last_error"]),
+                    snap_ok[q["file_key"]],
+                    f"succeeded file {q['file_key']} was touched")
+        # the corrupt file was re-executed: attempts 1 -> 2, still failing
+        f = [q for q in after if q["file_key"] == failed[0]["file_key"]]
+        self.assertEqual(len(f), 1)
+        self.assertEqual(f[0]["attempts"], 2)
+        self.assertEqual(f[0]["status"], "failed")
+        self.assertTrue(f[0]["last_error"])
+
+        det = self._batch_detail(batch_id)
+        self.assertEqual(det["batch"]["status"], "done")
+        self.assertEqual(det["batch"]["processed_count"], 5)
+        self.assertEqual(det["batch"]["failed_count"], 1)
+
+
+class TestPF_B02_RetryErrors(Base):
+    """PF-B02 — Stage B: retry-failed error paths.
+
+    409 no_failed_files when the batch has nothing to retry; 404 for an
+    unknown batch id.
+    """
+
+    def test_no_failed_files_409(self):
+        coll = self.make_collection()
+        from factory._smoke_fixtures import make_docx
+        tmp = tempfile.mkdtemp(prefix="pct-pf-b2-")
+        self.addCleanup(shutil.rmtree, tmp, ignore_errors=True)
+        paths = []
+        for i in range(2):
+            p = os.path.join(tmp, f"کتاب-{i}.docx")
+            make_docx(p, [
+                ("Normal", f"عنوان: کتاب {i}"),
+                ("Heading 1", "فصل اول"),
+                ("Normal", f"متن فارسی کتاب شماره {i + 1}."),
+                ("Heading 1", "فصل دوم"),
+                ("Normal", "پایان کتاب."),
+            ])
+            paths.append(p)
+
+        plan = self.make_batch(
+            coll["collection_id"], [self._file_entry(p) for p in paths])
+        batch_id = plan["batch"]["batch_id"]
+        for p in paths:
+            r = self.batch_upload(batch_id, p)
+            self.assertEqual(r.status_code, 201, r.get_data(as_text=True))
+
+        body = self.process_batch(batch_id)
+        self.wait_job(body["job"]["job_id"])
+        self.assertEqual(
+            sorted(q["status"] for q in self._queue_rows(
+                coll["collection_id"])), ["succeeded", "succeeded"])
+
+        r = self.retry_failed(batch_id)
+        self.assertEqual(r.status_code, 409, r.get_data(as_text=True))
+        j = r.get_json()
+        self.assertEqual(j["code"], "no_failed_files")
+        self.assertEqual(j["failed"], 0)
+
+    def test_unknown_batch_404(self):
+        r = self.retry_failed("b-00000000")
+        self.assertEqual(r.status_code, 404, r.get_data(as_text=True))
+
+
+class TestPF_B03_TransientRecovery(Base):
+    """PF-B03 — Stage B: a transient failure (missing stored original)
+    recovers via retry-failed after the file is restored.
+
+    Also exercises force_retry: the retry job key was already used by a
+    SUCCEEDED retry run, so a later retry must re-execute the same job
+    row instead of being blocked by idempotency.
+    """
+
+    def test_delete_restore_then_retry(self):
+        from factory._smoke_fixtures import make_docx
+        coll = self.make_collection()
+        tmp = tempfile.mkdtemp(prefix="pct-pf-b3-")
+        self.addCleanup(shutil.rmtree, tmp, ignore_errors=True)
+        book = os.path.join(tmp, "کتاب-موقتی.docx")
+        make_docx(book, [
+            ("Normal", "عنوان: کتاب موقتی"),
+            ("Normal", "نویسنده: نویسنده نمونه"),
+            ("Heading 1", "فصل اول"),
+            ("Normal", "متن فارسی کتاب موقتی."),
+            ("Heading 1", "فصل دوم"),
+            ("Normal", "پایان کتاب."),
+        ])
+
+        plan = self.make_batch(
+            coll["collection_id"], [self._file_entry(book)])
+        batch_id = plan["batch"]["batch_id"]
+        r = self.batch_upload(batch_id, book)
+        self.assertEqual(r.status_code, 201, r.get_data(as_text=True))
+        sha = r.get_json()["sha256"]
+        doc_id = r.get_json()["document"]["document_id"]
+        file_id = "f-" + sha[:8]
+        stored = knowledge_api._stored_file_path(sha, file_id, ".docx")
+        self.assertTrue(os.path.isfile(stored))
+
+        # break the store: move the original away -> processing must fail
+        backup = os.path.join(tmp, "backup.docx")
+        shutil.move(stored, backup)
+
+        body = self.process_batch(batch_id)
+        self.wait_job(body["job"]["job_id"])
+        q = self._queue_rows(coll["collection_id"])
+        self.assertEqual(len(q), 1)
+        self.assertEqual(q[0]["status"], "failed")
+        self.assertEqual(q[0]["attempts"], 1)
+
+        # retry while still broken -> honest second failure (attempts 2)
+        r = self.retry_failed(batch_id)
+        self.assertEqual(r.status_code, 202, r.get_data(as_text=True))
+        self.wait_job(r.get_json()["job"]["job_id"])
+        q = self._queue_rows(coll["collection_id"])
+        self.assertEqual(q[0]["status"], "failed")
+        self.assertEqual(q[0]["attempts"], 2)
+
+        # restore the original -> the retry succeeds. This re-submits the
+        # SAME job_key whose previous run already SUCCEEDED (force_retry).
+        shutil.copyfile(backup, stored)
+        r = self.retry_failed(batch_id)
+        self.assertEqual(r.status_code, 202, r.get_data(as_text=True))
+        job = self.wait_job(r.get_json()["job"]["job_id"])
+        self.assertEqual(job["status"], "succeeded", job)
+        q = self._queue_rows(coll["collection_id"])
+        self.assertEqual(q[0]["status"], "succeeded")
+        self.assertEqual(q[0]["attempts"], 3)
+        self.assertEqual(q[0]["last_error"], None)
+
+        d = self.client.get(
+            f"/api/knowledge/documents/{doc_id}").get_json()
+        self.assertEqual(d["document"]["status"], "parsed")
+
+        # nothing left to retry
+        r = self.retry_failed(batch_id)
+        self.assertEqual(r.status_code, 409, r.get_data(as_text=True))
+        self.assertEqual(r.get_json()["code"], "no_failed_files")
 
 
 if __name__ == "__main__":

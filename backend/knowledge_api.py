@@ -757,7 +757,7 @@ def _job_worker(db_path, job_id):
 
 
 def _submit_job(db, job_key, kind, collection_id, batch_id, total=0,
-                idempotency_key=None):
+                idempotency_key=None, force_retry=False):
     """Insert a persistent job row and start its worker thread.
 
     Idempotency: re-submitting the same job_key while the job is still
@@ -765,20 +765,28 @@ def _submit_job(db, job_key, kind, collection_id, batch_id, total=0,
     a second worker. A job in a terminal-but-retryable state (failed,
     interrupted — spec §13 "retryable") is RE-EXECUTED: the row is reset
     to pending and a fresh worker starts; retry_count is bumped.
+
+    PCM-20.9 Stage B: `force_retry=True` also treats a COMPLETED job
+    (status='succeeded') as retryable — used by the batch retry-failed
+    endpoint, where a successful retry run must not block a later retry.
     """
     now = _now()
     existing = db.execute(
         "SELECT job_id, status, retry_count FROM knowledge_jobs WHERE job_key=?",
         (job_key,)).fetchone()
     if existing:
-        if existing["status"] in ("failed", "interrupted"):
+        states = ("failed", "interrupted")
+        if force_retry:
+            states = states + ("succeeded",)
+        if existing["status"] in states:
+            ph = ",".join("?" for _ in states)
             db.execute(
-                """UPDATE knowledge_jobs
-                     SET status='pending', progress=0, stage=NULL, error=NULL,
-                         retry_count=retry_count+1, updated_at=?,
-                         completed_at=NULL
-                   WHERE job_id=? AND status IN ('failed','interrupted')""",
-                (now, existing["job_id"]))
+                f"""UPDATE knowledge_jobs
+                      SET status='pending', progress=0, stage=NULL, error=NULL,
+                          retry_count=retry_count+1, updated_at=?,
+                          completed_at=NULL
+                    WHERE job_id=? AND status IN ({ph})""",
+                (now, existing["job_id"], *states))
             db.commit()
             _start_worker(existing["job_id"])
             return {"job_id": existing["job_id"], "job_key": job_key,
@@ -1183,8 +1191,80 @@ def _job_kind_process_batch(conn, job_id):
     conn.commit()
 
 
+def _job_kind_process_batch_retry(conn, job_id):
+    """PCM-20.9 Stage B — retry only the FAILED files of a batch.
+
+    Succeeded / needs_review files are left untouched (checkpoint/resume:
+    a failed run never forces re-processing the whole batch). Each failed
+    queue row is re-executed through the normal Word Factory path with the
+    per-file queue lifecycle (attempts+1, safe-stage tracking, last_error).
+    Honours the batch pause scope like the main batch job (clean stop,
+    job interrupted, remaining failed files stay failed for a later retry).
+    """
+    r = conn.execute("SELECT job_key, collection_id FROM knowledge_jobs "
+                     "WHERE job_id=?", (job_id,)).fetchone()
+    _, batch_id = r["job_key"].split(":", 1)
+    coll = r["collection_id"]
+    scope = queue_scope(batch_id)
+    dclause, dparams = _batch_scope_clause(conn, batch_id, alias="d")
+    rows = conn.execute(
+        f"""SELECT q.file_key, q.document_id FROM knowledge_file_queue q
+             JOIN knowledge_collection_documents d
+               ON d.document_id = q.document_id
+              AND d.collection_id = q.collection_id
+            WHERE q.collection_id = ? AND q.status = 'failed'{dclause}
+            ORDER BY q.created_at""", (coll, *dparams)).fetchall()
+    total = len(rows)
+    done = 0
+    for q in rows:
+        if queue_is_paused(conn, scope):
+            # clean stop: the remaining failed files stay failed
+            paused_now = _now()
+            _job_progress(conn, job_id, done, total, "paused")
+            conn.execute(
+                """UPDATE knowledge_jobs
+                     SET status='interrupted',
+                         error=COALESCE(error,'') || ' [paused by user]',
+                         updated_at=? WHERE job_id=?""",
+                (paused_now, job_id))
+            conn.commit()
+            return
+        t0 = time.time()
+        on_stage = _queue_start(conn, coll, q["file_key"], t0)
+        try:
+            # _process_document finishes the queue row itself in every case
+            _process_document(conn, coll, q["document_id"], on_stage=on_stage)
+        except Exception as e:  # noqa: BLE001 — keep going, record per file
+            err = f"{type(e).__name__}: {e}"
+            conn.execute(
+                "UPDATE knowledge_collection_documents SET status='failed', "
+                "error=?, updated_at=? WHERE document_id=?",
+                (err, _now(), q["document_id"]))
+            conn.commit()
+            qrow = _queue_row(conn, coll, q["file_key"])
+            if qrow and qrow["status"] == "running":
+                _queue_finish(conn, coll, q["file_key"], "failed", error=err)
+        done += 1
+        _job_progress(conn, job_id, done, total, f"document {q['document_id']}")
+    # batch tally (same scope as the main batch job)
+    tclause, tparams = _batch_scope_clause(conn, batch_id)
+    t = conn.execute(
+        f"""SELECT
+             SUM(CASE WHEN status IN ('parsed','needs_review','approved','indexed')
+                 THEN 1 ELSE 0 END) AS ok,
+             SUM(CASE WHEN status='failed' THEN 1 ELSE 0 END) AS bad
+            FROM knowledge_collection_documents
+            WHERE collection_id=?{tclause}""", (coll, *tparams)).fetchone()
+    conn.execute(
+        "UPDATE knowledge_import_batches SET processed_count=?, failed_count=?, "
+        "status='done', updated_at=? WHERE batch_id=?",
+        (t["ok"] or 0, t["bad"] or 0, _now(), batch_id))
+    conn.commit()
+
+
 _JOB_KINDS["process_document"] = _job_kind_process_document
 _JOB_KINDS["process_batch"] = _job_kind_process_batch
+_JOB_KINDS["process_batch_retry"] = _job_kind_process_batch_retry
 
 
 # ---------------------------------------------------------------------------
@@ -2244,6 +2324,46 @@ def register_knowledge_routes(app, get_db):
         return jsonify({"ok": True, "paused": False,
                         "scope": queue_scope(batch_id),
                         "queue_control": dict(ctrl)})
+
+    @app.route("/api/knowledge/import/batches/<batch_id>/retry-failed",
+               methods=["POST"])
+    @require_auth
+    def knowledge_retry_failed_batch(batch_id):
+        """PCM-20.9 Stage B — retry ONLY the failed files of a batch.
+
+        Succeeded / needs_review files are untouched (checkpoint/resume):
+        a failed run never forces re-processing the whole batch. Each
+        failed queue row is re-executed with attempts+1 and safe-stage
+        tracking. Idempotent while a retry is pending/running; a completed
+        retry can be re-triggered (force_retry). 409 when there is
+        nothing to retry.
+        """
+        db = get_db()
+        ensure_knowledge_schema(db)
+        _recover_interrupted(db)
+        b = db.execute(
+            "SELECT * FROM knowledge_import_batches WHERE batch_id=?",
+            (batch_id,)).fetchone()
+        if not b:
+            return jsonify({"ok": False, "message": "بچ پیدا نشد"}), 404
+        dclause, dparams = _batch_scope_clause(db, batch_id, alias="d")
+        n = db.execute(
+            f"""SELECT COUNT(*) AS n FROM knowledge_file_queue q
+                 JOIN knowledge_collection_documents d
+                   ON d.document_id = q.document_id
+                  AND d.collection_id = q.collection_id
+                WHERE q.collection_id = ? AND q.status = 'failed'{dclause}""",
+            (b["collection_id"], *dparams)).fetchone()["n"]
+        if n == 0:
+            return jsonify({"ok": False, "code": "no_failed_files",
+                            "message": "فایلی با وضعیت ناموفق برای این بچ وجود ندارد",
+                            "failed": 0}), 409
+        job, created = _submit_job(
+            db, f"process_batch_retry:{batch_id}", "process_batch_retry",
+            b["collection_id"], batch_id, total=n,
+            idempotency_key=f"batch_retry:{batch_id}", force_retry=True)
+        return jsonify({"ok": True, "job": job, "files_queued": n,
+                        "resubmitted": not created}), (202 if created else 200)
 
     @app.route("/api/knowledge/queue/summary", methods=["GET"])
     @require_auth
