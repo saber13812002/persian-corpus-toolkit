@@ -1,6 +1,0 @@
-status=OK checked=3 blocked=0 live_also_at_cap=3 max_checks=3
-  idx=3036 http=200 live_len=2000 status=at_cap section='تفسیر تسنیم جلد (12)'
-  idx=50503 http=200 live_len=2000 status=at_cap section='تفسیر تسنیم جلد (51)'
-  idx=50614 http=200 live_len=2000 status=at_cap section='تفسیر تسنیم جلد (52)'
-at_cap page ids (first 10):
-report top keys: ['affected_pages', 'by_volume', 'cap', 'census', 'content_sha256', 'contract', 'generated_at', 'live_recheck', 'mission', 'source', 'summary_fa']

@@ -1,8 +1,0 @@
-=== BUILD CORPUS ===
-version        : v0001
-pages          : 45844
-volumes        : 6
-content sha256 : ee87686ac49ce9c08a4a492f4f54c23ace571bb8f048aa8a0a863bece3d542d8
-build dir      : data/tasnim/pcm20_4\corpus\builds\v0001
-validate       : PASS
-DONE.

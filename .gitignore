@@ -36,3 +36,7 @@ backend/wf-out/
 corpus/books/
 *.docx
 *.doc
+
+# Scratch/probe files از سشن‌های PCM-20.4+ (هرگز track نشود — hygiene PCM-20.6)
+.tmp_*
+_tmp_*

@@ -1,9 +1,0 @@
-=== BUILD DATASET ===
-pct            : 10%
-version        : v0002
-selected pages : 2969
-corpus         : v0001
-content sha256 : 11ab83ce8cef4d096f8cddd315a3ec0a37080b16d14ea862f301de01c56ff6d5
-out dir        : data/tasnim/pcm20_4\datasets\10pct\v0002
-  vol 56     pages=29689 selected=2969  coverage=10.0%
-DONE.

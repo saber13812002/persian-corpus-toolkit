@@ -1,9 +1,0 @@
-vol 1    candidates=1      with_next_text=1
-vol 12   candidates=4      with_next_text=4
-vol 47   candidates=2001   with_next_text=2001
-vol 56   candidates=7212   with_next_text=7212
-vol 80   candidates=171    with_next_text=171
-vol None candidates=1347   with_next_text=1347
-picked n=37
-picked vol census: {1: 1, 12: 4, 47: 8, 56: 8, 80: 8, None: 8}
-picked missing next text: []
