@@ -218,6 +218,32 @@ def ensure_knowledge_schema(db):
         created_at     TEXT NOT NULL,
         updated_at     TEXT NOT NULL
     );
+    -- PCM-20.9 Stage A — persisted batch import plan (one row per planned
+    -- file). This is what makes multi-import reliable: the plan survives
+    -- the HTTP response, and the per-file upload endpoint
+    -- (POST /import/batches/<id>/files) matches real uploads against it by
+    -- SHA-256. Statuses: pending / uploaded / duplicate / invalid_* /
+    -- size_mismatch.
+    CREATE TABLE IF NOT EXISTS knowledge_batch_files (
+        id            INTEGER PRIMARY KEY AUTOINCREMENT,
+        batch_id      TEXT NOT NULL,
+        seq           INTEGER NOT NULL,
+        file_name     TEXT NOT NULL,
+        sha256        TEXT,
+        size_bytes    INTEGER NOT NULL DEFAULT 0,
+        status        TEXT NOT NULL DEFAULT 'pending',
+        document_id   TEXT,
+        error         TEXT,
+        created_at    TEXT NOT NULL,
+        updated_at    TEXT NOT NULL,
+        UNIQUE (batch_id, seq)
+    );
+    CREATE INDEX IF NOT EXISTS idx_kbf_batch
+        ON knowledge_batch_files(batch_id);
+    CREATE INDEX IF NOT EXISTS idx_kbf_sha
+        ON knowledge_batch_files(batch_id, sha256);
+    -- NOTE: idx on knowledge_collection_documents(batch_id) is created in
+    -- _ensure_document_columns, AFTER the batch_id column itself exists.
     -- NOTE: scope columns use NOT NULL sentinels ('__global__' / '') because
     -- SQLite UNIQUE constraints disallow expressions and treat NULLs as
     -- distinct — sentinels make dedup exact and queryable.
@@ -534,12 +560,20 @@ def _ensure_document_columns(db):
         ("parser_version", "TEXT"),
         ("norm_version", "TEXT"),
         ("out_dir", "TEXT"),
+        # PCM-20.9 Stage A — which import batch created this document
+        # (NULL = single upload). Additive: pre-existing rows stay NULL.
+        ("batch_id", "TEXT"),
     ]
     for col, decl in wanted:
         if col not in existing:
             db.execute(
                 f"ALTER TABLE knowledge_collection_documents ADD COLUMN {col} {decl}"
             )
+    # PCM-20.9 Stage A — index for batch-scoped queries (only valid once the
+    # batch_id column exists, hence here and not in the CREATE script).
+    db.execute(
+        "CREATE INDEX IF NOT EXISTS idx_kcol_documents_batch "
+        "ON knowledge_collection_documents(batch_id)")
     # Backfill document_id for pre-14B rows that may have had null/dup ids.
     for r in db.execute(
             "SELECT id, document_id, sha256 FROM knowledge_collection_documents "
@@ -669,9 +703,9 @@ def _doc_row(db, doc_id):
     return db.execute(
         """SELECT id, document_id, collection_id, file_name, relative_path,
                   sha256, file_size, file_id, work_id, edition_id, volume_id,
-                  status, blocks_count, chars_count, quality_status,
-                  quality_score, parser_version, norm_version, out_dir, error,
-                  created_at, updated_at
+                  status, batch_id, blocks_count, chars_count,
+                  quality_status, quality_score, parser_version, norm_version,
+                  out_dir, error, created_at, updated_at
            FROM knowledge_collection_documents WHERE document_id = ?""",
         (doc_id,),
     ).fetchone()
@@ -889,18 +923,51 @@ def _queue_finish(conn, collection_id, file_key, status, error=None,
     conn.commit()
 
 
+def _batch_scope_clause(conn, batch_id, alias=None):
+    """PCM-20.9 Stage A — scoping clause for document/queue queries.
+
+    Returns (extra_where_sql, params) to append to a
+    knowledge_collection_documents query (optionally under `alias`):
+
+    - Batch WITH plan rows (knowledge_batch_files): scope to documents
+      belonging to this batch (documents.batch_id = batch_id, set by the
+      per-file upload endpoint) OR documents referenced by a plan row
+      (pre-20.9 flow: files single-uploaded before the batch was planned,
+      plan flags them 'duplicate' with existing_document_id).
+    - Batch WITHOUT plan rows (pre-20.9 legacy batch, plan not persisted):
+      returns ("", []) -> whole-collection semantics, as the original
+      PCM-15 flow relied on.
+    """
+    row = conn.execute(
+        "SELECT COUNT(*) AS n FROM knowledge_batch_files WHERE batch_id=?",
+        (batch_id,)).fetchone()
+    if not (row and row["n"]):
+        return "", []
+    col = f"{alias}." if alias else ""
+    return (f" AND ({col}batch_id = ? OR {col}document_id IN "
+            f"(SELECT document_id FROM knowledge_batch_files "
+            f" WHERE batch_id = ? AND document_id IS NOT NULL))",
+            [batch_id, batch_id])
+
+
 def _queue_ensure_rows(conn, collection_id, batch_id):
     """Ensure one pending queue row per planned file of the batch.
 
     The queue is keyed by the deterministic Word Factory file_id
     (f-<sha8> == f-<sha256[:8]>), so re-planning / re-runs converge on the
     same row (no duplicates).
+
+    PCM-20.9 Stage A: rows are scoped to the batch's own documents when the
+    batch has plan rows (see _batch_scope_clause). Legacy batches (pre-20.9,
+    plan not persisted) keep the historical whole-collection behaviour —
+    this is what the pre-20.9 PCM-15 flow relied on.
     """
+    clause, params = _batch_scope_clause(conn, batch_id)
     docs = conn.execute(
-        """SELECT document_id, file_name, sha256 FROM
+        f"""SELECT document_id, file_name, sha256 FROM
              knowledge_collection_documents
-          WHERE collection_id=? AND status IN ('uploaded','failed')
-          ORDER BY id""", (collection_id,)).fetchall()
+           WHERE collection_id=? AND status IN ('uploaded','failed'){clause}
+           ORDER BY id""", (collection_id, *params)).fetchall()
     for d in docs:
         file_key = "f-" + d["sha256"][:8]
         now = _now()
@@ -1049,10 +1116,14 @@ def _job_kind_process_batch(conn, job_id):
     scope = queue_scope(batch_id)
 
     _queue_ensure_rows(conn, coll, batch_id)
+    # PCM-20.9 Stage A: batch-scoped processing (see _batch_scope_clause);
+    # legacy pre-20.9 batches keep whole-collection semantics.
+    clause, params = _batch_scope_clause(conn, batch_id)
     docs = conn.execute(
-        """SELECT document_id, file_name, sha256 FROM knowledge_collection_documents
-           WHERE collection_id = ? AND status IN ('uploaded','failed')
-           ORDER BY id""", (coll,)).fetchall()
+        f"""SELECT document_id, file_name, sha256 FROM
+             knowledge_collection_documents
+            WHERE collection_id = ? AND status IN ('uploaded','failed'){clause}
+            ORDER BY id""", (coll, *params)).fetchall()
     total = len(docs)
     done = 0
     paused_now = _now()
@@ -1096,14 +1167,15 @@ def _job_kind_process_batch(conn, job_id):
         done += 1
         _job_progress(conn, job_id, done, total,
                       f"document {d['document_id']}")
-    # batch tally
+    # batch tally (PCM-20.9 Stage A: same scope as the docs processed above)
+    clause, params = _batch_scope_clause(conn, batch_id)
     t = conn.execute(
-        """SELECT
+        f"""SELECT
              SUM(CASE WHEN status IN ('parsed','needs_review','approved','indexed')
                  THEN 1 ELSE 0 END) AS ok,
              SUM(CASE WHEN status='failed' THEN 1 ELSE 0 END) AS bad
-           FROM knowledge_collection_documents WHERE collection_id=?""",
-        (coll,)).fetchone()
+            FROM knowledge_collection_documents
+            WHERE collection_id=?{clause}""", (coll, *params)).fetchone()
     conn.execute(
         "UPDATE knowledge_import_batches SET processed_count=?, failed_count=?, "
         "status='done', updated_at=? WHERE batch_id=?",
@@ -1729,22 +1801,29 @@ def register_knowledge_routes(app, get_db):
             (cid + now + json.dumps(files, sort_keys=True)).encode("utf-8")
         ).hexdigest()[:8]
         plan = []
+        plan_rows = []  # PCM-20.9 Stage A — persisted plan (knowledge_batch_files)
         for i, f in enumerate(files):
             if not isinstance(f, dict):
                 plan.append({"index": i, "status": "invalid",
                              "reason": "entry not an object"})
+                plan_rows.append((i, f"entry-{i}", None, 0, "invalid",
+                                  None, "entry not an object"))
                 continue
             name = os.path.basename(str(f.get("name") or "").replace("\\", "/"))
             sha = str(f.get("sha256") or "").strip().lower()
             size = int(f.get("size") or 0)
             entry = {"index": i, "name": name, "sha256": sha or None,
                      "size": size}
+            row_doc, row_err = None, None
             if not name or os.path.splitext(name)[1].lower() != ".docx":
                 entry["status"] = "invalid_extension"
+                row_err = "invalid extension (only .docx)"
             elif not re.match(r"^[0-9a-f]{64}$", sha):
                 entry["status"] = "invalid_sha"
+                row_err = "invalid SHA-256"
             elif size == 0 or size > MAX_UPLOAD_BYTES:
                 entry["status"] = "invalid_size"
+                row_err = f"invalid size ({size})"
             else:
                 known = db.execute(
                     "SELECT document_id FROM knowledge_collection_documents "
@@ -1753,9 +1832,12 @@ def register_knowledge_routes(app, get_db):
                 if known:
                     entry["status"] = "duplicate"
                     entry["existing_document_id"] = known["document_id"]
+                    row_doc = known["document_id"]
                 else:
                     entry["status"] = "pending"
             plan.append(entry)
+            plan_rows.append((i, name or f"entry-{i}", sha or None, size,
+                              entry["status"], row_doc, row_err))
 
         pending = sum(1 for e in plan if e["status"] == "pending")
         db.execute(
@@ -1766,6 +1848,15 @@ def register_knowledge_routes(app, get_db):
             (batch_id, cid,
              _clean_name(data.get("folder_name")) or None,
              len(plan), now, now))
+        # PCM-20.9 Stage A — persist the plan so the per-file upload
+        # endpoint can match real uploads against it (reliability).
+        for (seq, nm, sha, sz, st, doc, err) in plan_rows:
+            db.execute(
+                """INSERT INTO knowledge_batch_files
+                   (batch_id, seq, file_name, sha256, size_bytes, status,
+                    document_id, error, created_at, updated_at)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                (batch_id, seq, nm, sha, sz, st, doc, err, now, now))
         db.commit()
         return jsonify({
             "ok": True,
@@ -1780,6 +1871,147 @@ def register_knowledge_routes(app, get_db):
                                if e["status"].startswith("invalid")),
             },
         }), 201
+
+    @app.route("/api/knowledge/import/batches/<batch_id>/files",
+               methods=["POST"])
+    @require_auth
+    def knowledge_batch_upload_file(batch_id):
+        """PCM-20.9 Stage A — the REAL file upload for a planned batch.
+
+        Multipart upload of one DOCX. The server computes SHA-256, matches
+        it against the persisted plan (knowledge_batch_files), stores the
+        original (same layout as the single upload) and creates the
+        document row linked to this batch.
+
+        Per-file outcomes (idempotent, retryable):
+          uploaded        → new document row (status 'uploaded'), 201
+          200 duplicate_upload → already uploaded, same document returned
+          duplicate       → 409, same SHA already in the collection
+          size_mismatch   → 400, SHA in plan but size differs
+          not_in_plan     → 400, SHA is not part of this batch's plan
+        """
+        db = get_db()
+        ensure_knowledge_schema(db)
+        _recover_interrupted(db)
+        b = db.execute(
+            "SELECT * FROM knowledge_import_batches WHERE batch_id=?",
+            (batch_id,)).fetchone()
+        if not b:
+            return jsonify({"ok": False, "message": "بچ پیدا نشد"}), 404
+        f = request.files.get("file")
+        if f is None:
+            return jsonify({"ok": False, "field": "file",
+                            "message": "فایلی آپلود نشده است"}), 400
+        try:
+            name, ext = _validate_upload_file(f)
+        except ValueError as e:
+            return jsonify({"ok": False, "message": str(e),
+                            "field": "file"}), 400
+
+        import tempfile
+        tmp = None
+        size = 0
+        h = hashlib.sha256()
+        try:
+            fd, tmp = tempfile.mkstemp(suffix=ext, prefix="kbatch_")
+            with os.fdopen(fd, "wb") as out:
+                while True:
+                    chunk = f.stream.read(1 << 20)
+                    if not chunk:
+                        break
+                    size += len(chunk)
+                    if size > MAX_UPLOAD_BYTES:
+                        raise ValueError(
+                            f"فایل بزرگ‌تر از ۵۰ مگابایت است ({size} بایت)")
+                    out.write(chunk)
+                    h.update(chunk)
+            if size == 0:
+                raise ValueError("فایل خالی (0 بایت) است")
+            sha = h.hexdigest()
+        except ValueError as e:
+            if tmp and os.path.exists(tmp):
+                os.remove(tmp)
+            return jsonify({"ok": False, "message": str(e),
+                            "field": "file"}), 400
+        except Exception as e:  # noqa: BLE001
+            if tmp and os.path.exists(tmp):
+                os.remove(tmp)
+            return jsonify({"ok": False,
+                            "message": f"خواندن فایل ناموفق بود: {e}",
+                            "field": "file"}), 400
+
+        cid = b["collection_id"]
+        now = _now()
+        planned = db.execute(
+            "SELECT id, file_name, sha256, size_bytes, status, document_id "
+            "FROM knowledge_batch_files WHERE batch_id=? ORDER BY seq",
+            (batch_id,)).fetchall()
+        match = next((p for p in planned if p["sha256"] == sha), None)
+        if match is None:
+            os.remove(tmp)
+            return jsonify({"ok": False, "field": "file",
+                            "code": "not_in_plan",
+                            "message": "این فایل (SHA-256) در پلن ثبت‌شده این بچ نیست",
+                            "sha256": sha}), 400
+        if match["size_bytes"] != size:
+            os.remove(tmp)
+            db.execute(
+                "UPDATE knowledge_batch_files SET status='size_mismatch', "
+                "error=?, updated_at=? WHERE id=?",
+                (f"size mismatch: planned {match['size_bytes']} got {size}",
+                 now, match["id"]))
+            db.commit()
+            return jsonify({"ok": False, "field": "file",
+                            "code": "size_mismatch",
+                            "message": "حجم فایل با پلن مطابقت ندارد",
+                            "planned_size": match["size_bytes"],
+                            "actual_size": size, "sha256": sha}), 400
+        if match["status"] == "uploaded" and match["document_id"]:
+            # idempotent retry of an already-uploaded entry
+            os.remove(tmp)
+            doc = _doc_row(db, match["document_id"])
+            return jsonify({"ok": True, "status": "uploaded",
+                            "duplicate_upload": True,
+                            "document": dict(doc) if doc else None,
+                            "sha256": sha})
+        dup = db.execute(
+            "SELECT document_id FROM knowledge_collection_documents "
+            "WHERE collection_id=? AND sha256=?", (cid, sha)).fetchone()
+        if dup:
+            os.remove(tmp)
+            db.execute(
+                "UPDATE knowledge_batch_files SET status='duplicate', "
+                "document_id=?, error=NULL, updated_at=? WHERE id=?",
+                (dup["document_id"], now, match["id"]))
+            db.commit()
+            return jsonify({"ok": False, "code": "duplicate",
+                            "message": "این فایل (همان SHA-256) قبلا‌ در این کالکشن ثبت شده",
+                            "existing_document_id": dup["document_id"],
+                            "sha256": sha}), 409
+        file_id = "f-" + sha[:8]
+        dst = _stored_file_path(sha, file_id, ext)
+        os.makedirs(os.path.dirname(dst), exist_ok=True)
+        if os.path.exists(dst):
+            os.remove(tmp)  # content already stored (same sha) — reuse
+        else:
+            shutil.move(tmp, dst)
+        doc_id = _doc_id(sha)
+        db.execute(
+            """INSERT INTO knowledge_collection_documents
+               (collection_id, document_id, file_name, relative_path, sha256,
+                file_size, file_id, status, batch_id, created_at, updated_at)
+               VALUES (?, ?, ?, NULL, ?, ?, ?, 'uploaded', ?, ?, ?)""",
+            (cid, doc_id, match["file_name"] or name, sha, size, file_id,
+             batch_id, now, now))
+        db.execute(
+            "UPDATE knowledge_batch_files SET status='uploaded', "
+            "document_id=?, error=NULL, updated_at=? WHERE id=?",
+            (doc_id, now, match["id"]))
+        db.commit()
+        doc = _doc_row(db, doc_id)
+        return jsonify({"ok": True, "status": "uploaded",
+                        "document": dict(doc) if doc else None,
+                        "sha256": sha}), 201
 
     @app.route("/api/knowledge/import/batches", methods=["GET"])
     @require_auth
@@ -1851,28 +2083,71 @@ def register_knowledge_routes(app, get_db):
             (batch_id,)).fetchone()
         if not b:
             return jsonify({"ok": False, "message": "بچ پیدا نشد"}), 404
-        docs = [
+        # PCM-20.9 Stage A — the persisted plan (per-file status).
+        plan_files = [
             dict(r) for r in db.execute(
-                "SELECT id, document_id, file_name, relative_path, sha256, "
-                "file_size, status, blocks_count, chars_count, quality_status, "
-                "quality_score, error, created_at, updated_at "
-                "FROM knowledge_collection_documents "
-                "WHERE collection_id=? ORDER BY id", (b["collection_id"],))]
+                "SELECT id, seq, file_name, sha256, size_bytes, status, "
+                "document_id, error, updated_at FROM knowledge_batch_files "
+                "WHERE batch_id=? ORDER BY seq", (batch_id,))]
+        uploaded = sum(1 for p in plan_files if p["status"] == "uploaded")
+        # PCM-20.9 Stage A — documents/queue scoped to THIS batch (legacy
+        # batches without plan rows fall back to the whole collection).
+        clause, params = _batch_scope_clause(db, batch_id)
+        qclause, qparams = _batch_scope_clause(db, batch_id, alias="d")
+        if clause:
+            docs = [
+                dict(r) for r in db.execute(
+                    f"SELECT id, document_id, file_name, relative_path, "
+                    f"sha256, file_size, status, blocks_count, chars_count, "
+                    f"quality_status, quality_score, error, created_at, "
+                    f"updated_at FROM knowledge_collection_documents "
+                    f"WHERE collection_id=?{clause} ORDER BY id",
+                    (b["collection_id"], *params))]
+            queue = [dict(r) for r in db.execute(
+                f"SELECT q.file_key, q.document_id, q.file_name, q.sha256, "
+                f"q.status, q.stage, q.attempts, q.last_error, "
+                f"q.stage_started_at, q.finished_at, q.duration_ms, "
+                f"q.out_dir, q.created_at, q.updated_at "
+                f"FROM knowledge_file_queue q JOIN "
+                f"knowledge_collection_documents d ON "
+                f"d.document_id = q.document_id AND "
+                f"d.collection_id = q.collection_id "
+                f"WHERE q.collection_id=?{qclause} ORDER BY q.created_at",
+                (b["collection_id"], *qparams))]
+        else:
+            docs = [
+                dict(r) for r in db.execute(
+                    "SELECT id, document_id, file_name, relative_path, "
+                    "sha256, file_size, status, blocks_count, chars_count, "
+                    "quality_status, quality_score, error, created_at, "
+                    "updated_at FROM knowledge_collection_documents "
+                    "WHERE collection_id=? ORDER BY id",
+                    (b["collection_id"],))]
+            queue = [dict(r) for r in db.execute(
+                "SELECT file_key, document_id, file_name, sha256, status, "
+                "stage, attempts, last_error, stage_started_at, finished_at, "
+                "duration_ms, out_dir, created_at, updated_at "
+                "FROM knowledge_file_queue WHERE collection_id=? "
+                "ORDER BY created_at", (b["collection_id"],))]
         jobs = [dict(r) for r in db.execute(
             "SELECT job_id, kind, status, stage, progress, total, error, "
             "created_at, updated_at, completed_at FROM knowledge_jobs "
             "WHERE batch_id=? ORDER BY created_at DESC", (batch_id,))]
-        # PCM-15 — per-file queue rows (stage/attempts/last-error/timings)
-        queue = [dict(r) for r in db.execute(
-            "SELECT file_key, document_id, file_name, sha256, status, stage, "
-            "attempts, last_error, stage_started_at, finished_at, duration_ms, "
-            "out_dir, created_at, updated_at FROM knowledge_file_queue "
-            "WHERE collection_id=? ORDER BY created_at",
-            (b["collection_id"],))]
         ctrl = db.execute(
             "SELECT paused, updated_at FROM knowledge_queue_control WHERE scope=?",
             (queue_scope(batch_id),)).fetchone()
         return jsonify({"ok": True, "batch": dict(b),
+                        "plan_files": plan_files,
+                        "upload_summary": {
+                            "total": len(plan_files),
+                            "uploaded": uploaded,
+                            "pending": sum(1 for p in plan_files
+                                           if p["status"] == "pending"),
+                            "duplicate": sum(1 for p in plan_files
+                                             if p["status"] == "duplicate"),
+                            "invalid": sum(1 for p in plan_files
+                                           if p["status"].startswith("invalid")),
+                        },
                         "documents": docs, "jobs": jobs,
                         "queue": queue,
                         "paused": bool(ctrl and ctrl["paused"]),
@@ -1890,10 +2165,25 @@ def register_knowledge_routes(app, get_db):
             (batch_id,)).fetchone()
         if not b:
             return jsonify({"ok": False, "message": "بچ پیدا نشد"}), 404
+        # PCM-20.9 Stage A — batch-scoped count (see _batch_scope_clause);
+        # legacy pre-20.9 batches keep the collection-wide count.
+        clause, params = _batch_scope_clause(db, batch_id)
         n = db.execute(
-            "SELECT COUNT(*) AS n FROM knowledge_collection_documents "
-            "WHERE collection_id=? AND status IN ('uploaded','failed')",
-            (b["collection_id"],)).fetchone()["n"]
+            f"SELECT COUNT(*) AS n FROM knowledge_collection_documents "
+            f"WHERE collection_id=? AND status IN ('uploaded','failed'){clause}",
+            (b["collection_id"], *params)).fetchone()["n"]
+        planned = db.execute(
+            "SELECT COUNT(*) AS n FROM knowledge_batch_files "
+            "WHERE batch_id=?", (batch_id,)).fetchone()["n"]
+        if planned and n == 0:
+            up = db.execute(
+                "SELECT COUNT(*) AS n FROM knowledge_batch_files "
+                "WHERE batch_id=? AND status='uploaded'",
+                (batch_id,)).fetchone()["n"]
+            if up == 0:
+                return jsonify({"ok": False, "code": "no_files_uploaded",
+                                "message": "هنوز هیچ فایلی برای این بچ آپلود نشده؛ ابتدا فایل‌ها را آپلود کنید",
+                                "uploaded": 0, "planned": planned}), 409
         db.execute("UPDATE knowledge_import_batches SET status='processing', "
                    "updated_at=? WHERE batch_id=?", (_now(), batch_id))
         db.commit()

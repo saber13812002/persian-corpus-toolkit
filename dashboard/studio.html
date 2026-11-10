@@ -445,7 +445,7 @@
     <div id="importPlan" style="max-height:280px;overflow-y:auto"></div>
     <div class="form-err" id="importErr" role="alert"></div>
     <div class="form-actions">
-      <button type="button" class="btn btn-primary" id="importConfirm" disabled>ثبت برنامه‌ی واردسازی</button>
+      <button type="button" class="btn btn-primary" id="importConfirm" disabled>ثبت و آپلود فایل‌ها</button>
       <button type="button" class="btn btn-ghost" id="importCancel">انصراف</button>
     </div>
   </div>
@@ -999,7 +999,8 @@ function sha256Hex(file) {
   });
 }
 
-let importPlan = null;
+let importPlan = null;      // rows: {file, name, size, sha256, status, error, serverStatus, upload}
+let importBusy = false;
 function openImportModal() {
   if (!state.activeId) { toast('اول یک کالکشن انتخاب کنید', 'err'); return; }
   $('importFileInput').value = '';
@@ -1009,10 +1010,35 @@ function openImportModal() {
   importPlan = null;
   $('importModal').classList.add('open');
 }
+function renderImportPlan(msg) {
+  if (!importPlan) { $('importPlan').innerHTML = ''; return; }
+  const n = (s) => importPlan.filter((r) => r.status === s).length;
+  const up = importPlan.filter((r) => r.upload === 'uploaded').length;
+  $('importPlan').innerHTML =
+    (msg ? '<div class="t2" style="color:var(--dim);font-size:12px;padding:8px">' + escHtml(msg) + '</div>' : '') +
+    '<div class="badge dim" style="margin-bottom:8px">جمع: ' + faNum(importPlan.length) +
+    ' · در انتظار: ' + faNum(n('pending')) +
+    ' · نامعتبر: ' + faNum(importPlan.length - n('pending')) +
+    (up ? ' · آپلودشده: ' + faNum(up) : '') + '</div>' +
+    '<table class="docs-table"><thead><tr><th>فایل</th><th>حجم</th><th>وضعیت</th><th>آپلود</th></tr></thead><tbody>' +
+    importPlan.map((e) => {
+      let upTxt = '—', upCls = '';
+      if (e.upload === 'uploading') { upTxt = 'در حال آپلود…'; upCls = 'info'; }
+      else if (e.upload === 'uploaded') { upTxt = 'ثبت شد'; upCls = 'ok'; }
+      else if (e.upload === 'duplicate') { upTxt = 'تکراری قبلی'; upCls = 'dim'; }
+      else if (e.upload === 'error') { upTxt = 'خطا'; upCls = 'err'; }
+      const st = e.serverStatus || e.status;
+      return '<tr><td>' + escHtml(e.name) +
+        (e.error ? '<div class="row-err">' + escHtml(e.error) + '</div>' : '') + '</td>' +
+        '<td>' + faNum(Math.round(e.size / 1024)) + ' KB</td>' +
+        '<td>' + escHtml(st) + '</td>' +
+        '<td class="' + upCls + '">' + escHtml(upTxt) + '</td></tr>';
+    }).join('') + '</tbody></table>';
+}
 async function computeImportPlan() {
   const files = Array.from($('importFileInput').files || []);
   $('importErr').textContent = '';
-  if (!files.length) { $('importPlan').innerHTML = ''; $('importConfirm').disabled = true; return; }
+  if (!files.length) { $('importPlan').innerHTML = ''; $('importConfirm').disabled = true; importPlan = null; return; }
   $('importPlan').innerHTML = '<div class="t2" style="color:var(--dim);font-size:12px;padding:8px">در حال محاسبهٔ SHA-256 فایل‌ها (روی مرورگر شما)…</div>';
   const rows = [];
   for (const f of files) {
@@ -1022,28 +1048,24 @@ async function computeImportPlan() {
     if (!/\.docx$/i.test(f.name)) { status = 'invalid_extension'; error = 'فقط DOCX مجاز است'; }
     else if (f.size === 0) { status = 'empty'; error = 'فایل خالی است'; }
     else if (!/^[0-9a-f]{64}$/.test(sha)) { status = 'invalid_sha'; error = 'SHA-256 محاسبه نشد'; }
-    rows.push({ name: f.name, size: f.size, sha256: sha, status, error });
+    rows.push({ file: f, name: f.name, size: f.size, sha256: sha,
+                status, error, serverStatus: null, upload: null });
   }
   importPlan = rows;
-  const n = (s) => rows.filter((r) => r.status === s).length;
-  $('importPlan').innerHTML =
-    '<div class="badge dim" style="margin-bottom:8px">جمع: ' + faNum(rows.length) +
-    ' · در انتظار: ' + faNum(n('pending')) +
-    ' · نامعتبر: ' + faNum(rows.length - n('pending')) + '</div>' +
-    '<div class="t2" style="color:var(--dim);font-size:11px;margin-bottom:8px">تکراری‌ها (SHA-256 تکراری) هنگام ثبت روی سرور شناسایی می‌شوند.</div>' +
-    '<table class="docs-table"><thead><tr><th>فایل</th><th>حجم</th><th>وضعیت</th></tr></thead><tbody>' +
-    rows.map((e) =>
-      '<tr><td>' + escHtml(e.name) +
-        (e.error ? '<div class="row-err">' + escHtml(e.error) + '</div>' : '') + '</td>' +
-      '<td>' + faNum(Math.round(e.size / 1024)) + ' KB</td>' +
-      '<td>' + escHtml(e.status) + '</td></tr>'
-    ).join('') + '</tbody></table>';
-  $('importConfirm').disabled = n('pending') === 0;
+  renderImportPlan('تکراری‌ها (SHA-256 تکراری) هنگام ثبت روی سرور شناسایی می‌شوند.');
+  $('importConfirm').disabled = rows.filter((r) => r.status === 'pending').length === 0;
 }
+/* PCM-20.9 Stage A — real upload: plan (JSON) -> per-file multipart upload,
+   server verifies SHA-256 against the persisted plan. Retry-safe: re-running
+   confirm on an interrupted batch re-uploads only the missing files. */
 async function confirmImport() {
-  if (!importPlan) return;
+  if (!importPlan || importBusy) return;
+  const pending = importPlan.filter((r) => r.status === 'pending');
+  if (!pending.length) return;
+  importBusy = true;
   $('importConfirm').disabled = true;
   try {
+    // 1) register the plan (idempotent by content hash of the file list)
     const j = await fetchAPI('/api/knowledge/import/batches', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -1052,16 +1074,56 @@ async function confirmImport() {
       }),
     });
     if (!j) return;
-    const s = j.summary;
+    const batchId = j.batch.batch_id;
+    // 2) server statuses (duplicate / invalid flagged here)
+    (j.plan || []).forEach((p, i) => {
+      if (importPlan[i]) importPlan[i].serverStatus = p.status;
+    });
+    // 3) upload the bytes of every plan entry the server left 'pending'
+    const toUpload = importPlan.filter((r) => (r.serverStatus || r.status) === 'pending');
+    let uploaded = 0, duplicated = 0, i = 0;
+    const errors = [];
+    for (const row of toUpload) {
+      i++;
+      row.upload = 'uploading';
+      renderImportPlan('آپلود فایل ' + i + ' از ' + toUpload.length + ' (بچ ' + batchId + ')…');
+      try {
+        const fd = new FormData();
+        fd.append('file', row.file, row.name);
+        const r = await fetch('/api/knowledge/import/batches/' + batchId + '/files', {
+          method: 'POST', credentials: 'same-origin', body: fd,
+        });
+        let body = {};
+        try { body = await r.json(); } catch (e) { /* non-JSON */ }
+        if (r.status === 201) { row.upload = 'uploaded'; uploaded++; }
+        else if (r.status === 200) { row.upload = 'duplicate'; duplicated++; }
+        else if (r.status === 409) { row.upload = 'duplicate'; duplicated++; }
+        else {
+          row.upload = 'error';
+          errors.push(row.name + ': ' + (body.message || 'HTTP ' + r.status));
+        }
+      } catch (e) {
+        row.upload = 'error';
+        errors.push(row.name + ': ' + e.message);
+      }
+      renderImportPlan('آپلود فایل ' + i + ' از ' + toUpload.length + ' (بچ ' + batchId + ')…');
+    }
     closeImportModal();
-    toast('برنامهٔ ' + j.batch.batch_id + ' ثبت شد: ' + faNum(s.pending) + ' در انتظار' +
-      (s.duplicate ? ' · ' + faNum(s.duplicate) + ' تکراری' : '') +
-      (s.invalid ? ' · ' + faNum(s.invalid) + ' نامعتبر' : ''));
+    const s = j.summary;
+    toast('بچ ' + batchId + ': ' + faNum(uploaded) + ' فایل آپلود و ثبت شد' +
+      (duplicated ? ' · ' + faNum(duplicated) + ' تکراری (قبلا در کالکشن)' : '') +
+      (s.invalid ? ' · ' + faNum(s.invalid) + ' نامعتبر' : '') +
+      (errors.length ? ' · ' + faNum(errors.length) + ' خطا' : ''),
+      errors.length ? 'err' : 'ok');
+    if (errors.length) toast('خطاهای آپلود: ' + errors.join(' | '), 'err');
     await Promise.all([renderDocs(), renderDetail()]);
+    loadQueue();
   } catch (e) {
     $('importErr').textContent = e.message;
   } finally {
-    $('importConfirm').disabled = false;
+    importBusy = false;
+    if (importPlan) $('importConfirm').disabled =
+      importPlan.filter((r) => r.status === 'pending').length === 0;
   }
 }
 function closeImportModal() { $('importModal').classList.remove('open'); }
