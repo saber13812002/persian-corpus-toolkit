@@ -707,5 +707,253 @@ class TestPF_B03_TransientRecovery(Base):
         self.assertEqual(r.get_json()["code"], "no_failed_files")
 
 
+class TestPF_C01_SchemaLifecycle(Base):
+    """PF-C01 — Stage C: schema version lifecycle.
+
+    Draft creation (default template) -> validate against REAL blocks
+    (honest counts from the collection's processed documents) -> approve
+    -> collection.schema_version points at it -> draft edits immutable
+    after approval; a second version is created as a new draft.
+    """
+
+    def test_lifecycle(self):
+        from factory._smoke_fixtures import make_docx
+        coll = self.make_collection()
+        tmp = tempfile.mkdtemp(prefix="pct-pf-c1-")
+        self.addCleanup(shutil.rmtree, tmp, ignore_errors=True)
+        paths = []
+        for i in range(2):
+            p = os.path.join(tmp, f"کتاب-{i}.docx")
+            make_docx(p, [
+                ("Normal", f"عنوان: کتاب {i}"),
+                ("Normal", "نویسنده: نویسنده نمونه"),
+                ("Heading 1", "فصل اول"),
+                ("Normal", f"متن فارسی کتاب شماره {i + 1}."),
+                ("Heading 1", "فصل دوم"),
+                ("Normal", "پایان کتاب."),
+            ])
+            paths.append(p)
+        for p in paths:
+            with open(p, "rb") as fh:
+                raw = fh.read()
+            r = self.client.post(
+                f"/api/knowledge/collections/{coll['id']}/documents",
+                data={"file": (io.BytesIO(raw), os.path.basename(p))},
+                content_type="multipart/form-data")
+            self.assertEqual(r.status_code, 201, r.get_data(as_text=True))
+        # process both documents so real blocks.jsonl exist
+        docs = self.client.get(
+            f"/api/knowledge/collections/{coll['id']}/documents").get_json()
+        for d in docs["documents"]:
+            r = self.client.post(
+                f"/api/knowledge/documents/{d['document_id']}/process")
+            self.assertIn(r.status_code, (200, 202), r.get_data(as_text=True))
+            job = self.wait_job(r.get_json()["job"]["job_id"])
+            self.assertEqual(job["status"], "succeeded", job)
+
+        cid = coll["collection_id"]
+
+        # empty schema list + approved null
+        r = self.client.get(f"/api/knowledge/collections/{cid}/schema")
+        self.assertEqual(r.status_code, 200, r.get_data(as_text=True))
+        j = r.get_json()
+        self.assertEqual(j["versions"], [])
+        self.assertIsNone(j["approved"])
+        self.assertTrue(j["default_fields"])
+
+        # create a draft (default template)
+        r = self.client.post(
+            f"/api/knowledge/collections/{cid}/schema",
+            json={"description": "اسکیم بلوک‌های پیکره"})
+        self.assertEqual(r.status_code, 201, r.get_data(as_text=True))
+        sv1 = r.get_json()["schema"]
+        self.assertEqual(sv1["version"], 1)
+        self.assertEqual(sv1["status"], "draft")
+        self.assertTrue(sv1["fields"])
+        names = [f["name"] for f in sv1["fields"]]
+        self.assertIn("block_id", names)
+        self.assertIn("normalized_text", names)
+
+        # validate BEFORE approve -> ok, honest block counts
+        r = self.client.post(
+            f"/api/knowledge/collections/{cid}/schema/{sv1['schema_id']}/validate")
+        self.assertEqual(r.status_code, 200, r.get_data(as_text=True))
+        rep = r.get_json()["report"]
+        self.assertTrue(rep["ok"], rep)
+        self.assertGreater(rep["documents_scanned"], 0)
+        self.assertGreater(rep["blocks_scanned"], 0)
+        self.assertTrue(rep["observed_block_types"])
+        # block_id is required -> coverage 1.0
+        bid = next(f for f in rep["fields"] if f["name"] == "block_id")
+        self.assertEqual(bid["coverage"], 1.0)
+
+        # approve
+        r = self.client.post(
+            f"/api/knowledge/collections/{cid}/schema/{sv1['schema_id']}/approve")
+        self.assertEqual(r.status_code, 200, r.get_data(as_text=True))
+        self.assertTrue(r.get_json()["ok"])
+
+        # collection now points at the approved schema
+        det = self.client.get(
+            f"/api/knowledge/collections/{coll['id']}").get_json()["collection"]
+        self.assertEqual(det["schema_version"], sv1["schema_id"])
+        self.assertIsNotNone(det["schema"])
+        self.assertEqual(det["schema"]["schema_id"], sv1["schema_id"])
+
+        # approved version is immutable
+        r = self.client.patch(
+            f"/api/knowledge/collections/{cid}/schema/{sv1['schema_id']}",
+            json={"description": "تغییر بعد از تأیید"})
+        self.assertEqual(r.status_code, 409, r.get_data(as_text=True))
+        self.assertEqual(r.get_json()["code"], "immutable")
+
+        # a second version is a new draft (version 2)
+        r = self.client.post(
+            f"/api/knowledge/collections/{cid}/schema", json={})
+        self.assertEqual(r.status_code, 201, r.get_data(as_text=True))
+        sv2 = r.get_json()["schema"]
+        self.assertEqual(sv2["version"], 2)
+        self.assertEqual(sv2["status"], "draft")
+
+        # list shows both, approved = sv1
+        r = self.client.get(f"/api/knowledge/collections/{cid}/schema")
+        j = r.get_json()
+        self.assertEqual(len(j["versions"]), 2)
+        self.assertEqual(j["versions"][0]["version"], 2)  # newest first
+        self.assertEqual(j["approved"]["schema_id"], sv1["schema_id"])
+
+
+class TestPF_C02_SchemaValidation(Base):
+    """PF-C02 — Stage C: field validation & honest failure reporting.
+
+    - invalid field definitions are rejected (bad name / bad type /
+      duplicate name / duplicate es_field / empty list);
+    - a required field that does NOT exist in any real block produces a
+      FAILING validation report, which blocks approval (409 not_validated);
+    - an unknown collection / unknown schema_id -> 404.
+    """
+
+    def test_field_validation_errors(self):
+        coll = self.make_collection()
+        cid = coll["collection_id"]
+        bad_sets = [
+            {"fields": []},
+            {"fields": [{"name": "Bad Name", "type": "string"}]},
+            {"fields": [{"name": "x", "type": "not-a-type"}]},
+            {"fields": [{"name": "x", "type": "string"},
+                        {"name": "x", "type": "integer"}]},
+            {"fields": [{"name": "x", "type": "string", "es_field": "e"},
+                        {"name": "y", "type": "string", "es_field": "e"}]},
+        ]
+        for body in bad_sets:
+            r = self.client.post(
+                f"/api/knowledge/collections/{cid}/schema", json=body)
+            self.assertEqual(r.status_code, 400, r.get_data(as_text=True))
+            self.assertTrue(r.get_json()["errors"])
+
+    def test_required_field_missing_blocks_approve(self):
+        from factory._smoke_fixtures import make_docx
+        coll = self.make_collection()
+        tmp = tempfile.mkdtemp(prefix="pct-pf-c2-")
+        self.addCleanup(shutil.rmtree, tmp, ignore_errors=True)
+        p = os.path.join(tmp, "کتاب-تک.docx")
+        make_docx(p, [
+            ("Normal", "عنوان: کتاب تک"),
+            ("Heading 1", "فصل اول"),
+            ("Normal", "متن فارسی کتاب."),
+        ])
+        with open(p, "rb") as fh:
+            raw = fh.read()
+        r = self.client.post(
+            f"/api/knowledge/collections/{coll['id']}/documents",
+            data={"file": (io.BytesIO(raw), os.path.basename(p))},
+            content_type="multipart/form-data")
+        self.assertEqual(r.status_code, 201, r.get_data(as_text=True))
+        doc_id = r.get_json()["document"]["document_id"]
+        r = self.client.post(
+            f"/api/knowledge/documents/{doc_id}/process")
+        self.assertIn(r.status_code, (200, 202), r.get_data(as_text=True))
+        self.wait_job(r.get_json()["job"]["job_id"])
+
+        cid = coll["collection_id"]
+        # a custom schema where a REQUIRED field does not exist in blocks
+        fields = [
+            {"name": "block_id", "type": "string", "required": True,
+             "es_field": "block_id"},
+            {"name": "page", "type": "integer", "required": True,
+             "es_field": "page"},
+        ]
+        r = self.client.post(
+            f"/api/knowledge/collections/{cid}/schema",
+            json={"fields": fields, "description": "اسکیم با فیلد غلط"})
+        self.assertEqual(r.status_code, 201, r.get_data(as_text=True))
+        sv = r.get_json()["schema"]
+
+        # validation must FAIL: page is always null in docx -> required missing
+        r = self.client.post(
+            f"/api/knowledge/collections/{cid}/schema/{sv['schema_id']}/validate")
+        self.assertEqual(r.status_code, 200, r.get_data(as_text=True))
+        rep = r.get_json()["report"]
+        self.assertFalse(rep["ok"], rep)
+        self.assertTrue(any("page" in e for e in rep["errors"]))
+        page = next(f for f in rep["fields"] if f["name"] == "page")
+        self.assertEqual(page["present"], 0)
+
+        # approval is blocked by the failing report
+        r = self.client.post(
+            f"/api/knowledge/collections/{cid}/schema/{sv['schema_id']}/approve")
+        self.assertEqual(r.status_code, 409, r.get_data(as_text=True))
+        self.assertEqual(r.get_json()["code"], "not_validated")
+
+    def test_unknown_collection_and_schema_404(self):
+        r = self.client.get("/api/knowledge/collections/c-00000000/schema")
+        self.assertEqual(r.status_code, 404, r.get_data(as_text=True))
+        coll = self.make_collection()
+        r = self.client.get(
+            f"/api/knowledge/collections/{coll['collection_id']}"
+            "/schema/sv-0000")
+        self.assertEqual(r.status_code, 404, r.get_data(as_text=True))
+
+
+class TestPF_C03_SchemaDraftEdit(Base):
+    """PF-C03 — Stage C: a DRAFT version can be edited (description and
+    fields are re-validated); an invalid edit is rejected and leaves the
+    draft unchanged."""
+
+    def test_draft_edit_and_reject(self):
+        coll = self.make_collection()
+        cid = coll["collection_id"]
+        r = self.client.post(
+            f"/api/knowledge/collections/{cid}/schema",
+            json={"description": "پیش‌نویس"})
+        sv = r.get_json()["schema"]
+
+        # edit description + fields (valid)
+        new_fields = [
+            {"name": "block_id", "type": "string", "required": True,
+             "es_field": "block_id"},
+            {"name": "raw_text", "type": "text", "required": True},
+        ]
+        r = self.client.patch(
+            f"/api/knowledge/collections/{cid}/schema/{sv['schema_id']}",
+            json={"description": "ویرایش‌شده", "fields": new_fields})
+        self.assertEqual(r.status_code, 200, r.get_data(as_text=True))
+        upd = r.get_json()["schema"]
+        self.assertEqual(upd["description"], "ویرایش‌شده")
+        self.assertEqual(len(upd["fields"]), 2)
+        self.assertEqual(upd["status"], "draft")
+
+        # invalid edit rejected (400) and the draft keeps the prior fields
+        r = self.client.patch(
+            f"/api/knowledge/collections/{cid}/schema/{sv['schema_id']}",
+            json={"fields": [{"name": "bad name", "type": "string"}]})
+        self.assertEqual(r.status_code, 400, r.get_data(as_text=True))
+        r = self.client.get(
+            f"/api/knowledge/collections/{cid}/schema/{sv['schema_id']}")
+        kept = r.get_json()["schema"]
+        self.assertEqual(len(kept["fields"]), 2)
+        self.assertEqual(kept["description"], "ویرایش‌شده")
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

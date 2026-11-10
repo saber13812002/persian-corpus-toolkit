@@ -367,6 +367,27 @@ def ensure_knowledge_schema(db):
         paused       INTEGER NOT NULL DEFAULT 0,
         updated_at   TEXT NOT NULL
     );
+    -- PCM-20.9 Stage C — corpus schema versions (immutable design & mapping
+    -- of the per-block document schema). A version is created as a draft
+    -- (status='draft'), validated against the REAL blocks.jsonl of the
+    -- collection's processed documents, and then approved (status='approved',
+    -- approved_at set). Once approved a version's fields JSON is never
+    -- modified — fixes mean a NEW version (immutable versioning).
+    CREATE TABLE IF NOT EXISTS knowledge_schema_versions (
+        schema_id    TEXT PRIMARY KEY,        -- sv-<n> per collection
+        collection_id TEXT NOT NULL,
+        version      INTEGER NOT NULL,        -- 1, 2, 3, ... per collection
+        status       TEXT NOT NULL DEFAULT 'draft',  -- draft/approved
+        description  TEXT,
+        fields       TEXT NOT NULL,           -- JSON: list of field definitions
+        validation   TEXT,                    -- JSON: last validation report
+        approved_at  TEXT,
+        created_at   TEXT NOT NULL,
+        updated_at   TEXT NOT NULL,
+        UNIQUE (collection_id, version)
+    );
+    CREATE INDEX IF NOT EXISTS idx_ksv_coll
+        ON knowledge_schema_versions(collection_id, version DESC);
     """)
     db.commit()
     _ensure_document_columns(db)
@@ -931,6 +952,237 @@ def _queue_finish(conn, collection_id, file_key, status, error=None,
     conn.commit()
 
 
+SCHEMA_FIELD_TYPES = ("string", "text", "integer", "float", "boolean", "keyword")
+
+
+def _default_schema_fields():
+    """The corpus block schema shipped as the default draft (PCM-20.9 Stage C).
+
+    Mirrors the Word Factory unified block record (blocks.jsonl):
+    block_id, block_index, type, raw_text, normalized_text, norm_version,
+    style, parent_block_id, position, source_ref, page, content_hash,
+    table_rows, ref_id, warnings.
+    """
+    def f(name, ftype, desc="", es_field=None, required=False, searchable=True):
+        d = {"name": name, "type": ftype, "description": desc,
+             "required": required, "searchable": searchable}
+        if es_field:
+            d["es_field"] = es_field
+        return d
+    return [
+        f("block_id", "string", "شناسهٔ قطعی بلوک (b<index>:<type>)",
+          "block_id", True, True),
+        f("block_index", "integer", "شمارهٔ ترتیبی بلوک در سند",
+          "block_index", True, True),
+        f("type", "keyword", "نوع بلوک: heading/paragraph/table/footnote/endnote",
+          "type", True, True),
+        f("raw_text", "text", "متن خام بلوک", "raw_text", True, True),
+        f("normalized_text", "text", "متن نرمال‌شده (نسخهٔ norm)",
+          "normalized_text", True, True),
+        f("norm_version", "string", "نسخهٔ سیاست نرمال‌سازی", None, False, False),
+        f("content_hash", "string", "هش محتوای نرمال‌شده (dedup)",
+          "content_hash", False, False),
+        f("style", "string", "استایل docx (Heading1, Normal, ...)", "style",
+          False, True),
+        f("heading_level", "integer", "سطح تیتر (فقط برای بلوک‌های تیتر)",
+          "heading_level", False, True),
+        f("parent_block_id", "string", "بلوک والد در سلسله‌مراتب تیترها",
+          "parent_block_id", False, False),
+        f("position", "integer", "موقعیت بلوک در سند", "position", False, False),
+        f("page", "integer", "شمارهٔ صفحه (در docx همیشه null — حدس ممنوع)",
+          "page", False, True),
+        f("source_ref", "string", "ارجاع منبع (JSON به‌صورت رشته)",
+          "source_ref", False, False),
+        f("table_rows", "text", "ردیف‌های جدول (فقط بلوک‌های جدول)",
+          "table_rows", False, False),
+        f("ref_id", "string", "شناسهٔ پانوشت/پایان‌نوشت (fn-/en-)",
+          "ref_id", False, False),
+        f("warnings", "text", "هشدارهای پردازش (JSON به‌صورت رشته)",
+          "warnings", False, False),
+    ]
+
+
+def _schema_version_row(conn, collection_id, schema_id):
+    r = conn.execute(
+        """SELECT * FROM knowledge_schema_versions
+           WHERE collection_id=? AND schema_id=?""",
+        (collection_id, schema_id)).fetchone()
+    return dict(r) if r else None
+
+
+def _collection_schema_list(conn, collection_id):
+    return [dict(r) for r in conn.execute(
+        """SELECT * FROM knowledge_schema_versions
+           WHERE collection_id=? ORDER BY version DESC""",
+        (collection_id,)).fetchall()]
+
+
+def _collection_approved_schema(conn, collection_id):
+    r = conn.execute(
+        """SELECT * FROM knowledge_schema_versions
+           WHERE collection_id=? AND status='approved'
+           ORDER BY version DESC LIMIT 1""", (collection_id,)).fetchone()
+    return dict(r) if r else None
+
+
+def _validate_schema_fields(fields):
+    """Validate the schema field list itself. -> (normalized_fields, errors).
+
+    A field: name (non-empty, unique, [a-z0-9_]), type in SCHEMA_FIELD_TYPES,
+    optional description (str), optional es_field (str, unique when present),
+    required (bool, default False), searchable (bool, default True).
+    """
+    if not isinstance(fields, list) or not fields:
+        return None, ["fields باید یک لیست غیرخالی از تعریف فیلدها باشد"]
+    errors, names, es_names = [], set(), set()
+    normalized = []
+    for i, fld in enumerate(fields):
+        where = f"فیلد {i + 1}"
+        if not isinstance(fld, dict):
+            errors.append(f"{where}: باید یک شیٔ JSON باشد")
+            continue
+        name = str(fld.get("name") or "").strip()
+        if not name or not re.fullmatch(r"[a-z0-9_]{1,64}", name):
+            errors.append(f"{where}: نام معتبر ندارد ([a-z0-9_]، ۱ تا ۶۴ حرف)")
+            continue
+        if name in names:
+            errors.append(f"{where}: نام تکراری: {name}")
+            continue
+        ftype = str(fld.get("type") or "").strip()
+        if ftype not in SCHEMA_FIELD_TYPES:
+            errors.append(f"{where} ({name}): نوع «{ftype}» معتبر نیست "
+                          f"(مجاز: {', '.join(SCHEMA_FIELD_TYPES)})")
+            continue
+        es_field = str(fld.get("es_field") or "").strip() or None
+        if es_field and not re.fullmatch(r"[a-z0-9_.]{1,64}", es_field):
+            errors.append(f"{where} ({name}): es_field نامعتبر است")
+            continue
+        if es_field and es_field in es_names:
+            errors.append(f"{where} ({name}): es_field تکراری: {es_field}")
+            continue
+        desc = str(fld.get("description") or "")
+        norm = {
+            "name": name,
+            "type": ftype,
+            "description": desc,
+            "required": bool(fld.get("required", False)),
+            "searchable": bool(fld.get("searchable", True)),
+        }
+        if es_field:
+            norm["es_field"] = es_field
+        names.add(name)
+        if es_field:
+            es_names.add(es_field)
+        normalized.append(norm)
+    if errors:
+        return None, errors
+    return normalized, []
+
+
+def _schema_validate_report(conn, collection_id, fields, limit=200000):
+    """Dry-run a schema against the collection's REAL processed blocks.
+
+    Reads blocks.jsonl from the out_dirs of parsed/approved documents (up to
+    `limit` blocks total), checks every required field for presence and every
+    declared type for a sane runtime type, and reports per-field coverage plus
+    observed values of `type`/`style`. Honest counts only.
+    """
+    docs = conn.execute(
+        """SELECT document_id, out_dir FROM knowledge_collection_documents
+           WHERE collection_id=? AND out_dir IS NOT NULL
+             AND status IN ('parsed','needs_review','approved','indexed')""",
+        (collection_id,)).fetchall()
+    data_root = knowledge_data_dir()
+    fields_by_name = {f["name"]: f for f in fields}
+    seen = {}
+    for f in fields:
+        seen[f["name"]] = {"present": 0, "type_ok": 0, "type_bad": 0, "seen": 0}
+    type_values = {}
+    style_values = {}
+    total_blocks = 0
+    docs_scanned = 0
+    for d in docs:
+        if total_blocks >= limit:
+            break
+        blocks_p = os.path.join(data_root, d["out_dir"], "blocks.jsonl")
+        if not os.path.isfile(blocks_p):
+            continue
+        docs_scanned += 1
+        try:
+            with open(blocks_p, encoding="utf-8") as fh:
+                for line in fh:
+                    line = line.strip()
+                    if not line:
+                        continue
+                    total_blocks += 1
+                    if total_blocks > limit:
+                        break
+                    try:
+                        rec = json.loads(line)
+                    except Exception:
+                        continue
+                    for f in fields:
+                        s = seen[f["name"]]
+                        if f["name"] not in rec or rec[f["name"]] is None:
+                            continue
+                        s["present"] += 1
+                        v = rec[f["name"]]
+                        t = f["type"]
+                        ok = (
+                            (t in ("string", "text", "keyword")
+                             and isinstance(v, str))
+                            or (t == "integer" and isinstance(v, int)
+                                and not isinstance(v, bool))
+                            or (t == "float" and isinstance(v, (int, float))
+                                and not isinstance(v, bool))
+                            or (t == "boolean" and isinstance(v, bool))
+                        )
+                        s["seen"] += 1
+                        s["type_ok" if ok else "type_bad"] += 1
+                    if "type" in rec and isinstance(rec["type"], str):
+                        type_values[rec["type"]] = \
+                            type_values.get(rec["type"], 0) + 1
+                    if "style" in rec and isinstance(rec["style"], str):
+                        style_values[rec["style"]] = \
+                            style_values.get(rec["style"], 0) + 1
+        except OSError:
+            continue
+    errors, warnings = [], []
+    for f in fields:
+        s = seen[f["name"]]
+        if total_blocks and f["required"] and s["present"] == 0:
+            errors.append(f"فیلد الزامی «{f['name']}» در هیچ بلوکی یافت نشد")
+        if s["type_bad"]:
+            warnings.append(
+                f"فیلد «{f['name']}» در {s['type_bad']} بلوک نوع نامطلوب دارد")
+    report = {
+        "ok": not errors,
+        "errors": errors,
+        "warnings": warnings,
+        "documents_scanned": docs_scanned,
+        "blocks_scanned": total_blocks,
+        "truncated": total_blocks > limit,
+        "fields": [
+            {
+                "name": f["name"],
+                "required": f["required"],
+                "seen": seen[f["name"]]["seen"],
+                "present": seen[f["name"]]["present"],
+                "type_ok": seen[f["name"]]["type_ok"],
+                "type_bad": seen[f["name"]]["type_bad"],
+                "coverage": (round(seen[f["name"]]["present"] / total_blocks, 4)
+                              if total_blocks else None),
+            } for f in fields
+        ],
+        "observed_block_types": dict(sorted(type_values.items(),
+                                            key=lambda kv: -kv[1])),
+        "observed_styles": dict(sorted(style_values.items(),
+                                        key=lambda kv: -kv[1])),
+        "at": _now(),
+    }
+    return report
+
+
 def _batch_scope_clause(conn, batch_id, alias=None):
     """PCM-20.9 Stage A — scoping clause for document/queue queries.
 
@@ -1415,6 +1667,9 @@ def register_knowledge_routes(app, get_db):
                 (row["collection_id"],))
         ]
         item["metadata_fields"] = _meta_fields(db, row["collection_id"])
+        # PCM-20.9 Stage C — approved corpus schema (null until approved)
+        item["schema"] = _collection_approved_schema(
+            db, row["collection_id"])
         return jsonify({"ok": True, "collection": item})
 
     @app.route("/api/knowledge/collections/<int:coll_id>", methods=["PATCH"])
@@ -2364,6 +2619,204 @@ def register_knowledge_routes(app, get_db):
             idempotency_key=f"batch_retry:{batch_id}", force_retry=True)
         return jsonify({"ok": True, "job": job, "files_queued": n,
                         "resubmitted": not created}), (202 if created else 200)
+
+    # ── PCM-20.9 Stage C — corpus schema design & mapping ───────────────
+    def _coll_or_404_schema(db, collection_id):
+        return db.execute(
+            "SELECT * FROM knowledge_collections WHERE collection_id=?",
+            (collection_id,)).fetchone()
+
+    def _schema_payload(db, collection_id, schema_id=None):
+        versions = _collection_schema_list(db, collection_id)
+        approved = _collection_approved_schema(db, collection_id)
+        out = {
+            "versions": [
+                {**v, "fields": json.loads(v["fields"]),
+                 "validation": json.loads(v["validation"])
+                 if v["validation"] else None}
+                for v in versions
+            ],
+            "approved": (
+                {**approved, "fields": json.loads(approved["fields"]),
+                 "validation": json.loads(approved["validation"])
+                 if approved["validation"] else None}
+                if approved else None),
+            "default_fields": _default_schema_fields(),
+        }
+        return out
+
+    @app.route("/api/knowledge/collections/<cid>/schema", methods=["GET"])
+    @require_auth
+    def knowledge_schema_list(cid):
+        """List the corpus schema versions of a collection (newest first),
+        plus the approved version and the default field template."""
+        db = get_db()
+        ensure_knowledge_schema(db)
+        c = _coll_or_404_schema(db, cid)
+        if not c:
+            return jsonify({"ok": False, "message": "کالکشن پیدا نشد"}), 404
+        return jsonify({"ok": True, "collection_id": cid,
+                        **_schema_payload(db, cid)})
+
+    @app.route("/api/knowledge/collections/<cid>/schema", methods=["POST"])
+    @require_auth
+    def knowledge_schema_create(cid):
+        """Create a NEW schema version draft for the collection.
+
+        Body: {description?, fields?}. fields defaults to the built-in
+        block-schema template. Versions are immutable once approved; this
+        endpoint always creates a fresh version (version = max+1).
+        """
+        db = get_db()
+        ensure_knowledge_schema(db)
+        c = _coll_or_404_schema(db, cid)
+        if not c:
+            return jsonify({"ok": False, "message": "کالکشن پیدا نشد"}), 404
+        data = request.get_json(silent=True) or {}
+        description = str(data.get("description") or "").strip()[:500] or None
+        fields_in = data.get("fields")
+        if fields_in is None:
+            normalized, _ = _validate_schema_fields(_default_schema_fields())
+        else:
+            normalized, errors = _validate_schema_fields(fields_in)
+            if errors:
+                return jsonify({"ok": False, "field": "fields", "errors": errors,
+                                "message": "تعریف فیلدها نامعتبر است"}), 400
+        row = db.execute(
+            "SELECT COALESCE(MAX(version), 0) AS v "
+            "FROM knowledge_schema_versions WHERE collection_id=?",
+            (cid,)).fetchone()
+        version = row["v"] + 1
+        schema_id = f"sv-{version:04d}"
+        now = _now()
+        db.execute(
+            """INSERT INTO knowledge_schema_versions
+               (schema_id, collection_id, version, status, description,
+                fields, created_at, updated_at)
+               VALUES (?, ?, ?, 'draft', ?, ?, ?, ?)""",
+            (schema_id, cid, version, description,
+             json.dumps(normalized, ensure_ascii=False), now, now))
+        db.commit()
+        sv = _schema_version_row(db, cid, schema_id)
+        return jsonify({"ok": True, "schema": {
+            **sv, "fields": json.loads(sv["fields"]), "validation": None}}), 201
+
+    @app.route("/api/knowledge/collections/<cid>/schema/<schema_id>",
+               methods=["GET"])
+    @require_auth
+    def knowledge_schema_detail(cid, schema_id):
+        db = get_db()
+        ensure_knowledge_schema(db)
+        sv = _schema_version_row(db, cid, schema_id)
+        if not sv:
+            return jsonify({"ok": False, "message": "نسخهٔ اسکیم پیدا نشد"}), 404
+        return jsonify({"ok": True, "schema": {
+            **sv, "fields": json.loads(sv["fields"]),
+            "validation": json.loads(sv["validation"])
+            if sv["validation"] else None}})
+
+    @app.route("/api/knowledge/collections/<cid>/schema/<schema_id>",
+               methods=["PATCH"])
+    @require_auth
+    def knowledge_schema_update(cid, schema_id):
+        """Update a DRAFT version (description and/or fields).
+
+        Approved versions are immutable — 409. fields are re-validated.
+        """
+        db = get_db()
+        ensure_knowledge_schema(db)
+        sv = _schema_version_row(db, cid, schema_id)
+        if not sv:
+            return jsonify({"ok": False, "message": "نسخهٔ اسکیم پیدا نشد"}), 404
+        if sv["status"] == "approved":
+            return jsonify({"ok": False, "code": "immutable",
+                            "message": "نسخهٔ تأییدشده تغییرناپذیر است — "
+                                       "یک نسخهٔ جدید بسازید"}), 409
+        data = request.get_json(silent=True) or {}
+        sets, params = [], []
+        if "description" in data:
+            d = str(data.get("description") or "").strip()[:500] or None
+            sets.append("description=?"); params.append(d)
+        if "fields" in data:
+            normalized, errors = _validate_schema_fields(data["fields"])
+            if errors:
+                return jsonify({"ok": False, "field": "fields",
+                                "errors": errors,
+                                "message": "تعریف فیلدها نامعتبر است"}), 400
+            sets.append("fields=?")
+            params.append(json.dumps(normalized, ensure_ascii=False))
+        if not sets:
+            return jsonify({"ok": False, "message": "مقداری برای ویرایش نیست"}), 400
+        sets.append("updated_at=?"); params.append(_now())
+        params += [schema_id, cid]
+        db.execute(f"""UPDATE knowledge_schema_versions
+                        SET {', '.join(sets)}
+                        WHERE schema_id=? AND collection_id=?""", params)
+        db.commit()
+        sv = _schema_version_row(db, cid, schema_id)
+        return jsonify({"ok": True, "schema": {
+            **sv, "fields": json.loads(sv["fields"]),
+            "validation": json.loads(sv["validation"])
+            if sv["validation"] else None}})
+
+    @app.route("/api/knowledge/collections/<cid>/schema/<schema_id>/validate",
+               methods=["POST"])
+    @require_auth
+    def knowledge_schema_validate(cid, schema_id):
+        """'Design & Validate Schema' — dry-run a version's fields against
+        the collection's REAL blocks.jsonl (honest counts, truncated at a
+        200k-block cap). Works for draft AND approved versions (read-only:
+        does not change the version, only stores the latest report)."""
+        db = get_db()
+        ensure_knowledge_schema(db)
+        sv = _schema_version_row(db, cid, schema_id)
+        if not sv:
+            return jsonify({"ok": False, "message": "نسخهٔ اسکیم پیدا نشد"}), 404
+        fields = json.loads(sv["fields"])
+        report = _schema_validate_report(db, cid, fields)
+        db.execute("""UPDATE knowledge_schema_versions
+                      SET validation=?, updated_at=?
+                      WHERE schema_id=? AND collection_id=?""",
+                   (json.dumps(report, ensure_ascii=False), _now(),
+                    schema_id, cid))
+        db.commit()
+        return jsonify({"ok": True, "schema_id": schema_id, "report": report})
+
+    @app.route("/api/knowledge/collections/<cid>/schema/<schema_id>/approve",
+               methods=["POST"])
+    @require_auth
+    def knowledge_schema_approve(cid, schema_id):
+        """'Approve Schema Version' — the version must be a draft with a
+        PASSING validation report (ok=true, at least 1 block scanned).
+        Approval is immutable: the version's fields JSON is never touched
+        again, and the collection's schema_version is pointed at it."""
+        db = get_db()
+        ensure_knowledge_schema(db)
+        c = _coll_or_404_schema(db, cid)
+        if not c:
+            return jsonify({"ok": False, "message": "کالکشن پیدا نشد"}), 404
+        sv = _schema_version_row(db, cid, schema_id)
+        if not sv:
+            return jsonify({"ok": False, "message": "نسخهٔ اسکیم پیدا نشد"}), 404
+        if sv["status"] == "approved":
+            return jsonify({"ok": True, "already": True,
+                            "schema_id": schema_id}), 200
+        val = json.loads(sv["validation"]) if sv["validation"] else None
+        if not val or not val.get("ok") or not val.get("blocks_scanned"):
+            return jsonify({"ok": False, "code": "not_validated",
+                            "message": "پیش از تأیید باید «اعتبارسنجی» با "
+                                       "نتیجهٔ موفق اجرا شود (حداقل یک بلوک)"}), 409
+        now = _now()
+        db.execute("""UPDATE knowledge_schema_versions
+                      SET status='approved', approved_at=?, updated_at=?
+                      WHERE schema_id=? AND collection_id=?""",
+                   (now, now, schema_id, cid))
+        db.execute("""UPDATE knowledge_collections
+                      SET schema_version=?, updated_at=?
+                      WHERE collection_id=?""", (schema_id, now, cid))
+        db.commit()
+        return jsonify({"ok": True, "schema_id": schema_id,
+                        "version": sv["version"], "approved_at": now})
 
     @app.route("/api/knowledge/queue/summary", methods=["GET"])
     @require_auth

@@ -357,6 +357,12 @@
         <h3><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="m12 2 9 5-9 5-9-5 9-5Zm-9 10 9 5 9-5m-18 5 9 5 9-5"/></svg> نسخه‌ها</h3>
         <dl class="kv" id="stVersions"></dl>
       </div>
+      <div class="card" id="schemaCard">
+        <h3><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 6h16M4 12h16M4 18h10"/></svg> اسکیم پیکره (طراحی و نقشه‌برداری)
+          <button type="button" class="btn btn-sm btn-ghost" id="schemaNewBtn" style="margin-inline-start:auto">نسخه جدید</button>
+        </h3>
+        <div id="schemaBody"><div class="t2" style="color:var(--dim);font-size:12px">در حال بارگذاری…</div></div>
+      </div>
       <div class="card">
         <h3><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><ellipse cx="12" cy="5" rx="8" ry="3"/><path d="M4 5v14c0 1.7 3.6 3 8 3s8-1.3 8-3V5M4 12c0 1.7 3.6 3 8 3s8-1.3 8-3"/></svg> Elasticsearch</h3>
         <dl class="kv" id="stEs"></dl>
@@ -788,6 +794,7 @@ async function renderDetail() {
 
     renderStructure(c);
     renderDocs();
+    loadSchema();
     renderMeta();
     renderCompat();
     loadQueue();
@@ -830,6 +837,120 @@ function renderStructure(c) {
     '<div class="step done"><span class="dot"></span><span><b>PCM-15</b> — صف ماندگار پردازش (توقف/ادامه/تکرار)</span></div>' +
     '<div class="step done"><span class="dot"></span><span><b>PCM-16</b> — پیکره‌ساز از Dumpهای d-1 (CLI آفلاین)</span></div>' +
     '<div class="step done"><span class="dot"></span><span><b>PCM-17</b> — مدیریت صف + رجیستری در استودیو (این فاز)</span></div>';
+}
+
+/* ═══════ PCM-20.9 Stage C: اسکیم پیکره (طراحی، اعتبارسنجی، تأیید) ═══════ */
+const SCHEMA_STATE = { sel: null };
+function renderSchema() {
+  const box = $('schemaBody');
+  const vs = SCHEMA_STATE.versions || [];
+  if (!vs.length) {
+    box.innerHTML = '<div class="t2" style="color:var(--dim);font-size:12px">هنوز نسخه‌ای از اسکیم پیکره نساخته‌اید. با «نسخه جدید» یک پیش‌نویس از اسکیم پیش‌فرض بلوک‌ها بسازید.</div>';
+    return;
+  }
+  let sel = vs.find((v) => v.schema_id === SCHEMA_STATE.sel) || vs[0];
+  SCHEMA_STATE.sel = sel.schema_id;
+  const rep = sel.validation;
+  let h = '<div style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:10px">';
+  h += vs.map((v) =>
+    '<button type="button" class="btn btn-sm ' + (v.schema_id === sel.schema_id ? 'btn-primary' : 'btn-ghost') + '" data-sv="' + escHtml(v.schema_id) + '">' +
+    'v' + faNum(v.version) + (v.status === 'approved' ? ' ✓' : '') + '</button>').join('');
+  h += '</div>';
+  h += '<div style="font-size:12px;color:var(--dim);margin-bottom:8px">' +
+    (sel.description ? escHtml(sel.description) + ' · ' : '') +
+    (sel.status === 'approved'
+      ? '<span class="badge ok">تأییدشده — تغییرناپذیر</span>'
+      : '<span class="badge warn">پیش‌نویس</span>') + '</div>';
+  if (rep) {
+    h += '<div class="q-chip ' + (rep.ok ? 'ok' : 'err') + '" style="display:inline-block;margin-bottom:8px">' +
+      (rep.ok ? 'اعتبارسنجی: موفق' : 'اعتبارسنجی: ناموفق') +
+      ' — ' + faNum(rep.blocks_scanned) + ' بلوک از ' + faNum(rep.documents_scanned) + ' سند' +
+      (rep.truncated ? ' (تکمیلی)' : '') + '</div>';
+    h += '<table class="docs-table" style="margin-bottom:8px"><thead><tr><th>فیلد</th><th>الزامی</th><th>موجود</th><th>نوع صحیح</th><th>نوع نادرست</th><th>پوشش</th></tr></thead><tbody>' +
+      rep.fields.map((f) =>
+        '<tr><td class="c-slug">' + escHtml(f.name) + '</td>' +
+        '<td>' + (f.required ? 'بله' : '—') + '</td>' +
+        '<td>' + faNum(f.present) + '</td>' +
+        '<td>' + faNum(f.type_ok) + '</td>' +
+        '<td>' + (f.type_bad ? '<span style="color:var(--red)">' + faNum(f.type_bad) + '</span>' : '—') + '</td>' +
+        '<td>' + (f.coverage == null ? '—' : faNum(Math.round(f.coverage * 100)) + '٪') + '</td></tr>').join('') +
+      '</tbody></table>';
+    (rep.errors || []).forEach((e) => { h += '<div class="error-box" style="display:block;margin-bottom:4px;font-size:12px">' + escHtml(e) + '</div>'; });
+    (rep.warnings || []).forEach((w) => { h += '<div class="t2" style="color:var(--amber,#b45309);font-size:12px;margin-bottom:4px">⚠ ' + escHtml(w) + '</div>'; });
+  }
+  h += '<table class="docs-table"><thead><tr><th>فیلد</th><th>نوع</th><th>الزامی</th><th>جستجوپذیر</th><th>فیلد ES</th></tr></thead><tbody>' +
+    (sel.fields || []).map((f) =>
+      '<tr><td class="c-slug">' + escHtml(f.name) + '</td>' +
+      '<td>' + escHtml(f.type) + '</td>' +
+      '<td>' + (f.required ? 'بله' : '—') + '</td>' +
+      '<td>' + (f.searchable ? 'بله' : '—') + '</td>' +
+      '<td class="c-slug">' + escHtml(f.es_field || '—') + '</td></tr>').join('') +
+    '</tbody></table>';
+  if (sel.status === 'approved') {
+    h += '<div class="t2" style="color:var(--dim);font-size:12px;margin-top:8px">این نسخه تأییدشده و تغییرناپذیر است. برای تغییر، «نسخه جدید» بسازید.</div>';
+  } else {
+    h += '<div style="display:flex;gap:8px;margin-top:10px;flex-wrap:wrap">' +
+      '<button type="button" class="btn btn-primary btn-sm" id="schemaValidateBtn">طراحی و اعتبارسنجی اسکیم</button>' +
+      '<button type="button" class="btn btn-ghost btn-sm" id="schemaApproveBtn">تأیید نسخه اسکیم</button>' +
+      '</div>';
+  }
+  box.innerHTML = h;
+  box.querySelectorAll('button[data-sv]').forEach((btn) => {
+    btn.addEventListener('click', () => { SCHEMA_STATE.sel = btn.getAttribute('data-sv'); renderSchema(); });
+  });
+  const vb = $('schemaValidateBtn');
+  if (vb) vb.addEventListener('click', schemaValidate);
+  const ab = $('schemaApproveBtn');
+  if (ab) ab.addEventListener('click', schemaApprove);
+}
+async function loadSchema() {
+  const box = $('schemaBody');
+  if (!state.collection) { box.innerHTML = ''; return; }
+  const cid = state.collection.collection_id;
+  try {
+    const j = await fetchAPI('/api/knowledge/collections/' + encodeURIComponent(cid) + '/schema');
+    if (!j) return;
+    SCHEMA_STATE.versions = j.versions;
+    SCHEMA_STATE.approved = j.approved;
+    if (!SCHEMA_STATE.sel || !j.versions.some((v) => v.schema_id === SCHEMA_STATE.sel)) {
+      SCHEMA_STATE.sel = j.versions.length ? j.versions[0].schema_id : null;
+    }
+    renderSchema();
+  } catch (e) {
+    box.innerHTML = '<div class="error-box" style="display:block">' + escHtml(e.message) + '</div>';
+  }
+}
+async function schemaValidate() {
+  const cid = state.collection.collection_id, sid = SCHEMA_STATE.sel;
+  $('schemaValidateBtn').disabled = true;
+  try {
+    const j = await fetchAPI('/api/knowledge/collections/' + encodeURIComponent(cid) + '/schema/' + sid + '/validate', { method: 'POST' });
+    toast(j.report.ok
+      ? 'اعتبارسنجی موفق: ' + faNum(j.report.blocks_scanned) + ' بلوک بررسی شد'
+      : 'اعتبارسنجی ناموفق — ' + faNum(j.report.errors.length) + ' خطا', j.report.ok ? 'ok' : 'err');
+    await loadSchema();
+  } catch (e) { toast(e.message, 'err'); $('schemaValidateBtn').disabled = false; }
+}
+async function schemaApprove() {
+  const cid = state.collection.collection_id, sid = SCHEMA_STATE.sel;
+  try {
+    await fetchAPI('/api/knowledge/collections/' + encodeURIComponent(cid) + '/schema/' + sid + '/approve', { method: 'POST' });
+    toast('نسخه اسکیم تأیید شد: ' + sid);
+    await loadSchema();
+  } catch (e) { toast(e.message, 'err'); }
+}
+function initSchemaCard() {
+  $('schemaNewBtn').addEventListener('click', async () => {
+    try {
+      const j = await fetchAPI('/api/knowledge/collections/' + encodeURIComponent(state.collection.collection_id) + '/schema', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({}),
+      });
+      toast('نسخه جدید پیش‌نویس ساخته شد: v' + faNum(j.schema.version));
+      SCHEMA_STATE.sel = j.schema.schema_id;
+      await loadSchema();
+    } catch (e) { toast(e.message, 'err'); }
+  });
 }
 
 /* ── create ── */
@@ -1717,6 +1838,8 @@ $('metaClose').addEventListener('click', closeMetaModal);
 $('metaCancel').addEventListener('click', closeMetaModal);
 $('metaModal').addEventListener('click', (e) => { if (e.target === $('metaModal')) closeMetaModal(); });
 $('metaForm').addEventListener('submit', doMetaField);
+/* ── PCM-20.9 Stage C listener ── */
+initSchemaCard();
 /* ── PCM-17 listeners ── */
 $('workNewBtn').addEventListener('click', openWorkModal);
 $('workClose').addEventListener('click', closeWorkModal);
