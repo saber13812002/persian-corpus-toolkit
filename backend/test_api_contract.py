@@ -1,8 +1,9 @@
 # -*- coding: utf-8 -*-
 """test_api_contract — PCM-19: OpenAPI↔app contract tests (CT-01..CT-06).
 
-These tests make the two additive OpenAPI specs (PCM-14D work registry,
-PCM-15/17 file queue) a machine-enforced contract against the live app:
+These tests make the additive OpenAPI specs (PCM-14D work registry,
+PCM-15/17 file queue, PCM-20.9 pipeline/release) a machine-enforced
+contract against the live app:
 
   CT-01 spec validity — both specs parse, openapi 3.x, info complete,
                         every operation has an operationId, every local
@@ -51,7 +52,9 @@ SPEC_14D = os.path.join(REPO_ROOT, "docs", "openapi",
                         "pcm14d-knowledge-work-registry.openapi.yaml")
 SPEC_15 = os.path.join(REPO_ROOT, "docs", "openapi",
                        "pcm15-file-queue.openapi.yaml")
-SPECS = [SPEC_14D, SPEC_15]
+SPEC_209 = os.path.join(REPO_ROOT, "docs", "openapi",
+                        "pcm209-pipeline-release.openapi.yaml")
+SPECS = [SPEC_14D, SPEC_15, SPEC_209]
 HTTP_METHODS = ("get", "post", "put", "patch", "delete")
 
 
@@ -123,8 +126,8 @@ def _path_url(path):
     so it must be numeric."""
     def repl(m):
         name = m.group(1)
-        if name == "value_id":
-            return "999999"
+        if name in ("value_id", "coll_id"):
+           return "999999"
         return name.split("_")[0] + "-ffffffff"
     return re.sub(r"\{(\w+)\}", repl, path)
 
@@ -166,7 +169,7 @@ class TestCT01_SpecValidity(unittest.TestCase):
         self.specs = load_specs()
 
     def test_ct01a_parse_and_version(self):
-        self.assertEqual(len(self.specs), 2)
+        self.assertEqual(len(self.specs), 3)
         for name, spec in self.specs.items():
             with self.subTest(spec=name):
                 self.assertTrue(

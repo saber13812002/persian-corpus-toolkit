@@ -40,7 +40,7 @@ import threading
 import time
 import unicodedata
 
-from flask import jsonify, request
+from flask import Response, jsonify, request
 
 from auth import make_require_auth
 
@@ -388,6 +388,40 @@ def ensure_knowledge_schema(db):
     );
     CREATE INDEX IF NOT EXISTS idx_ksv_coll
         ON knowledge_schema_versions(collection_id, version DESC);
+    -- PCM-20.9 Final — release bundle registry. One row per built release:
+    -- a content-addressed zip (corpus c-1 + per-doc dumps d-1 + chained
+    -- manifest + README) stored under <data>/releases/<release_id>/.
+    -- release_id = rel-<sha256(collection_id:content_sha256)[:8]> (deterministic).
+    -- rag_status: blocked (PCT_RAG_INGEST_URL absent -> honest, no call) /
+    -- success (ingest confirmed) / failed (ingest attempted, error recorded).
+    CREATE TABLE IF NOT EXISTS knowledge_releases (
+        release_id     TEXT PRIMARY KEY,      -- rel-<sha8>
+        collection_id  TEXT NOT NULL,
+        build_iv_id    TEXT,                  -- the Stage D build it came from
+        content_sha256 TEXT NOT NULL,         -- corpus archive sha (identity)
+        zip_path       TEXT NOT NULL,         -- absolute, under data dir
+        zip_sha256     TEXT NOT NULL,
+        size_bytes     INTEGER NOT NULL DEFAULT 0,
+        manifest       TEXT NOT NULL,         -- JSON: release-manifest.json
+        rag_status     TEXT NOT NULL DEFAULT 'blocked',
+        created_at     TEXT NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_krel_coll
+        ON knowledge_releases(collection_id, created_at DESC);
+    -- PCM-20.9 Final — append-only audit trail. Every pipeline/acceptance/
+    -- approve/release action is recorded (never updated, never deleted).
+    CREATE TABLE IF NOT EXISTS knowledge_audit_log (
+        id            INTEGER PRIMARY KEY AUTOINCREMENT,
+        ts            TEXT NOT NULL,
+        actor         TEXT NOT NULL,          -- sess-<sha8> | worker | system
+        collection_id TEXT,
+        stage         TEXT NOT NULL,          -- import/build/acceptance/release/...
+        action        TEXT NOT NULL,
+        status        TEXT NOT NULL,          -- ok / fail / blocked
+        detail_json   TEXT
+    );
+    CREATE INDEX IF NOT EXISTS idx_kaudit_coll
+        ON knowledge_audit_log(collection_id, ts);
     """)
     db.commit()
     _ensure_document_columns(db)
@@ -629,6 +663,11 @@ def _ensure_build_columns(db):
         ("es_index_status", "TEXT"),
         # JSON detail of the ES factory outcome (reason / error / info)
         ("es_detail", "TEXT"),
+        # PCM-20.9 Stage E — search-acceptance outcome on the live alias:
+        # pass / fail (NULL = never validated)
+        ("search_status", "TEXT"),
+        # JSON report of the 10-category search acceptance run
+        ("search_detail", "TEXT"),
     ]
     for col, decl in wanted:
         if col not in existing:
@@ -876,6 +915,100 @@ def _job_progress(conn, job_id, progress, total=None, stage=None):
         "stage=?, updated_at=? WHERE job_id=?",
         (progress, total, stage, _now(), job_id))
     conn.commit()
+
+
+# ---------------------------------------------------------------------------
+# PCM-20.9 Final — audit trail (append-only) + guarded RAG ingest
+# ---------------------------------------------------------------------------
+
+def _audit_actor():
+    """Who is acting, from the CURRENT context (never fabricated).
+
+    - inside a request: 'sess-<sha8>' from the live session cookie;
+    - inside a worker thread (no request context): 'worker';
+    - otherwise: 'system'.
+    """
+    try:
+        import flask
+        if flask.has_request_context():
+            tok = request.cookies.get("pct_session", "")
+            if tok:
+                return "sess-" + hashlib.sha256(
+                    tok.encode("utf-8")).hexdigest()[:8]
+    except Exception:  # noqa: BLE001 — actor best-effort, never blocks
+        pass
+    try:
+        import threading
+        if threading.current_thread() is not threading.main_thread():
+            return "worker"
+    except Exception:  # noqa: BLE001
+        pass
+    return "system"
+
+
+def _audit_log(db, collection_id, stage, action, status, detail=None):
+    """Append one row to knowledge_audit_log (append-only, never updated).
+
+    Best-effort: a failed audit write must never break the action it
+    records (logged, not raised).
+    """
+    try:
+        db.execute(
+            "INSERT INTO knowledge_audit_log "
+            "(ts, actor, collection_id, stage, action, status, detail_json) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?)",
+            (_now(), _audit_actor(), collection_id, stage, action, status,
+             json.dumps(detail, ensure_ascii=False) if detail is not None
+             else None))
+        db.commit()
+    except Exception:  # noqa: BLE001
+        import traceback
+        traceback.print_exc()
+
+
+def _rag_ingest(conn, coll_id, build, release, manifest):
+    """Guarded RAG ingest of a release bundle.
+
+    Honest: without PCT_RAG_INGEST_URL (and a token) the result is
+    'blocked' (unknown RAG contract — nothing is called, nothing claimed).
+    When configured, the release zip is ingested over HTTP and the outcome
+    (success / failed + detail) is recorded. Returns (status, detail).
+    """
+    url = os.environ.get("PCT_RAG_INGEST_URL", "").strip()
+    token = os.environ.get("PCT_RAG_INGEST_TOKEN", "").strip()
+    if not url:
+        return "blocked", ("PCT_RAG_INGEST_URL تنظیم نیست — RAG ingest "
+                           "غیرفعال (unknown RAG contract); خروجی release "
+                           "لوکال قابل استفاده است")
+    try:
+        import urllib.request
+        payload = json.dumps({
+            "kind": "pct-release",
+            "contract": manifest["release_contract"],
+            "collection_id": coll_id,
+            "build_iv_id": build["iv_id"],
+            "content_sha256": build["content_sha256"],
+            "release_id": release["release_id"],
+            "zip_sha256": release["zip_sha256"],
+            "path": release["zip_path"],
+            "manifest_path": os.path.join(
+                os.path.dirname(release["zip_path"]),
+                "release-manifest.json"),
+            "manifest_sha256": _sha256_file(os.path.join(
+                os.path.dirname(release["zip_path"]),
+                "release-manifest.json")),
+        }).encode("utf-8")
+        req = urllib.request.Request(url, data=payload,
+                                     method="POST")
+        req.add_header("Content-Type", "application/json")
+        if token:
+            req.add_header("Authorization", "Bearer " + token)
+        with urllib.request.urlopen(req, timeout=60) as resp:
+            if resp.status >= 300:
+                raise RuntimeError(f"HTTP {resp.status}")
+        return "success", "ingest request accepted"
+    except Exception as e:  # noqa: BLE001 — record, don't crash the release
+        return "failed", f"{type(e).__name__}: {e}"
 
 
 # ---------------------------------------------------------------------------
@@ -1352,6 +1485,13 @@ def _es_build_index(conn, coll, fields, corpus_dir):
         if not f.get("searchable", True):
             p["index"] = False
         props[key] = p
+    # Stage E filter fields (work/edition/volume scope) — always present
+    # in the mapping so term filters on keywords.* are deterministic.
+    props["keywords"] = {"properties": {
+        "work_id": {"type": "keyword"},
+        "edition_id": {"type": "keyword"},
+        "volume_id": {"type": "keyword"},
+    }}
     _es_request(es_url, "PUT", "/" + es_index,
                 {"mappings": {"properties": props}})
 
@@ -1371,6 +1511,19 @@ def _es_build_index(conn, coll, fields, corpus_dir):
             rec = json.loads(line)
             fid = (rec.get("provenance") or {}).get("factory_file_id")
             payload = dict(rec)
+            # Stage E: promote the provenance entity ids to top-level
+            # keyword fields so work/edition/volume filters are term
+            # queries (no painless, no dynamic sub-guessing).
+            prov = rec.get("provenance") or {}
+            kw = {}
+            if prov.get("work_id"):
+                kw["work_id"] = prov["work_id"]
+            if prov.get("edition_id"):
+                kw["edition_id"] = prov["edition_id"]
+            if prov.get("volume_id"):
+                kw["volume_id"] = prov["volume_id"]
+            if kw:
+                payload["keywords"] = kw
             doc_row = docs_by_file.get(fid)
             if doc_row is not None:
                 payload["metadata"] = _document_metadata(
@@ -1855,6 +2008,8 @@ def _job_kind_corpus_build(conn, job_id):
             "UPDATE knowledge_index_builds SET status='succeeded', "
             "completed_at=? WHERE iv_id=?", (_now(), iv_id))
         conn.commit()
+        _audit_log(conn, coll_id, "build", "corpus_reused", "ok",
+                   {"iv_id": iv_id, "content_sha256": content_sha})
         _job_progress(conn, job_id, total, total, f"reused {iv_id}")
         return
 
@@ -1899,9 +2054,12 @@ def _job_kind_corpus_build(conn, job_id):
             ("blocked", json.dumps(
                 {"status": "blocked",
                  "reason": "PCT_ES_URL تنظیم نیست — ES factory غیرفعال "
-                           "(build corpus-only)"},
+                            "(build corpus-only)"},
                 ensure_ascii=False), iv_id))
         conn.commit()
+        _audit_log(conn, coll_id, "build", "corpus_built", "blocked",
+                   {"iv_id": iv_id, "content_sha256": content_sha,
+                    "es": "blocked: PCT_ES_URL not set"})
         return
 
     schema_row = _collection_approved_schema(conn, coll_id)
@@ -1918,6 +2076,8 @@ def _job_kind_corpus_build(conn, job_id):
                  "error": f"{type(e).__name__}: {e}"},
                 ensure_ascii=False), iv_id))
         conn.commit()
+        _audit_log(conn, coll_id, "build", "es_index_failed", "fail",
+                   {"iv_id": iv_id, "error": f"{type(e).__name__}: {e}"})
         raise
     conn.execute(
         "UPDATE knowledge_index_builds SET es_index=?, es_index_status=?, "
@@ -1930,13 +2090,680 @@ def _job_kind_corpus_build(conn, job_id):
         "indexing_status='ready', updated_at=? WHERE collection_id=?",
         (iv_id, _now(), coll_id))
     conn.commit()
+    _audit_log(conn, coll_id, "build", "es_index_success", "ok",
+               {"iv_id": iv_id, "es_index": info["es_index"],
+                "es_alias": info.get("es_alias")})
     _job_progress(conn, job_id, total, total, f"es {info['es_index']}")
+
+
+# ---------------------------------------------------------------------------
+# PCM-20.9 Stage E — search validation & acceptance
+# ---------------------------------------------------------------------------
+
+# The 10 acceptance categories (RECON §8 Stage E). The order is the
+# reported order; each one is a REAL query against the LIVE alias.
+_SEARCH_CATEGORIES = [
+    "count",            # 01 — alias /_count == corpus blocks_total
+    "exact_block",      # 02 — phrase match on a full normalized block
+    "partial_text",     # 03 — single-word match (Persian analyzer works)
+    "heading_filter",   # 04 — type=heading filter returns only headings
+    "work_filter",      # 05 — keywords.work_id term filter, exact scope
+    "metadata_filter",  # 06 — custom metadata term filter, exact scope
+    "pagination",       # 07 — from/size pages: stable total, unique ids
+    "determinism",      # 08 — same query twice -> identical id set
+    "absence",          # 09 — a nonsense phrase matches 0 docs
+    "latency",          # 10 — a search query returns well under 30 s
+]
+
+
+def _search_acceptance_run(conn, build, coll_id):
+    """Run the 10-category acceptance against the LIVE alias (read-only).
+
+    Safe by construction: it only issues search/count requests — the
+    alias is never touched, so a failing acceptance cannot move any
+    pointer. Every category is honest: missing data yields 'skipped'
+    (vacuous), a wrong result yields 'fail' with the evidence.
+
+    Returns the report dict stored in search_detail (JSON).
+    """
+    alias = build["es_alias"]
+    index = build["es_index"]
+    expected = build["chunk_count"]
+    es = _es_url()
+
+    def q(query, size=3, from_=None, sort=None):
+        body = {"query": query}
+        if size is not None:
+            body["size"] = size
+        if from_ is not None:
+            body["from"] = from_
+        if sort is not None:
+            body["sort"] = sort
+        return _es_request(es, "POST", "/" + alias + "/_search", body)
+
+    def total_of(resp):
+        return (resp.get("hits") or {}).get("total", {}).get("value")
+
+    def hits_of(resp):
+        return (resp.get("hits") or {}).get("hits") or []
+
+    def _normalized_records(limit=20000):
+        p = os.path.join(knowledge_data_dir(), build["out_dir"],
+                         "normalized.jsonl")
+        recs = []
+        with open(p, encoding="utf-8") as fh:
+            for line in fh:
+                line = line.strip()
+                if line:
+                    recs.append(json.loads(line))
+                if len(recs) >= limit:
+                    break
+        return recs
+
+    # --- 01 count ---------------------------------------------------------
+    def _do_count():
+        got = _es_request(es, "GET", "/" + alias + "/_count").get("count")
+        ok = (got == expected)
+        return ("pass" if ok else "fail"), \
+            f"count={got} vs corpus blocks_total={expected}"
+
+    # --- 02 exact block (phrase on a full normalized text) ----------------
+    def _do_exact():
+        recs = _normalized_records(1)
+        if not recs:
+            return "skipped", "corpus normalized.jsonl is empty"
+        text = (recs[0].get("normalized_text") or "").strip()
+        if not text:
+            return "skipped", "first block has empty normalized_text"
+        n = total_of(q({"match_phrase": {"normalized_text": text}}))
+        exact = any((h.get("_source") or {}).get("normalized_text") == text
+                    for h in hits_of(q(
+                        {"match_phrase": {"normalized_text": text}})))
+        ok = bool(n and n >= 1) and exact
+        return ("pass" if ok else "fail"), \
+            f"phrase {text[:50]!r}: hits={n}, exact-source-present={exact}"
+
+    # --- 03 partial text (one word, analyzer) -----------------------------
+    def _do_partial():
+        recs = _normalized_records(1)
+        text = ""
+        for r in recs:
+            text = (r.get("normalized_text") or "").strip()
+            if text:
+                break
+        if not text:
+            return "skipped", "no non-empty normalized_text found"
+        word = text.split()[0]
+        n = total_of(q({"match": {"normalized_text": word}}))
+        ok = bool(n and n >= 1)
+        return ("pass" if ok else "fail"), \
+            f"word {word!r}: hits={n} (expected >=1)"
+
+    # --- 04 heading filter --------------------------------------------------
+    def _do_heading():
+        resp = q({"bool": {"filter": [{"term": {"type": "heading"}}]}},
+                 size=20)
+        n = total_of(resp)
+        if not n:
+            return "skipped", "corpus has no heading blocks"
+        all_h = all((h.get("_source") or {}).get("type") == "heading"
+                    for h in hits_of(resp))
+        return ("pass" if all_h else "fail"), \
+            f"type=heading: hits={n}, all-headings={all_h}"
+
+    # --- 05 work filter (keyword term on provenance work_id) ---------------
+    def _do_work():
+        r = conn.execute(
+            """SELECT work_id FROM knowledge_collection_documents
+               WHERE collection_id=? AND work_id IS NOT NULL
+                 AND work_id != '' ORDER BY id LIMIT 1""",
+            (coll_id,)).fetchone()
+        if not r or not r["work_id"]:
+            return "skipped", "no work_id on any document (category vacuous)"
+        wid = r["work_id"]
+        exp = conn.execute(
+            """SELECT COALESCE(SUM(blocks_count), 0) AS n
+               FROM knowledge_collection_documents
+              WHERE collection_id=? AND work_id=?""",
+            (coll_id, wid)).fetchone()["n"]
+        resp = q({"term": {"keywords.work_id": wid}}, size=20)
+        n = total_of(resp)
+        all_w = all((h.get("_source") or {}).get("keywords", {})
+                    .get("work_id") == wid for h in hits_of(resp))
+        ok = (n == exp) and all_w
+        return ("pass" if ok else "fail"), \
+            f"keywords.work_id={wid}: hits={n}, expected={exp}, " \
+            f"all-same-work={all_w}"
+
+    # --- 06 custom metadata filter -----------------------------------------
+    def _do_metadata():
+        row = conn.execute(
+            """SELECT f.field_key, v.value
+               FROM knowledge_metadata_values v
+               JOIN knowledge_metadata_fields f ON f.field_id = v.field_id
+              WHERE f.enabled = 1 AND f.scope = 'collection'
+                AND v.collection_id = ?
+              ORDER BY v.value_id LIMIT 1""",
+            (coll_id,)).fetchone()
+        if not row or row["value"] is None:
+            return "skipped", \
+                "no collection-scope metadata value (category vacuous)"
+        key, value = row["field_key"], row["value"]
+        # expected = blocks of docs whose MERGED metadata keeps the value
+        exp = 0
+        for d in conn.execute(
+                "SELECT * FROM knowledge_collection_documents "
+                "WHERE collection_id=?", (coll_id,)):
+            if _document_metadata(conn, coll_id, d).get(key) == value:
+                exp += d["blocks_count"] or 0
+        # real ES: a dynamic string field is text + .keyword subfield —
+        # the term query must hit the exact .keyword side
+        resp = q({"term": {"metadata." + key + ".keyword": value}},
+                 size=20)
+        n = total_of(resp)
+        all_m = all((h.get("_source") or {}).get("metadata", {})
+                    .get(key) == value for h in hits_of(resp))
+        ok = (n == exp) and all_m
+        return ("pass" if ok else "fail"), \
+            f"metadata.{key}={value!r}: hits={n}, expected={exp}, " \
+            f"all-carry-value={all_m}"
+
+    # --- 07 pagination -------------------------------------------------------
+    def _do_pagination():
+        sort = [{"_id": {"order": "asc"}}]  # stable paging on real ES too
+        pages = []
+        totals = set()
+        for f in (0, 2, 4):
+            resp = q({"match_all": {}}, size=2, from_=f, sort=sort)
+            totals.add(total_of(resp))
+            pages.append([h["_id"] for h in hits_of(resp)])
+        all_ids = [i for pg in pages for i in pg]
+        stable = len(totals) == 1
+        unique = len(all_ids) == len(set(all_ids))
+        ok = stable and unique and all_ids
+        return ("pass" if ok else "fail"), \
+            f"pages(from=0/2/4, size=2): totals={sorted(totals, key=str)}, " \
+            f"ids={len(all_ids)}, unique={unique}"
+
+    # --- 08 determinism ------------------------------------------------------
+    def _do_determinism():
+        sort = [{"_id": {"order": "asc"}}]
+        a = [h["_id"] for h in hits_of(
+            q({"match_all": {}}, size=20, sort=sort))]
+        b = [h["_id"] for h in hits_of(
+            q({"match_all": {}}, size=20, sort=sort))]
+        ok = bool(a) and a == b
+        return ("pass" if ok else "fail"), \
+            f"two identical sorted queries: {len(a)} vs {len(b)} ids, " \
+            f"equal={a == b}"
+
+    # --- 09 absence -----------------------------------------------------------
+    def _do_absence():
+        nonsense = "زبرجدی‌فوق‌العادة‌۹۸۷۶۵"
+        n = total_of(q({"match_phrase": {"normalized_text": nonsense}}))
+        ok = n == 0
+        return ("pass" if ok else "fail"), \
+            f"nonsense phrase: hits={n} (expected 0)"
+
+    # --- 10 latency smoke -------------------------------------------------------
+    def _do_latency():
+        t0 = time.time()
+        _es_request(es, "GET", "/" + alias + "/_count")
+        dt = time.time() - t0
+        ok = dt < 30.0
+        return ("pass" if ok else "fail"), \
+            f"count query took {dt:.3f}s (budget 30s)"
+
+    runners = {
+        "count": _do_count,
+        "exact_block": _do_exact,
+        "partial_text": _do_partial,
+        "heading_filter": _do_heading,
+        "work_filter": _do_work,
+        "metadata_filter": _do_metadata,
+        "pagination": _do_pagination,
+        "determinism": _do_determinism,
+        "absence": _do_absence,
+        "latency": _do_latency,
+    }
+    categories = {}
+    failed = []
+    for code in _SEARCH_CATEGORIES:
+        fn = runners[code]
+        try:
+            status, detail = fn()
+        except Exception as e:  # noqa: BLE001 — a failed query IS evidence
+            status, detail = "fail", f"{type(e).__name__}: {e}"
+        categories[code] = {"status": status, "detail": detail}
+        if status == "fail":
+            failed.append(code)
+    return {
+        "version": "sa-1",
+        "alias": alias,
+        "index": index,
+        "build_iv_id": build["iv_id"],
+        "expected_count": expected,
+        "categories": categories,
+        "overall": "pass" if not failed else "fail",
+        "failed": failed,
+        "ran_at": _now(),
+    }
+
+
+def _job_kind_search_acceptance(conn, job_id):
+    """PCM-20.9 Stage E — the guarded search acceptance (job).
+
+    Guards (honest, no fabricated results):
+      - a Stage D build (content_sha256 NOT NULL) must exist;
+      - PCT_ES_URL must be configured, else the job fails BLOCKED;
+      - the build's es_index_status must be 'success' (a live alias),
+        else BLOCKED — acceptance against a non-live index is meaningless.
+    Outcome is written to the build row (search_status pass/fail/blocked
+    + search_detail report) and to the collection (validation_status
+    accepted / needs_review). The alias is never touched here.
+    """
+    r = conn.execute(
+        "SELECT job_key FROM knowledge_jobs WHERE job_id=?",
+        (job_id,)).fetchone()
+    _, coll_id = r["job_key"].split(":", 1)
+    coll = conn.execute(
+        "SELECT * FROM knowledge_collections WHERE collection_id=?",
+        (coll_id,)).fetchone()
+    if not coll:
+        raise RuntimeError(f"collection {coll_id} not found")
+    build = conn.execute(
+        """SELECT * FROM knowledge_index_builds
+           WHERE collection_id=? AND content_sha256 IS NOT NULL
+           ORDER BY created_at DESC, iv_id DESC""",
+        (coll_id,)).fetchone()
+    if not build:
+        raise RuntimeError("no Stage D corpus build found — run the "
+                           "corpus build (Stage D) first")
+    build = dict(build)
+
+    def _mark_blocked(reason):
+        conn.execute(
+            "UPDATE knowledge_index_builds SET search_status=?, "
+            "search_detail=? WHERE iv_id=?",
+            ("blocked", json.dumps(
+                {"status": "blocked", "reason": reason},
+                ensure_ascii=False), build["iv_id"]))
+        conn.commit()
+        _audit_log(conn, coll_id, "acceptance", "search_acceptance_blocked",
+                   "blocked", {"iv_id": build["iv_id"], "reason": reason})
+
+    if not _es_url():
+        _mark_blocked("PCT_ES_URL تنظیم نیست — search acceptance "
+                      "غیرفعال (Stage D ES factory هم blocked است)")
+        raise RuntimeError("search acceptance BLOCKED: PCT_ES_URL is "
+                           "not set (no cluster configured)")
+    if (build["es_index_status"] or "pending") != "success":
+        _mark_blocked(f"es_index_status={build['es_index_status']!r} — "
+                      "ابتدا Stage D تا es success (alias زنده) بماند")
+        raise RuntimeError("search acceptance BLOCKED: the Stage D ES "
+                           "factory has no successful index yet")
+
+    _job_progress(conn, job_id, 1, len(_SEARCH_CATEGORIES),
+                  "acceptance start")
+    report = _search_acceptance_run(conn, build, coll_id)
+    overall = report["overall"]
+    conn.execute(
+        "UPDATE knowledge_index_builds SET search_status=?, "
+        "search_detail=? WHERE iv_id=?",
+        (overall, json.dumps(report, ensure_ascii=False), build["iv_id"]))
+    vs = "accepted" if overall == "pass" else "needs_review"
+    conn.execute(
+        "UPDATE knowledge_collections SET validation_status=?, "
+        "updated_at=? WHERE collection_id=?",
+        (vs, _now(), coll_id))
+    conn.commit()
+    _job_progress(conn, job_id, len(_SEARCH_CATEGORIES),
+                  len(_SEARCH_CATEGORIES), f"acceptance {overall}")
+    _audit_log(conn, coll_id, "acceptance", "search_acceptance",
+               "ok" if overall == "pass" else "fail",
+               {"iv_id": build["iv_id"], "overall": overall,
+                "failed": report.get("failed", [])})
+
+
+def _job_kind_release(conn, job_id):
+    """PCM-20.9 Final — the release bundle (standalone, always runnable).
+
+    Produces a content-addressed zip:
+      corpus/corpus-data.zip + corpus-manifest.json   (c-1)
+      dumps/<file_id>/{canonical files + dump-manifest.json}  (d-1, one per doc)
+      release-manifest.json  — chained hashes of EVERY layer + provenance
+      README.md              — human provenance
+    All layers are re-verified BEFORE packaging (hashes recomputed from the
+    bytes on disk; a mismatch fails the job). The release row is keyed by
+    (collection_id, content_sha256): the same corpus content produces the
+    SAME release_id and the zip is reused (no rewrite).
+
+    RAG is config-guarded: PCT_RAG_INGEST_URL absent -> rag_status='blocked'
+    (honest, nothing called); present -> ingest attempt recorded.
+    """
+    from factory.dump import validate_dump
+    from factory.corpus import ARCHIVE_NAME, CORPUS_DATA_FILES
+
+    r = conn.execute(
+        "SELECT job_key FROM knowledge_jobs WHERE job_id=?",
+        (job_id,)).fetchone()
+    _, coll_id = r["job_key"].split(":", 1)
+    coll = conn.execute(
+        "SELECT * FROM knowledge_collections WHERE collection_id=?",
+        (coll_id,)).fetchone()
+    if not coll:
+        raise RuntimeError(f"collection {coll_id} not found")
+    coll = dict(coll)
+    build = conn.execute(
+        """SELECT * FROM knowledge_index_builds
+           WHERE collection_id=? AND content_sha256 IS NOT NULL
+           ORDER BY created_at DESC, iv_id DESC""",
+        (coll_id,)).fetchone()
+    if not build:
+        raise RuntimeError("no Stage D corpus build found — run the "
+                           "corpus build (Stage D) first")
+    build = dict(build)
+    corpus_dir = os.path.join(knowledge_data_dir(), build["out_dir"])
+    content_sha = build["content_sha256"]
+    total = 4  # corpus / dumps / manifest / rag
+
+    # ---- 1. corpus layer (c-1): re-verify the archive + manifest ---------
+    _job_progress(conn, job_id, 1, total, "verify corpus (c-1)")
+    archive = os.path.join(corpus_dir, ARCHIVE_NAME)
+    if not os.path.isfile(archive):
+        raise RuntimeError(f"corpus archive missing on disk: {archive}")
+    real_archive = _sha256_file(archive)
+    if real_archive != content_sha:
+        raise RuntimeError(
+            "corpus archive sha mismatch — on-disk archive does not match "
+            "the recorded build content_sha256")
+    with open(os.path.join(corpus_dir, "corpus-manifest.json"),
+              encoding="utf-8") as fh:
+        cman = json.load(fh)
+    cman_sha = _sha256_file(os.path.join(corpus_dir,
+                                         "corpus-manifest.json"))
+    corpus_files = {}
+    for f in cman.get("files") or []:
+        p = os.path.join(corpus_dir, f["name"])
+        corpus_files[f["name"]] = {
+            "sha256": _sha256_file(p),
+            "size_bytes": os.path.getsize(p),
+        }
+
+    # ---- 2. dumps layer (d-1): exactly the dumps the corpus was built ----
+    # from (the corpus manifest's input_dumps is the authoritative layer
+    # list — the release must mirror the corpus, not the current DB).
+    _job_progress(conn, job_id, 2, total, "verify dumps (d-1)")
+    dumps_root = os.path.join(os.path.dirname(corpus_dir), "dumps")
+    input_dumps = cman.get("input_dumps") or []
+    if not input_dumps:
+        raise RuntimeError("corpus manifest has no input_dumps — cannot "
+                           "build a release from it")
+    corpus_fids = sorted((i.get("file_id") or "" for i in input_dumps))
+    docs = conn.execute(
+        """SELECT file_id, file_name FROM knowledge_collection_documents
+           WHERE collection_id=? AND out_dir IS NOT NULL
+             AND status IN ('parsed','needs_review','approved','indexed')""",
+        (coll_id,)).fetchall()
+    doc_by_fid = {d["file_id"]: (d["file_name"] or "") for d in docs
+                  if d["file_id"]}
+    db_fids = sorted(doc_by_fid)
+    if corpus_fids != db_fids:
+        stale = sorted(set(db_fids) - set(corpus_fids))
+        gone = sorted(set(corpus_fids) - set(db_fids))
+        raise RuntimeError(
+            "corpus is stale relative to the collection's documents — "
+            "run the corpus build (Stage D) again before release "
+            f"(new in DB: {stale}; not in DB: {gone})")
+    dumps_entries = []
+    for i, entry in enumerate(input_dumps, 1):
+        fid = entry.get("file_id")
+        dump_dir = os.path.join(dumps_root, fid)
+        dm_path = os.path.join(dump_dir, "dump-manifest.json")
+        if not os.path.isfile(dm_path):
+            raise RuntimeError(f"dump missing on disk: {fid}")
+        ok, errs, _w = validate_dump(dump_dir)
+        if not ok:
+            raise RuntimeError(f"dump invalid ({fid}): "
+                               + "; ".join(errs[:3]))
+        with open(dm_path, encoding="utf-8") as fh:
+            dm = json.load(fh)
+        fentries = []
+        for e in dm.get("files") or []:
+            p = os.path.join(dump_dir, e["name"])
+            real = _sha256_file(p)
+            if real != e.get("sha256"):
+                raise RuntimeError(
+                    f"dump file hash mismatch {fid}/{e['name']}")
+            fentries.append({"name": e["name"], "sha256": real,
+                             "size_bytes": os.path.getsize(p)})
+        dumps_entries.append({
+            "file_id": fid,
+            "input_filename": doc_by_fid.get(fid, ""),
+            "input_sha256": (dm.get("integrity") or {}).get("input_sha256"),
+            "work_id": (dm.get("identifiers") or {}).get("work_id"),
+            "edition_id": (dm.get("identifiers") or {}).get("edition_id"),
+            "volume_id": (dm.get("identifiers") or {}).get("volume_id"),
+            "dump_contract": dm.get("dump_contract_version"),
+            "dump_manifest_sha256": _sha256_file(dm_path),
+            "blocks": (dm.get("counts") or {}).get("blocks"),
+            "files": fentries,
+        })
+    _job_progress(conn, job_id, 2, total,
+                  f"dumps verified ({len(dumps_entries)})")
+
+    # ---- 3. build the deterministic release zip --------------------------
+    release_id = "rel-" + hashlib.sha256(
+        (coll_id + content_sha).encode("utf-8")).hexdigest()[:8]
+    release_dir = os.path.join(knowledge_data_dir(), "releases", release_id)
+    os.makedirs(release_dir, exist_ok=True)
+    zip_path = os.path.join(release_dir, f"release-{release_id}.zip")
+
+    # Idempotent: a row with this (collection, content) + zip on disk -> reuse
+    existing = conn.execute(
+        "SELECT release_id, zip_path, zip_sha256 FROM knowledge_releases "
+        "WHERE collection_id=? AND content_sha256=?",
+        (coll_id, content_sha)).fetchone()
+    if existing and os.path.isfile(existing["zip_path"]):
+        _audit_log(conn, coll_id, "release", "release_reused", "ok",
+                   {"release_id": existing["release_id"],
+                    "content_sha256": content_sha})
+        _job_progress(conn, job_id, total, total,
+                      f"reused {existing['release_id']}")
+        return
+
+    members = []  # (arcname, abs_path)
+    # corpus layer
+    members.append(("corpus/" + ARCHIVE_NAME, archive))
+    members.append(("corpus/corpus-manifest.json",
+                    os.path.join(corpus_dir, "corpus-manifest.json")))
+    for name in CORPUS_DATA_FILES:
+        members.append(("corpus/" + name, os.path.join(corpus_dir, name)))
+    # dumps layer
+    for de in dumps_entries:
+        for fe in de["files"]:
+            members.append(
+                (f"dumps/{de['file_id']}/{fe['name']}",
+                 os.path.join(dumps_root, de["file_id"], fe["name"])))
+
+    _job_progress(conn, job_id, 3, total, "pack release data zip")
+    _write_release_zip(zip_path, members)
+    zip_sha = _sha256_file(zip_path)
+    zip_size = os.path.getsize(zip_path)
+
+    # ---- 4. release manifest (chained hashes) + README -------------------
+    # The manifest is a SIDE-CAR (NOT inside the zip) — exactly like corpus
+    # c-1: the container cannot hash itself, so the manifest sits alongside
+    # and carries the hash of the data zip it describes.
+    dumps_chain = hashlib.sha256(
+        "|".join(sorted(e["dump_manifest_sha256"]
+                        for e in dumps_entries)).encode("utf-8")).hexdigest()
+    manifest = {
+        "release_contract": "rel-1",
+        "release_id": release_id,
+        "collection_id": coll_id,
+        "collection_name": coll["name"],
+        "collection_slug": coll["slug"],
+        "build_iv_id": build["iv_id"],
+        "generated_at": _now(),
+        "generator": "knowledge-studio/release",
+        "data_zip": {"name": os.path.basename(zip_path), "sha256": zip_sha,
+                     "size_bytes": zip_size,
+                     "members": [m[0] for m in sorted(members,
+                                                       key=lambda x: x[0])]},
+        "corpus": {
+            "contract": "c-1",
+            "archive": {"name": ARCHIVE_NAME, "sha256": real_archive,
+                        "size_bytes": os.path.getsize(archive)},
+            "manifest_sha256": cman_sha,
+            "files": corpus_files,
+            "blocks_total": (cman.get("counts") or {}).get("blocks_total"),
+        },
+        "dumps": {
+            "contract": "d-1",
+            "count": len(dumps_entries),
+            "entries": dumps_entries,
+        },
+        "chained": {
+            "corpus_archive_sha256": real_archive,
+            "dumps_root_sha256": dumps_chain,
+            "data_zip_sha256": zip_sha,
+        },
+        "provenance": {
+            "es_alias": coll["es_alias"],
+            "es_index_status": build["es_index_status"],
+            "search_status": build["search_status"],
+            "schema_version": build["schema_version"],
+            "normalization_version": build["norm_version"],
+            "chunking_version": build["chunking_version"],
+        },
+    }
+    m_bytes = json.dumps(manifest, ensure_ascii=False,
+                         indent=2).encode("utf-8")
+    with open(os.path.join(release_dir, "release-manifest.json"),
+              "wb") as fh:
+        fh.write(m_bytes)
+
+    readme = _release_readme(coll, build, manifest, dumps_entries)
+    with open(os.path.join(release_dir, "README.md"), "w",
+              encoding="utf-8") as fh:
+        fh.write(readme)
+
+    # ---- 5. RAG (guarded) ------------------------------------------------
+    _job_progress(conn, job_id, 4, total, "rag ingest (guarded)")
+    rag_status, rag_detail = _rag_ingest(conn, coll_id, build,
+                                         {"release_id": release_id,
+                                          "zip_sha256": zip_sha,
+                                          "zip_path": zip_path},
+                                         manifest)
+
+    # ---- 6. persist release row (upsert by content) ----------------------
+    now = _now()
+    conn.execute(
+        """INSERT INTO knowledge_releases
+           (release_id, collection_id, build_iv_id, content_sha256,
+            zip_path, zip_sha256, size_bytes, manifest, rag_status,
+            created_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+           ON CONFLICT(release_id) DO UPDATE SET
+             build_iv_id=excluded.build_iv_id,
+             zip_path=excluded.zip_path,
+             zip_sha256=excluded.zip_sha256,
+             size_bytes=excluded.size_bytes,
+             manifest=excluded.manifest,
+             rag_status=excluded.rag_status""",
+        (release_id, coll_id, build["iv_id"], content_sha, zip_path,
+         zip_sha, zip_size,
+         json.dumps(manifest, ensure_ascii=False), rag_status, now))
+    conn.commit()
+    _audit_log(conn, coll_id, "release", "release_built", "ok",
+               {"release_id": release_id, "content_sha256": content_sha,
+                "zip_sha256": zip_sha, "size_bytes": zip_size,
+                "dumps": len(dumps_entries), "rag_status": rag_status})
+    _job_progress(conn, job_id, total, total, f"release {release_id}")
+
+
+def _sha256_file(path, chunk=1 << 20):
+    h = hashlib.sha256()
+    with open(path, "rb") as f:
+        for c in iter(lambda: f.read(chunk), b""):
+            h.update(c)
+    return h.hexdigest()
+
+
+def _write_release_zip(path, members):
+    """Deterministic release zip: fixed member order (sorted by arcname),
+    fixed date 1980-01-01, deflate. No self-hash member (like corpus c-1)."""
+    import zipfile
+    ordered = sorted(members, key=lambda m: m[0])
+    fixed_date = (1980, 1, 1, 0, 0, 0)
+    with zipfile.ZipFile(path, "w", zipfile.ZIP_DEFLATED, compresslevel=9) as z:
+        for arcname, abspath in ordered:
+            zi = zipfile.ZipInfo(arcname, date_time=fixed_date)
+            zi.compress_type = zipfile.ZIP_DEFLATED
+            zi.external_attr = 0o644 << 16
+            with open(abspath, "rb") as f:
+                data = f.read()
+            z.writestr(zi, data)
+
+
+def _release_readme(coll, build, manifest, dumps_entries):
+    c = manifest["corpus"]
+    lines = [
+        "# Persian Corpus Toolkit — Release " + manifest["release_id"],
+        "",
+        "This release is a **self-contained, verifiable** package of the "
+        "canonical corpus and its source dumps.",
+        "",
+        "## On-disk layout",
+        f"- `release-{manifest['release_id']}.zip` — DATA ONLY (corpus + "
+        f"dumps); sha256 `{manifest['data_zip']['sha256']}`",
+        "- `release-manifest.json` — side-car: chained hash of every layer "
+        "(NOT inside the zip, so the zip can be hashed)",
+        "- `README.md` — this file",
+        "",
+        "## Provenance",
+        f"- Collection: {coll['name']} (`{coll['slug']}`, "
+        f"`{coll['collection_id']}`)",
+        f"- Build: `{build['iv_id']}` (content sha "
+        f"`{build['content_sha256']}`)",
+        f"- Schema version: {build['schema_version']} · "
+        f"normalization: {build['norm_version']} · "
+        f"chunking: {build['chunking_version']}",
+        f"- ES: {build['es_index_status']} · search acceptance: "
+        f"{build['search_status']}",
+        f"- Generated at: {manifest['generated_at']}",
+        "",
+        "## Contents (layered + chained hashes)",
+        f"- `corpus/corpus-data.zip` — canonical c-1 archive "
+        f"(sha256 `{c['archive']['sha256']}`, "
+        f"{c['blocks_total']} blocks)",
+        f"- `corpus/corpus-manifest.json` — sha256 "
+        f"`{manifest['corpus']['manifest_sha256']}`",
+        f"- `corpus/*.jsonl` — the 4 c-1 streams (raw/normalized × full/unique)",
+        f"- `dumps/<file_id>/` — {len(dumps_entries)} source dumps (d-1), "
+        "each re-validated (V1..V11)",
+        "",
+        "## Verification (run in any environment)",
+        "1. Recompute `sha256` of the data zip and compare with "
+        "`data_zip.sha256` in `release-manifest.json`.",
+        "2. Inside the zip: recompute `sha256(corpus/corpus-data.zip)` and "
+        "compare with `corpus.archive.sha256` (must also equal the build's "
+        "content sha).",
+        "3. For each `dumps/<file_id>/`, re-run the d-1 validator "
+        "(`factory.dump.validate_dump`) — all V1..V11 checks must pass.",
+        "The release is trustworthy if and only if all three match.",
+        "",
+    ]
+    return "\n".join(lines)
 
 
 _JOB_KINDS["process_document"] = _job_kind_process_document
 _JOB_KINDS["process_batch"] = _job_kind_process_batch
 _JOB_KINDS["process_batch_retry"] = _job_kind_process_batch_retry
 _JOB_KINDS["corpus_build"] = _job_kind_corpus_build
+_JOB_KINDS["search_acceptance"] = _job_kind_search_acceptance
+_JOB_KINDS["release"] = _job_kind_release
 
 
 # ---------------------------------------------------------------------------
@@ -2149,11 +2976,12 @@ def register_knowledge_routes(app, get_db):
                 """SELECT iv_id, es_index, es_alias, schema_version,
                           norm_version, chunking_version, chunk_count,
                           status, created_at, completed_at,
-                          content_sha256, out_dir, es_index_status, es_detail
+                          content_sha256, out_dir, es_index_status,
+                          es_detail, search_status, search_detail
                    FROM knowledge_index_builds
                    WHERE collection_id = ?
                    ORDER BY created_at DESC, iv_id DESC""",
-                 (row["collection_id"],))
+                  (row["collection_id"],))
         ]
         return jsonify({"ok": True,
                         "collection_id": row["collection_id"],
@@ -3237,6 +4065,8 @@ def register_knowledge_routes(app, get_db):
                       SET schema_version=?, updated_at=?
                       WHERE collection_id=?""", (schema_id, now, cid))
         db.commit()
+        _audit_log(db, cid, "schema", "schema_approved", "ok",
+                   {"schema_id": schema_id, "version": sv["version"]})
         return jsonify({"ok": True, "schema_id": schema_id,
                         "version": sv["version"], "approved_at": now})
 
@@ -3290,12 +4120,13 @@ def register_knowledge_routes(app, get_db):
                 """SELECT iv_id, es_index, es_alias, schema_version,
                           norm_version, chunking_version, chunk_count,
                           status, created_at, completed_at,
-                          content_sha256, out_dir, es_index_status, es_detail
+                          content_sha256, out_dir, es_index_status,
+                          es_detail, search_status, search_detail
                    FROM knowledge_index_builds
                    WHERE collection_id = ?
                      AND content_sha256 IS NOT NULL
                    ORDER BY created_at DESC, iv_id DESC""",
-                 (row["collection_id"],))
+                  (row["collection_id"],))
         ]
         return jsonify({"ok": True,
                         "collection_id": row["collection_id"],
@@ -3326,6 +4157,217 @@ def register_knowledge_routes(app, get_db):
                     manifest = None
         item["manifest"] = manifest
         return jsonify({"ok": True, "build": item})
+
+    # ── PCM-20.9 Stage E — search acceptance + index approval ───────────
+
+    @app.route("/api/knowledge/collections/<int:coll_id>/search-acceptance",
+               methods=["POST"])
+    @require_auth
+    def knowledge_search_acceptance(coll_id):
+        """Start the Stage E search acceptance (job, guarded).
+
+        Validates the 10 categories against the LIVE alias of the
+        collection's newest Stage D build. Guards: no Stage D build ->
+        409; no PCT_ES_URL or no successful ES index -> the job fails
+        honestly as BLOCKED (no fabricated results). Idempotency key
+        search_acceptance:<cid> (force_retry: re-runnable).
+        """
+        db = get_db()
+        ensure_knowledge_schema(db)
+        row = _collection_row(db, coll_id)
+        if not row:
+            return jsonify({"ok": False, "message": "کالکشن پیدا نشد"}), 404
+        cid = row["collection_id"]
+        has_build = db.execute(
+            """SELECT 1 FROM knowledge_index_builds
+               WHERE collection_id=? AND content_sha256 IS NOT NULL
+               LIMIT 1""", (cid,)).fetchone()
+        if not has_build:
+            return jsonify({"ok": False, "code": "no_corpus_build",
+                            "message": "هنوز پیکره canonical (Stage D) "
+                                       "ساخته نشده — ابتدا «ساخت پیکره»"}), 409
+        job, started = _submit_job(
+            db, job_key=f"search_acceptance:{cid}",
+            kind="search_acceptance", collection_id=cid, batch_id=None,
+            total=len(_SEARCH_CATEGORIES),
+            idempotency_key=f"search_acceptance:{cid}", force_retry=True)
+        return jsonify({"ok": True, "queued": started, "job": job}), \
+            (202 if started else 200)
+
+    @app.route("/api/knowledge/index-builds/<iv_id>/approve",
+               methods=["POST"])
+    @require_auth
+    def knowledge_approve_index_build(iv_id):
+        """Approve an index version (Stage E gate, RECON §8).
+
+        Hard gate: the build must have a FULL acceptance pass
+        (search_status='pass'). Without it -> 409 (no approval on a
+        non-validated alias — stop rule «no live alias change without
+        acceptance»). On approval: collection.current_index_build +
+        validation_status='accepted' + indexing_status='ready'.
+        """
+        db = get_db()
+        ensure_knowledge_schema(db)
+        r = db.execute(
+            "SELECT * FROM knowledge_index_builds WHERE iv_id=?",
+            (iv_id,)).fetchone()
+        if not r:
+            return jsonify({"ok": False, "message": "بیلد پیدا نشد"}), 404
+        if (r["search_status"] or "") != "pass":
+            return jsonify(
+                {"ok": False, "code": "acceptance_not_passed",
+                 "search_status": r["search_status"],
+                 "message": "تأیید نسخه‌ی ایندکس فقط بعد از گذر کامل "
+                            "اعتبارسنجی جستجو (Stage E) امکان دارد"}), 409
+        if (r["es_index_status"] or "") != "success":
+            return jsonify(
+                {"ok": False, "code": "es_not_success",
+                 "es_index_status": r["es_index_status"],
+                 "message": "این بیلد ایندکس ES زنده ندارد (es success "
+                            "نیست) — قابل تأیید نیست"}), 409
+        db.execute(
+            """UPDATE knowledge_collections
+               SET current_index_build=?, validation_status='accepted',
+                   indexing_status='ready', updated_at=?
+              WHERE collection_id=?""",
+            (iv_id, _now(), r["collection_id"]))
+        db.commit()
+        _audit_log(db, r["collection_id"], "acceptance", "index_approved",
+                   "ok", {"iv_id": iv_id,
+                          "search_status": r["search_status"],
+                          "es_index_status": r["es_index_status"]})
+        return jsonify({"ok": True, "iv_id": iv_id,
+                        "collection_id": r["collection_id"],
+                        "validation_status": "accepted"})
+
+    # ── PCM-20.9 Final — release bundle + audit trail ─────────────────────
+
+    @app.route("/api/knowledge/collections/<int:coll_id>/release",
+               methods=["POST"])
+    @require_auth
+    def knowledge_release(coll_id):
+        """Start the release build (job). Standalone: it never needs ES or
+        RAG — the bundle is always produced; RAG ingest is config-guarded
+        (absent URL -> rag_status='blocked', nothing called). Idempotent by
+        corpus content (same content -> same release_id, zip reused)."""
+        db = get_db()
+        ensure_knowledge_schema(db)
+        row = _collection_row(db, coll_id)
+        if not row:
+            return jsonify({"ok": False, "message": "کالکشن پیدا نشد"}), 404
+        cid = row["collection_id"]
+        build = db.execute(
+            """SELECT iv_id FROM knowledge_index_builds
+               WHERE collection_id=? AND content_sha256 IS NOT NULL
+               ORDER BY created_at DESC, iv_id DESC LIMIT 1""",
+            (cid,)).fetchone()
+        if not build:
+            return jsonify(
+                {"ok": False, "code": "no_corpus_build",
+                 "message": "برای ساخت release باید پیکره canonical "
+                             "(Stage D) وجود داشت — ابتدا «ساخت پیکره»"}
+            ), 409
+        n = db.execute(
+            """SELECT COUNT(*) AS n FROM knowledge_collection_documents
+               WHERE collection_id=? AND out_dir IS NOT NULL
+                 AND status IN ('parsed','needs_review','approved',
+                                'indexed')""",
+            (cid,)).fetchone()["n"]
+        job, started = _submit_job(
+            db, job_key=f"release:{cid}", kind="release",
+            collection_id=cid, batch_id=None, total=4,
+            idempotency_key=f"release:{cid}", force_retry=True)
+        return jsonify({"ok": True, "queued": started, "job": job,
+                        "documents": n}), (202 if started else 200)
+
+    @app.route("/api/knowledge/collections/<int:coll_id>/releases",
+               methods=["GET"])
+    @require_auth
+    def knowledge_releases(coll_id):
+        """List the release bundles of a collection (newest first)."""
+        db = get_db()
+        ensure_knowledge_schema(db)
+        row = _collection_row(db, coll_id)
+        if not row:
+            return jsonify({"ok": False, "message": "کالکشن پیدا نشد"}), 404
+        rels = [dict(r) for r in db.execute(
+            """SELECT release_id, collection_id, build_iv_id,
+                      content_sha256, zip_path, zip_sha256, size_bytes,
+                      rag_status, created_at
+               FROM knowledge_releases
+               WHERE collection_id=?
+               ORDER BY created_at DESC, release_id DESC""",
+            (row["collection_id"],))]
+        return jsonify({"ok": True,
+                        "collection_id": row["collection_id"],
+                        "releases": rels})
+
+    @app.route("/api/knowledge/releases/<release_id>/download",
+               methods=["GET"])
+    @require_auth
+    def knowledge_release_download(release_id):
+        """Download a release bundle zip (behind PCM-09 auth).
+
+        The on-disk zip is re-hashed against the recorded zip_sha256 before
+        it is served — a tampered/missing file never goes out the door."""
+        db = get_db()
+        ensure_knowledge_schema(db)
+        r = db.execute(
+            "SELECT * FROM knowledge_releases WHERE release_id=?",
+            (release_id,)).fetchone()
+        if not r:
+            return jsonify({"ok": False, "message": "release پیدا نشد"}), 404
+        p = r["zip_path"]
+        if not os.path.isfile(p):
+            return jsonify(
+                {"ok": False, "code": "zip_missing",
+                 "message": "فایل zip روی دیسک پیدا نشد (release روی DB "
+                             "ثبت است ولی فایل غایب است)"}), 410
+        real = _sha256_file(p)
+        if real != r["zip_sha256"]:
+            _audit_log(db, r["collection_id"], "release",
+                       "download_hash_mismatch", "fail",
+                       {"release_id": release_id,
+                        "expected": r["zip_sha256"], "actual": real})
+            return jsonify(
+                {"ok": False, "code": "hash_mismatch",
+                 "message": "SHA-256 فایل zip با مقدار ثبت‌شده نمی‌خواند "
+                             "— دانلود برای امنیت متوقف شد"}), 409
+        # serve the VERIFIED bytes in memory (no open handle left behind —
+        # on Windows an open handle would block the data-dir cleanup)
+        with open(p, "rb") as fh:
+            data = fh.read()
+        resp = Response(data, mimetype="application/zip")
+        resp.headers[
+            "Content-Disposition"] = (
+            "attachment; filename=" + os.path.basename(p))
+        return resp
+
+    @app.route("/api/knowledge/collections/<int:coll_id>/audit",
+               methods=["GET"])
+    @require_auth
+    def knowledge_audit(coll_id):
+        """Read the append-only audit trail of a collection
+        (newest first, ?limit= capped)."""
+        db = get_db()
+        ensure_knowledge_schema(db)
+        row = _collection_row(db, coll_id)
+        if not row:
+            return jsonify({"ok": False, "message": "کالکشن پیدا نشد"}), 404
+        try:
+            limit = max(1, min(int(request.args.get("limit", 100)), 500))
+        except (TypeError, ValueError):
+            limit = 100
+        entries = [dict(r) for r in db.execute(
+            """SELECT ts, actor, stage, action, status, detail_json
+               FROM knowledge_audit_log
+               WHERE collection_id=?
+               ORDER BY id DESC LIMIT ?""",
+            (row["collection_id"], limit))]
+        return jsonify({"ok": True,
+                        "collection_id": row["collection_id"],
+                        "count": len(entries),
+                        "entries": entries})
 
     @app.route("/api/knowledge/queue/summary", methods=["GET"])
     @require_auth

@@ -19,18 +19,18 @@
 | 8 | Dump d-1 | ✅ IMPLEMENTED (فقط CLI/offline) | `factory/dump.py`؛ 26 تست D؛ **اتصال به API ندارد** |
 | 9 | Corpus c-1 | ✅ IMPLEMENTED (فقط CLI/offline) | `factory/corpus.py`؛ 24 تست C؛ **اتصال به API ندارد** |
 | 10 | Dataset builder | ✅ IMPLEMENTED (offline) | `corpus/build_dataset.py` + `corpus/tasnim/dataset.py` |
-| 11 | **Stage C — Schema Design & Mapping** | ⬜ NOT_IMPLEMENTED | فقط ستون‌های `schema_version='s-1'` ثابت؛ مدیریت نسخه‌ی schema وجود ندارد |
-| 12 | **Stage D — ES index factory** | ⛔ NOT_IMPLEMENTED + BLOCKED | هیچ ES در production نیست (§۵)؛ guard با env لازم |
-| 13 | **Stage E — Search validation** | ⛔ NOT_IMPLEMENTED + BLOCKED | وابسته به Stage D |
-| 14 | **RAG publish** | ⚠️ UNKNOWN contract | `rag.ai.ismc.ir` پورتال عمومی است؛ API ingest مستند یافت نشد (§۵.۲) |
+| 11 | **Stage C — Schema Design & Mapping** | ✅ IMPLEMENTED | versions اتمیک + immutable + validate dry-run + approve (PF-C01..C03) |
+| 12 | **Stage D — Corpus build + ES index factory** | ✅ IMPLEMENTED | corpus/build (c-1) + ES guarded (blocked بدون `PCT_ES_URL`) (PF-D01..D04) |
+| 13 | **Stage E — Search validation** | ✅ IMPLEMENTED | search-acceptance (mock ES) + approve gate (PF-E01..E03) |
+| 14 | **RAG publish** | 🟡 GUARDED | قرارداد ingest شناخته‌شده نیست → `rag_status=blocked` (بدون URL) / `failed` (با URL) (PF-F06) |
 | 15 | **Full Pipeline runner** | ⬜ NOT_IMPLEMENTED | — |
 | 16 | **Nightly scheduler** | ⬜ NOT_IMPLEMENTED | — |
 | 17 | **Pipeline dashboard (stage cards)** | ⬜ NOT_IMPLEMENTED | studio.html بدون نمای pipeline است |
-| 18 | Audit trail | 🟡 PARTIAL | `knowledge_jobs` + queue rows هست؛ جدول audit اختصاصی (append-only) نیست |
-| 19 | OpenAPI | 🟡 PARTIAL | 19 operation (PCM-14D/15)؛ operations pipeline اضافه نمی‌شوند |
-| 20 | UI multi-import (frontend) | ❌ BROKEN | `confirmImport()` فقط plan JSON می‌فرستد (studio.html) |
+| 18 | Audit trail | ✅ IMPLEMENTED | `knowledge_audit_log` (append-only) + `GET /audit` + کارت audit در UI (PF-F07) |
+| 19 | OpenAPI | ✅ IMPLEMENTED | 3 spec / 28 operation (PCM-14D/15/20.9) + `pcm19_openapi_check` + CT-01..06 (3 spec) |
+| 20 | UI multi-import (frontend) | ✅ IMPLEMENTED | `confirmImport()` → plan + آپلود واقعی تدریجی + retry-failed (Stage A/B، PF-A/B) |
 
-**نتیجه‌ی کلیدی:** نیمه‌ی «پردازش» (Factory + Queue + Jobs + Registry) قوی و تست‌شده است. نیمه‌ی «ورود» (multi-import) **شکسته** است و نیمه‌ی «خروج» (corpus/dump/dataset) آماده اما **اتصال‌نشده به API** است. ES/RAG هنوز وجود/قرارداد ندارند → guard می‌شوند.
+**نتیجه‌ی کلیدی (به‌روز بعد از Stages A..F + OpenAPI):** «ورود» (multi-import) و «خروج» (corpus/dump/release) حالا به API متصل‌اند؛ Stage D/E/F با guard صادقانه (ES/RAG) پیاده و تست‌شده‌اند. باقی‌مانده: pipeline runner/nightly/UI pipeline dashboard + deploy + گزارش.
 
 ---
 
@@ -309,4 +309,85 @@ Jobs: 44 مورد، همه succeeded. صف خالی. **ES: نه روی 9200/9300
 
 ---
 
-*این سند فقط وضعیت و شواهد است؛ هیچ تغییری در production یا کد انجام نشده است.*
+## ۱۲. لاگ اجرای واقعی (به‌روزرسانی زنده)
+
+### Stage A — ✅ (تست‌های PF-A01..A05 سبز)
+- جدول `knowledge_batch_files` + `batch_id` روی `knowledge_collection_documents` (additive).
+- `POST /collections/<id>/import/plan` + `POST /import/upload` (مطابقت plan + size + duplicate → 409/400/409) + `POST /batches/<id>/process` (فقط scope batch).
+- شمارنده‌های زنده: `uploaded/file_count` روی batch + `GET /batches/<id>`.
+
+### Stage B — ✅ (تست‌های PF-B01..B03 سبز)
+- `POST /batches/<id>/retry-failed` (فقط failedها؛ بدون failed → 409) + delete/restore فایل موقت + retry.
+- resume تدریجی multi-import در UI (upQueue + progress per-file).
+
+### Stage C — ✅ (تست‌های PF-C01..C03 سبز)
+- `knowledge_collection_schemas` + `knowledge_schema_fields` (versions اتمیک، immutable پس از approve)
+  + `validation_status` روی collection (`pending→validating→ready_for_approval→approved|needs_review`).
+- validate = dry-run واقعی روی بلوک‌های parse‌شده (missing/frequency per field)؛ approve فقط با
+  `report.overall=pass` و پوشش کامل فیلدهای required.
+
+### Stage D — ✅ (تست‌های PF-D01..D04 سبز)
+- `POST /collections/<id>/corpus-build` (job؛ idempotent) → پیکره canonical `c-1` از
+  `knowledge_blocks` (RAW + NORMALIZED جدا + provenance + dedup) + `GET /corpus-builds`.
+- کارخانه‌ی ایندکس ES guarded: بدون `PCT_ES_URL` → `es_index_status='blocked'` صادقانه؛
+  با ES: `PUT <name>_vNNNN` (mapping واقعی) → bulk (idهای idempotent) → `_refresh` →
+  count verification → `/_aliases` atomic (remove+add) → rollback alias اگر count mismatch.
+- reuse: اگر alias به همان index اشاره کند و count برابر باشد → بدون rebuild.
+
+### Stage E — ✅ (تست‌های PF-E01..E03 سبز)
+- `POST /collections/<id>/search-acceptance` (job؛ guarded: بدون ES یا بدون Stage D build → 409/BLOCKED).
+- ۱۰ دسته: count / exact_block (match_phrase + exact-source) / partial_text / heading_filter
+  / work_filter (keyword) / metadata_filter (`.keyword`) / pagination (sort `_id`، stable) /
+  determinism / absence / latency (budget 30s). خروجی: `search_status` +
+  `search_detail` (report `sa-1` JSON: overall/pass/fail/skipped + failed[]) روی build row.
+- guard صادقانه: شکست هر دسته → `search_status='fail'` + `validation_status='needs_review'`
+  + `POST /index-builds/<iv_id>/approve` → 409 `acceptance_not_passed`.
+- approve: فقط با `search_status='pass'` و `es_index_status='success'` →
+  `validation_status='accepted'` + `current_index_build=<iv_id>` (تأیید هر دو آدرس
+  `current_index_build` و `current_schema` روی collection).
+- تست با mock ES در سطح `_es_request` (build + acceptance روی یک fake cluster با alias map).
+
+### Final (Release) — ✅ (تست‌های PF-F01..F07 سبز)
+- `POST /collections/<id>/release` (job؛ guarded: بدون Stage D build → 409 `no_corpus_build`)
+  → باز-verify sha آرشیو corpus روی دایسک + باز-اعتبارسنجی کامل هر dump (d-1، V1..V11)
+  + zip قطعی (fixed timestamp 1980-01-01، deflate، مرتب‌شده) + **release-manifest کنار
+  zip (side-car، نه داخل zip — چون container نمی‌تواند خودش را hash کند، مثل c-1)** +
+  README + زنجیره‌ی hash (corpus archive → dumps root → data zip).
+- RAG guarded و صادقانه: بدون `PCT_RAG_INGEST_URL` → `rag_status='blocked'`؛
+  با URL → POST واقعی (payload: kind/contract/release_id/zip_sha256/manifest_sha256 +
+  `Authorization: Bearer`)؛ خطا → `failed` (release خراب نمی‌شود).
+- `GET /collections/<id>/releases` + `GET /releases/<release_id>/download`:
+  download **مجدداً hash می‌گیرد**؛ mismatch → 409 `hash_mismatch` + ثبت audit.
+- idempotent: هم‌محتوا → همان `release_id` + reuse zip (سطر تکراری نمی‌سازد).
+- stale corpus: آپلود جدید بعد از build → release job `failed` (stale) تا Stage D دوباره.
+- **audit trail**: جدول `knowledge_audit_log` (append-only؛ actor = `sess-<sha8>` برای
+  اکشن‌های request یا `worker` برای job) + `GET /collections/<id>/audit` (limit/offset) +
+  کارت «ردیابی اقدامات» در UI (فیلتر stage/action).
+- `test_pipeline`: 28/28 سبز (A5+B3+C3+D4+E3+F7+T0... A..F).
+
+### OpenAPI — ✅ (spec سوم + CT به‌روز)
+- `docs/openapi/pcm209-pipeline-release.openapi.yaml` — ۹ operation جدید
+  (corpus/build، corpus/builds، index-builds/<iv_id>، search-acceptance،
+  index-builds/<iv_id>/approve، release، releases، download، audit) + schemas
+  (JobObject/JobResult/IndexBuild/Release/AuditEntry/Error).
+- `test_api_contract`: `SPECS` به ۳ spec؛ `len(specs)==3`؛ `_path_url` مقدار عددی
+  برای `coll_id` (converter `<int:...>`).
+- `deploy/pcm19_openapi_check.py`: **3 specs, 28 operations** — OK.
+
+### وضعیت رگرسیون (آخرین اجرا)
+- `test_pipeline`: 28/28 سبز (A5+B3+C3+D4+E3+F7 = ۲۵ کلاس، ۲۸ تست).
+- رگرسیون کامل روی **Python 3.13** (با PyYAML، هم‌شکل CI): **228 تست → OK، 0 skip**
+  (200 موجود + 28 pipeline؛ CT-01..06 با ۳ spec سبز).
+- روی Python 3.14 (32-bit، بدون PyYAML): 228 تست → OK (10 skip CT، پیشین).
+- UI: کارت «ریلیز پیکره» (Build + releases + RAG badge) + کارت «ردیابی اقدامات»
+  (audit log با فیلتر) + JS syntax OK (node).
+
+### باقی‌مانده
+- Pipeline runner + schedule (nightly hook) + UI pipeline dashboard (چند stage زنجیره‌ای).
+- deploy/pcm209_deploy.sh + اجرای واقعی روی s52 (host در دسترس نبود).
+- `گزارش-PCM-20.9-KNOWLEDGE-STUDIO-FACTORY.md` (24 بخش) + راهنمای اپراتور فارسی.
+
+---
+
+*بخش ۱۲ به‌روزرسانی زنده است؛ بقیه‌ی مراحل (Pipeline runner، Nightly، UI pipeline
+dashboard، deploy، گزارش) در همین سند ثبت می‌شوند.*

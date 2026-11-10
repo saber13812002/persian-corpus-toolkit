@@ -1,0 +1,368 @@
+openapi: 3.0.3
+info:
+  title: "Persian Corpus Toolkit — Knowledge Studio: Canonical Pipeline & Release (PCM-20.9)"
+  version: 1.0.0
+  description: |
+    PCM-20.9 additive extension of the Corpus Knowledge Studio API
+    (`/api/knowledge/*`) covering the canonical-corpus pipeline stages
+    D/E and the final release bundle.
+
+    Stage D — canonical corpus build (`c-1`):
+    - POST /api/knowledge/collections/{coll_id}/corpus/build
+    - GET  /api/knowledge/collections/{coll_id}/corpus/builds
+    - GET  /api/knowledge/index-builds/{iv_id}
+
+    Stage E — search acceptance + index approval:
+    - POST /api/knowledge/collections/{coll_id}/search-acceptance
+    - POST /api/knowledge/index-builds/{iv_id}/approve
+
+    Release (final bundle, `rel-1`):
+    - POST /api/knowledge/collections/{coll_id}/release
+    - GET  /api/knowledge/collections/{coll_id}/releases
+    - GET  /api/knowledge/releases/{release_id}/download
+
+    Audit trail (append-only, PCM-20.9):
+    - GET  /api/knowledge/collections/{coll_id}/audit
+
+    Guarantees:
+    - Every stage runs as a `knowledge_jobs` row (202 + `job.job_id`);
+      progress via GET /api/knowledge/jobs/{job_id} (PCM-14 surface).
+    - Stage D is idempotent: same document set -> same `iv_id` (sha of
+      the content), reused without rebuild.
+    - Stage E acceptance validates the 10 canonical categories against
+      the LIVE alias. `approve` is a HARD gate: it only succeeds after
+      `search_status=pass` AND `es_index_status=success`; it then sets
+      the collection's `current_index_build` and `validation_status=accepted`.
+    - The release bundle re-verifies the corpus archive hash on disk and
+      re-validates every source dump (d-1, V1..V11) before packing.
+      `rag_status` is honest: `blocked` when PCT_RAG_INGEST_URL is unset
+      (unknown RAG contract), `failed` when a configured ingest refuses.
+    - All endpoints are protected by PCM-09 session auth (cookie).
+    - Responses use `{"ok": true, ...}` / `{"ok": false, "message": ..., "field"?: ...}`.
+servers:
+  - url: https://corpus.ai.ismc.ir
+    description: production (s52)
+tags:
+  - name: pipeline
+    description: Canonical corpus build + search acceptance (PCM-20.9 Stage D/E)
+  - name: release
+    description: Release bundle + audit trail (PCM-20.9 final)
+security:
+  - cookieAuth: []
+paths:
+  /api/knowledge/collections/{coll_id}/corpus/build:
+    post:
+      tags: [pipeline]
+      operationId: startCorpusBuild
+      summary: Start the Stage D canonical corpus build (job, guarded)
+      parameters:
+        - { name: coll_id, in: path, required: true, schema: { type: integer } }
+      responses:
+        "200":
+          description: Idempotent hit — the corpus for this content already exists (job reused)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/JobResult"
+        "202":
+          description: Corpus build queued
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/JobResult"
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+  /api/knowledge/collections/{coll_id}/corpus/builds:
+    get:
+      tags: [pipeline]
+      operationId: listCorpusBuilds
+      summary: List the collection's canonical corpus builds (newest first)
+      parameters:
+        - { name: coll_id, in: path, required: true, schema: { type: integer } }
+      responses:
+        "200":
+          description: Builds for this collection
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  ok: { type: boolean, example: true }
+                  collection_id: { type: string, example: "c-01234567" }
+                  builds:
+                    type: array
+                    items: { $ref: "#/components/schemas/IndexBuild" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+  /api/knowledge/index-builds/{iv_id}:
+    get:
+      tags: [pipeline]
+      operationId: indexBuildDetail
+      summary: One build row + its canonical corpus manifest (when on disk)
+      parameters:
+        - { name: iv_id, in: path, required: true, schema: { type: string } }
+      responses:
+        "200":
+          description: Build detail
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  ok: { type: boolean, example: true }
+                  build:
+                    allOf:
+                      - { $ref: "#/components/schemas/IndexBuild" }
+                      - type: object
+                        properties:
+                          manifest:
+                            type: [object, "null"]
+                            description: corpus-manifest.json (c-1) when readable from out_dir
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+  /api/knowledge/collections/{coll_id}/search-acceptance:
+    post:
+      tags: [pipeline]
+      operationId: startSearchAcceptance
+      summary: Start the Stage E search acceptance (job, guarded)
+      parameters:
+        - { name: coll_id, in: path, required: true, schema: { type: integer } }
+      responses:
+        "200":
+          description: Idempotent hit (job already queued for this content)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/JobResult"
+        "202":
+          description: Search acceptance queued
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/JobResult"
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409":
+          description: No Stage D corpus build yet (no_corpus_build)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+  /api/knowledge/index-builds/{iv_id}/approve:
+    post:
+      tags: [pipeline]
+      operationId: approveIndexBuild
+      summary: Approve an index version (hard gate after Stage E pass)
+      parameters:
+        - { name: iv_id, in: path, required: true, schema: { type: string } }
+      responses:
+        "200":
+          description: Build approved; collection.current_index_build updated
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  ok: { type: boolean, example: true }
+                  iv_id: { type: string, example: "iv-0a1b2c3d" }
+                  collection_id: { type: string, example: "c-01234567" }
+                  validation_status: { type: string, example: accepted }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409":
+          description: Acceptance not passed, or ES index not success
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+  /api/knowledge/collections/{coll_id}/release:
+    post:
+      tags: [release]
+      operationId: buildRelease
+      summary: Build the final release bundle (job, guarded)
+      parameters:
+        - { name: coll_id, in: path, required: true, schema: { type: integer } }
+      responses:
+        "200":
+          description: Idempotent hit (release for this content already built)
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - { $ref: "#/components/schemas/JobResult" }
+                  - type: object
+                    properties:
+                      documents: { type: integer, example: 12 }
+        "202":
+          description: Release build queued
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - { $ref: "#/components/schemas/JobResult" }
+                  - type: object
+                    properties:
+                      documents: { type: integer, example: 12 }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409":
+          description: No Stage D corpus build yet (no_corpus_build)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+  /api/knowledge/collections/{coll_id}/releases:
+    get:
+      tags: [release]
+      operationId: listReleases
+      summary: List the collection's releases
+      parameters:
+        - { name: coll_id, in: path, required: true, schema: { type: integer } }
+      responses:
+        "200":
+          description: Releases for this collection
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  ok: { type: boolean, example: true }
+                  collection_id: { type: string, example: "c-01234567" }
+                  releases:
+                    type: array
+                    items: { $ref: "#/components/schemas/Release" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+  /api/knowledge/releases/{release_id}/download:
+    get:
+      tags: [release]
+      operationId: downloadRelease
+      summary: Download the release zip (re-hashed on disk before serving)
+      parameters:
+        - { name: release_id, in: path, required: true, schema: { type: string } }
+      responses:
+        "200":
+          description: Release data zip (application/zip)
+          content:
+            application/zip:
+              schema:
+                type: string
+                format: binary
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409":
+          description: On-disk hash mismatch (hash_mismatch) — download refused
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+  /api/knowledge/collections/{coll_id}/audit:
+    get:
+      tags: [release]
+      operationId: collectionAudit
+      summary: Append-only audit trail of collection actions
+      parameters:
+        - { name: coll_id, in: path, required: true, schema: { type: integer } }
+        - { name: limit, in: query, required: false, schema: { type: integer, default: 100, maximum: 500 } }
+        - { name: offset, in: query, required: false, schema: { type: integer, default: 0 } }
+      responses:
+        "200":
+          description: Audit entries (newest first)
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  ok: { type: boolean, example: true }
+                  collection_id: { type: string, example: "c-01234567" }
+                  entries:
+                    type: array
+                    items: { $ref: "#/components/schemas/AuditEntry" }
+                  count: { type: integer, example: 7 }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+components:
+  securitySchemes:
+    cookieAuth:
+      type: apiKey
+      in: cookie
+      name: pct_session
+  schemas:
+    JobObject:
+      type: object
+      description: knowledge_jobs row
+      properties:
+        job_id: { type: string, example: "j-0a1b2c3d" }
+        job_key: { type: string, example: "corpus_build:c-01234567" }
+        kind: { type: string, example: corpus_build }
+        collection_id: { type: string, example: "c-01234567" }
+        status: { type: string, enum: [queued, running, succeeded, failed, interrupted] }
+        stage: { type: [string, "null"], example: "corpus c-60d313c9" }
+        total: { type: integer, example: 4 }
+        done: { type: integer, example: 0 }
+        error: { type: [string, "null"] }
+        created_at: { type: string }
+        updated_at: { type: string }
+    JobResult:
+      type: object
+      properties:
+        ok: { type: boolean, example: true }
+        queued: { type: boolean, example: true }
+        job: { $ref: "#/components/schemas/JobObject" }
+    IndexBuild:
+      type: object
+      description: knowledge_index_builds row
+      properties:
+        iv_id: { type: string, example: "iv-0a1b2c3d" }
+        collection_id: { type: string, example: "c-01234567" }
+        es_index: { type: [string, "null"], example: "pct-c01234567" }
+        es_alias: { type: [string, "null"], example: "pct-c01234567-live" }
+        schema_version: { type: [string, "null"] }
+        norm_version: { type: [string, "null"] }
+        chunking_version: { type: [string, "null"] }
+        chunk_count: { type: [integer, "null"] }
+        status: { type: string, enum: [planned, running, succeeded, failed] }
+        content_sha256: { type: [string, "null"] }
+        out_dir: { type: [string, "null"], example: "corpus_builds/c-60d313c9" }
+        es_index_status: { type: [string, "null"], enum: [success, blocked, failed, "null"] }
+        es_detail: { type: [string, "null"] }
+        search_status: { type: [string, "null"], enum: [pass, fail, pending, blocked, "null"] }
+        search_detail: { type: [string, "null"] }
+        created_at: { type: string }
+        completed_at: { type: [string, "null"] }
+    Release:
+      type: object
+      description: knowledge_releases row
+      properties:
+        release_id: { type: string, example: "rel-642031fe" }
+        collection_id: { type: string, example: "c-01234567" }
+        build_iv_id: { type: string, example: "iv-0a1b2c3d" }
+        content_sha256: { type: string }
+        zip_path: { type: string }
+        zip_sha256: { type: string }
+        size_bytes: { type: integer }
+        rag_status: { type: string, enum: [blocked, failed, success] }
+        created_at: { type: string }
+    AuditEntry:
+      type: object
+      description: knowledge_audit_log row (append-only)
+      properties:
+        entry_id: { type: integer, example: 12 }
+        collection_id: { type: string, example: "c-01234567" }
+        actor: { type: string, example: "worker", description: sess-<sha8> or worker }
+        action: { type: string, example: release_built }
+        status: { type: string, enum: [ok, fail, blocked] }
+        detail: { type: [string, "null"], description: JSON string }
+        ts: { type: string }
+    Error:
+      type: object
+      properties:
+        ok: { type: boolean, example: false }
+        code: { type: [string, "null"], example: no_corpus_build }
+        field: { type: [string, "null"] }
+        message: { type: string }
+  responses:
+    Unauthorized:
+      description: Missing/invalid session
+    NotFound:
+      description: Unknown collection / build / release

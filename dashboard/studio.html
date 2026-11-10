@@ -365,10 +365,24 @@
       </div>
       <div class="card" id="corpusCard">
         <h3><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><ellipse cx="12" cy="5" rx="8" ry="3"/><path d="M4 5v14c0 1.7 3.6 3 8 3s8-1.3 8-3V5M4 12c0 1.7 3.6 3 8 3s8-1.3 8-3"/></svg> پیکره canonical + Elasticsearch
-          <button type="button" class="btn btn-sm btn-primary" id="corpusBuildBtn" style="margin-inline-start:auto">ساخت پیکره</button>
+          <span style="margin-inline-start:auto;display:flex;gap:8px">
+            <button type="button" class="btn btn-sm btn-ghost" id="acceptanceBtn">اعتبارسنجی جستجو</button>
+            <button type="button" class="btn btn-sm btn-primary" id="corpusBuildBtn">ساخت پیکره</button>
+            <button type="button" class="btn btn-sm btn-primary" id="releaseBtn">ساخت Release</button>
+          </span>
         </h3>
         <dl class="kv" id="stEs"></dl>
         <div id="stBuildsBox" style="margin-top:12px"><div class="t2" style="color:var(--dim);font-size:12px">در حال بارگذاری…</div></div>
+        <div id="stReleasesBox" style="margin-top:16px;border-top:1px solid var(--line);padding-top:12px">
+          <div class="t2" style="font-size:12px;margin-bottom:8px">بسته‌های Release (خروجی قابل وریفای — c-1 + d-1 + manifest زنجیره‌ای)</div>
+          <div id="stReleasesInner"><div class="t2" style="color:var(--dim);font-size:12px">در حال بارگذاری…</div></div>
+        </div>
+      </div>
+      <div class="card" id="auditCard">
+        <h3><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 20h9M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4Z"/></svg> ردیابی اقدامات (audit log)
+          <button type="button" class="btn btn-sm btn-ghost" id="auditRefreshBtn" style="margin-inline-start:auto">به‌روزرسانی</button>
+        </h3>
+        <div id="stAuditBody"><div class="t2" style="color:var(--dim);font-size:12px">در حال بارگذاری…</div></div>
       </div>
       <div class="card" id="stMetaCard">
         <h3><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 6h16M4 12h16M4 18h10"/></svg> متادیتای سفارشی
@@ -798,6 +812,8 @@ async function renderDetail() {
     renderDocs();
     loadSchema();
     loadCorpusBuilds();
+    loadReleases();
+    loadAudit();
     renderMeta();
     renderCompat();
     loadQueue();
@@ -948,10 +964,14 @@ function initSchemaCard() {
   });
 }
 
-/* ═══════ PCM-20.9 Stage D: پیکره canonical + کارخانه ایندکس ES ═══════ */
+/* ═══════ PCM-20.9 Stage D/E: پیکره canonical + ES + اعتبارسنجی جستجو ═══════ */
 const CORPUS_ES_BADGE = {
   pending: ['در انتظار', 'warn'], blocked: ['ES بلاک', 'warn'],
   success: ['موفق', 'ok'], failed: ['خطا', 'err'],
+};
+const SEARCH_BADGE = {
+  pass: ['جستجو: قبول', 'ok'], fail: ['جستجو: مردود', 'err'],
+  blocked: ['جستجو: بلاک', 'warn'],
 };
 function renderCorpusBuilds(builds) {
   const bb = $('stBuildsBox');
@@ -959,16 +979,32 @@ function renderCorpusBuilds(builds) {
     bb.innerHTML = '<div class="empty" style="padding:16px"><div class="t2">هنوز پیکره canonical ساخته نشده است. با دکمه «ساخت پیکره» از روی اسناد پردازش‌شده، پیکره رسمی (قرارداد c-1) ساخته می‌شود.</div></div>';
     return;
   }
-  bb.innerHTML = '<table class="docs-table"><thead><tr><th>Build</th><th>ایندکس ES</th><th>بلوک</th><th>ES</th><th>وضعیت</th></tr></thead><tbody>' +
+  bb.innerHTML = '<table class="docs-table"><thead><tr><th>Build</th><th>ایندکس ES</th><th>بلوک</th><th>ES</th><th>اعتبارسنجی</th><th>تأیید</th></tr></thead><tbody>' +
     builds.map((b) => {
       const bes = CORPUS_ES_BADGE[b.es_index_status] || [b.es_index_status || '—', 'dim'];
+      const sb = SEARCH_BADGE[b.search_status || ''] || ['—', 'dim'];
+      let sTitle = b.search_detail || '';
+      if (b.search_status === 'fail' && b.search_detail) {
+        try {
+          const rep = JSON.parse(b.search_detail);
+          sTitle = 'دسته‌های مردود: ' + (rep.failed || []).join('، ');
+        } catch (e) { /* raw */ }
+      }
+      const canApprove = b.search_status === 'pass' && b.es_index_status === 'success';
+      const approveBtn = canApprove
+        ? '<button type="button" class="btn btn-sm btn-primary" data-approve="' + escHtml(b.iv_id) + '">تأیید ایندکس</button>'
+        : '<span class="t2" style="color:var(--dim);font-size:11px" title="تأیید فقط بعد از گذر کامل اعتبارسنجی جستجو">—</span>';
       return '<tr><td class="c-slug">' + escHtml(b.iv_id) + '</td>' +
         '<td class="c-slug">' + ((b.es_index && b.es_index !== 'none') ? escHtml(b.es_index) : '<span style="color:var(--dim)">—</span>') + '</td>' +
         '<td>' + faNum(b.chunk_count) + '</td>' +
         '<td><span class="badge ' + bes[1] + '" title="' + escHtml(b.es_detail || '') + '">' + bes[0] + '</span></td>' +
-        '<td>' + escHtml(b.status) + '</td></tr>';
+        '<td><span class="badge ' + sb[1] + '" title="' + escHtml(sTitle) + '">' + sb[0] + '</span></td>' +
+        '<td>' + approveBtn + '</td></tr>';
     }).join('') +
     '</tbody></table>';
+  bb.querySelectorAll('[data-approve]').forEach((el) => {
+    el.addEventListener('click', () => approveBuild(el.getAttribute('data-approve')));
+  });
 }
 async function loadCorpusBuilds() {
   const bb = $('stBuildsBox');
@@ -1002,6 +1038,33 @@ function waitForJob(jobId, deadlineS) {
     setTimeout(tick, 1000);
   });
 }
+async function runAcceptance() {
+  if (!state.activeId) return;
+  const btn = $('acceptanceBtn');
+  btn.disabled = true;
+  try {
+    const j = await fetchAPI('/api/knowledge/collections/' + state.activeId + '/search-acceptance', { method: 'POST' });
+    if (!j) return;
+    toast('اعتبارسنجی جستجو آغاز شد (10 دسته)');
+    refreshJobs();
+    const row = await waitForJob(j.job.job_id);
+    if (row && row.status === 'succeeded') toast('اعتبارسنجی جستجو کامل شد');
+    await Promise.all([loadCorpusBuilds(), renderDetail()]);
+  } catch (e) {
+    toast(e.message, 'err');
+  } finally {
+    btn.disabled = false;
+  }
+}
+async function approveBuild(ivId) {
+  try {
+    await fetchAPI('/api/knowledge/index-builds/' + ivId + '/approve', { method: 'POST' });
+    toast('نسخه‌ی ایندکس تأیید شد (current_index_build)');
+    await Promise.all([loadCorpusBuilds(), renderDetail()]);
+  } catch (e) {
+    toast(e.message, 'err');
+  }
+}
 async function corpusBuild() {
   if (!state.activeId) return;
   const btn = $('corpusBuildBtn');
@@ -1017,6 +1080,95 @@ async function corpusBuild() {
     toast(e.message, 'err');
   } finally {
     btn.disabled = false;
+  }
+}
+
+/* ── PCM-20.9 Final — release bundle + audit trail ── */
+const RAG_BADGE = {
+  blocked: ['RAG: غیرفعال', 'warn'],
+  success: ['RAG: ثبت‌شده', 'ok'],
+  failed: ['RAG: خطا', 'err'],
+};
+const AUDIT_STATUS = {
+  ok: ['ok', 'ok'], fail: ['fail', 'err'], blocked: ['blocked', 'warn'],
+};
+function renderReleases(rels) {
+  const box = $('stReleasesInner');
+  if (!rels.length) {
+    box.innerHTML = '<div class="empty" style="padding:12px"><div class="t2">هنوز release ساخته نشده است. با دکمه «ساخت Release» یک بسته قابل وریفای (پیکره c-1 + دامپ‌های d-1 + manifest زنجیره‌ای + README) می‌سازد — بدون نیاز به ES یا RAG.</div></div>';
+    return;
+  }
+  box.innerHTML = '<table class="docs-table"><thead><tr><th>Release</th><th>Build</th><th>محتوا (sha)</th><th>اندازه</th><th>RAG</th><th>زمان</th><th>دانلود</th></tr></thead><tbody>' +
+    rels.map((r) => {
+      const rag = RAG_BADGE[r.rag_status] || [r.rag_status || '—', 'dim'];
+      return '<tr><td class="c-slug">' + escHtml(r.release_id) + '</td>' +
+        '<td class="c-slug">' + escHtml(r.build_iv_id || '—') + '</td>' +
+        '<td class="c-slug" style="font-size:11px" title="' + escHtml(r.content_sha256) + '">' + escHtml((r.content_sha256 || '').slice(0, 12)) + '…</td>' +
+        '<td>' + faNum(Math.round((r.size_bytes || 0) / 1024)) + ' KB</td>' +
+        '<td><span class="badge ' + rag[1] + '">' + rag[0] + '</span></td>' +
+        '<td style="font-size:11px">' + escHtml((r.created_at || '').replace('T', ' ').slice(0, 19)) + '</td>' +
+        '<td><a class="btn btn-sm btn-ghost" href="/api/knowledge/releases/' + encodeURIComponent(r.release_id) + '/download">دانلود zip</a></td></tr>';
+    }).join('') +
+    '</tbody></table>';
+}
+async function loadReleases() {
+  const box = $('stReleasesInner');
+  if (!state.activeId) { box.innerHTML = ''; return; }
+  try {
+    const j = await fetchAPI('/api/knowledge/collections/' + state.activeId + '/releases');
+    if (!j) return;
+    renderReleases(j.releases);
+  } catch (e) {
+    box.innerHTML = '<div class="error-box" style="display:block">' + escHtml(e.message) + '</div>';
+  }
+}
+async function buildRelease() {
+  if (!state.activeId) return;
+  const btn = $('releaseBtn');
+  btn.disabled = true;
+  try {
+    const j = await fetchAPI('/api/knowledge/collections/' + state.activeId + '/release', { method: 'POST' });
+    if (!j) return;
+    toast('ساخت Release آغاز شد (' + faNum(j.documents) + ' دامپ)');
+    refreshJobs();
+    await waitForJob(j.job.job_id);
+    await Promise.all([loadReleases(), renderDetail()]);
+  } catch (e) {
+    toast(e.message, 'err');
+  } finally {
+    btn.disabled = false;
+  }
+}
+function renderAudit(entries) {
+  const box = $('stAuditBody');
+  if (!entries.length) {
+    box.innerHTML = '<div class="empty" style="padding:12px"><div class="t2">هنوز اقدامی ثبت نشده است.</div></div>';
+    return;
+  }
+  box.innerHTML = '<table class="docs-table"><thead><tr><th>زمان</th><th>کاربر</th><th>مرحله</th><th>اقدام</th><th>وضعیت</th><th>جزئیات</th></tr></thead><tbody>' +
+    entries.map((e) => {
+      const st = AUDIT_STATUS[e.status] || [e.status, 'dim'];
+      let detail = '';
+      try { detail = JSON.stringify(JSON.parse(e.detail_json)); }
+      catch (err) { detail = e.detail_json || ''; }
+      return '<tr><td style="font-size:11px;white-space:nowrap">' + escHtml((e.ts || '').replace('T', ' ').slice(0, 19)) + '</td>' +
+        '<td class="c-slug" style="font-size:11px">' + escHtml(e.actor) + '</td>' +
+        '<td>' + escHtml(e.stage) + '</td>' +
+        '<td class="c-slug" style="font-size:12px">' + escHtml(e.action) + '</td>' +
+        '<td><span class="badge ' + st[1] + '">' + st[0] + '</span></td>' +
+        '<td class="c-slug" style="font-size:11px;max-width:340px;overflow:hidden;text-overflow:ellipsis" title="' + escHtml(detail) + '">' + escHtml(detail) + '</td></tr>';
+    }).join('') +
+    '</tbody></table>';
+}
+async function loadAudit() {
+  const box = $('stAuditBody');
+  if (!state.activeId) { box.innerHTML = ''; return; }
+  try {
+    const j = await fetchAPI('/api/knowledge/collections/' + state.activeId + '/audit?limit=100');
+    if (!j) return;
+    renderAudit(j.entries);
+  } catch (e) {
+    box.innerHTML = '<div class="error-box" style="display:block">' + escHtml(e.message) + '</div>';
   }
 }
 
@@ -1907,8 +2059,11 @@ $('metaModal').addEventListener('click', (e) => { if (e.target === $('metaModal'
 $('metaForm').addEventListener('submit', doMetaField);
 /* ── PCM-20.9 Stage C listener ── */
 initSchemaCard();
-/* ── PCM-20.9 Stage D listener ── */
+/* ── PCM-20.9 Stage D/E listeners ── */
 $('corpusBuildBtn').addEventListener('click', corpusBuild);
+$('acceptanceBtn').addEventListener('click', runAcceptance);
+$('releaseBtn').addEventListener('click', buildRelease);
+$('auditRefreshBtn').addEventListener('click', loadAudit);
 /* ── PCM-17 listeners ── */
 $('workNewBtn').addEventListener('click', openWorkModal);
 $('workClose').addEventListener('click', closeWorkModal);

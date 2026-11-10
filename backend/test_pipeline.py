@@ -1410,5 +1410,714 @@ class TestPF_D04_ESFactoryMocked(_StageDPrep):
                          r"^knowledge_" + coll["slug"] + r"_v\d{4}$")
 
 
+# ---------------------------------------------------------------------------
+# PCM-20.9 Stage E — search acceptance + approval (PF-Exx)
+# ---------------------------------------------------------------------------
+
+class _FakeSearchES:
+    """A minimal in-memory cluster for acceptance runs.
+
+    Docs are recorded per PHYSICAL index by the bulk hook
+    (`_make_fake_bulk`), and the /_aliases call maintains
+    alias -> index, so the acceptance sees exactly the docs that were
+    switched in under the alias. The search endpoint answers the
+    acceptance's real requests with a faithful mini-matcher:
+      - match_phrase  normalized_text : exact substring in the text
+      - match         normalized_text : exact word in the text (the
+                                        Persian analyzer's token set)
+      - term          keywords.work_id: exact keyword equality
+      - term          metadata.<key>  : exact value equality
+      - bool.filter term type=heading : exact field equality
+      - match_all: everything
+    Pagination: sort by _id asc (only when a sort is given), then
+    from/size — mirroring real ES stable paging.
+    """
+
+    def __init__(self):
+        self.indices = {}          # name -> mapping props
+        self.alias_to_index = {}   # alias -> physical index
+        self.bulk_docs = {}        # physical index -> [(doc_id, source)]
+        self.search_calls = []     # (path, body)
+
+    def __call__(self, es_url, method, path, body=None, ndjson=False):
+        if method == "PUT":  # PUT /<new_index> {mappings}
+            self.indices[path[1:]] = (body or {}).get(
+                "mappings", {}).get("properties", {})
+            return {}
+        if method == "POST" and path == "/_bulk":
+            # (never reached in tests: the bulk hook wraps us)
+            return {"errors": False}
+        if method == "POST" and path.endswith("/_refresh"):
+            return {}
+        if method == "GET" and path.endswith("/_count"):
+            name = path[1:-len("/_count")]
+            return {"count": len(self._docs_for(name))}
+        if method == "GET" and path == "/_aliases":
+            return {}
+        if method == "POST" and path == "/_aliases":
+            for a in body["actions"]:
+                al = a.get("add", {}).get("alias")
+                if "remove" in a:
+                    al = a["remove"]["alias"]
+                    self.alias_to_index.pop(al, None)
+                if "add" in a:
+                    self.alias_to_index[a["add"]["alias"]] = \
+                        a["add"]["index"]
+            return {}
+        if method == "GET" and "/" not in path[1:]:
+            # GET /<name> — alias holder listing
+            name = path[1:]
+            if name in self.indices:
+                return {name: {}}
+            if name in self.alias_to_index:
+                return {self.alias_to_index[name]: {}}
+            return {}
+        if method == "POST" and path.endswith("/_search"):
+            self.search_calls.append((path, body))
+            alias = path[1:-len("/_search")]
+            docs = self._docs_for(alias)
+            hits = [(d, s) for d, s in docs if self._match(body, s)]
+            if (body or {}).get("sort"):
+                hits = sorted(hits, key=lambda h: h[0])
+            size = body.get("size", 10)
+            frm = body.get("from", 0)
+            page = hits[frm:frm + size]
+            return {"hits": {
+                "total": {"value": len(hits), "relation": "eq"},
+                "hits": [{"_id": d, "_source": s} for d, s in page],
+            }}
+        raise AssertionError(f"unexpected ES call {method} {path}")
+
+    # -- internals -------------------------------------------------------
+    def _docs_for(self, name):
+        """Docs for a physical index name OR an alias (the build counts
+        the physical index before the alias exists; the acceptance
+        searches the live alias)."""
+        if name in self.bulk_docs:
+            return sorted(self.bulk_docs[name])
+        idx = self.alias_to_index.get(name)
+        if idx is None:
+            return []
+        return sorted(self.bulk_docs.get(idx, []))
+
+    def _match(self, body, src):
+        query = (body or {}).get("query") or {}
+        if "match_all" in query:
+            return True
+        if "bool" in query:
+            for f in (query["bool"].get("filter") or []):
+                for field, spec in f.items():
+                    if field == "term":
+                        k, v = next(iter(spec.items()))
+                        if src.get(k) != v:
+                            return False
+            return True
+        if "match_phrase" in query:
+            (k, v), = query["match_phrase"].items()
+            return v in (src.get(k) or "")
+        if "match" in query:
+            (k, v), = query["match"].items()
+            return (str(v) in str(src.get(k) or "").split())
+        if "term" in query:
+            (k, v), = query["term"].items()
+            if k == "keywords.work_id":
+                return (src.get("keywords") or {}).get("work_id") == v
+            if k.startswith("metadata."):
+                # real ES: dynamic strings are text + .keyword subfield;
+                # the query targets the .keyword side
+                fk = k.split(".", 1)[1]
+                if fk.endswith(".keyword"):
+                    fk = fk[:-len(".keyword")]
+                return (src.get("metadata") or {}).get(fk) == v
+        return False
+
+
+def _make_fake_bulk(es):
+    """Wrap the fake so /_bulk records docs per physical index
+    (the seam sits above the fake's own bulk handling)."""
+    orig = es.__call__
+
+    def wrapped(es_url, method, path, body=None, ndjson=False):
+        if method == "POST" and path == "/_bulk":
+            per_index = {}
+            for i in range(0, len(body), 2):
+                act = body[i].get("index", {})
+                per_index.setdefault(act.get("_index"), []).append(
+                    (act.get("_id"), body[i + 1]))
+            for idx, docs in per_index.items():
+                es.bulk_docs.setdefault(idx, []).extend(docs)
+            return {"errors": False}
+        return orig(es_url, method, path, body=body, ndjson=ndjson)
+    return wrapped
+
+
+class TestPF_E01_SearchAcceptanceMocked(_StageDPrep):
+    """PF-E01 — Stage E: the 10-category acceptance, mocked at
+    _es_request (real build + real corpus; ES simulated).
+
+    - the build switches the alias to the new index (Stage D);
+    - the acceptance then runs 10 REAL categories against the LIVE
+      alias: count, exact phrase, partial word, heading filter,
+      work_id keyword filter, custom metadata filter, pagination,
+      determinism, absence, latency;
+    - every category passes with real evidence;
+    - search_status='pass' on the build row;
+    - collection validation_status='accepted';
+    - the approve endpoint then returns ok (the gate is open) and
+      current_index_build points at the build.
+    """
+
+    def setUp(self):
+        super().setUp()
+        os.environ["PCT_ES_URL"] = "http://es.fake:9200"
+        self.addCleanup(lambda: os.environ.pop("PCT_ES_URL", None))
+
+    def _approve_default_schema(self, cid):
+        r = self.client.post(
+            f"/api/knowledge/collections/{cid}/schema", json={})
+        self.assertEqual(r.status_code, 201, r.get_data(as_text=True))
+        sv = r.get_json()["schema"]
+        r = self.client.post(
+            f"/api/knowledge/collections/{cid}/schema/{sv['schema_id']}"
+            "/validate")
+        self.assertEqual(r.status_code, 200, r.get_data(as_text=True))
+        r = self.client.post(
+            f"/api/knowledge/collections/{cid}/schema/{sv['schema_id']}"
+            "/approve")
+        self.assertEqual(r.status_code, 200, r.get_data(as_text=True))
+
+    def _collection_meta_value(self, cid, key, value):
+        r = self.client.post("/api/knowledge/metadata/fields", json={
+            "scope": "collection", "collection_id": cid,
+            "field_key": key, "display_name": "دسته آزمایشی",
+            "data_type": "string"})
+        self.assertEqual(r.status_code, 201, r.get_data(as_text=True))
+        r = self.client.post("/api/knowledge/metadata/values", json={
+            "field_key": key, "value": value, "scope": "collection",
+            "collection_id": cid})
+        self.assertEqual(r.status_code, 200, r.get_data(as_text=True))
+
+    def test_acceptance_pass_and_approve(self):
+        import unittest.mock
+        import knowledge_api
+        coll, rows = self._prep(2)
+        cid = coll["collection_id"]
+        blocks_total = sum(r["blocks_count"] for r in rows)
+        self._approve_default_schema(cid)
+        # a collection-scope metadata value (exercises category 06)
+        self._collection_meta_value(cid, "category", "آزمایشی")
+        # capture the work_id of the first document (category 05)
+        docs = self.client.get(
+            f"/api/knowledge/collections/{coll['id']}/documents"
+        ).get_json()["documents"]
+        work_id = docs[0]["work_id"]
+        self.assertTrue(work_id)
+
+        fake = _FakeSearchES()
+        with unittest.mock.patch.object(
+                knowledge_api, "_es_request",
+                side_effect=_make_fake_bulk(fake)):
+            _, _, job = self.corpus_build(coll["id"])
+        self.assertEqual(job["status"], "succeeded", job)
+        builds = self.corpus_builds(coll["id"])
+        b = builds[0]
+        self.assertEqual(b["es_index_status"], "success")
+        alias = coll["es_alias"]
+        self.assertEqual(fake.alias_to_index.get(alias), b["es_index"])
+
+        # --- run the acceptance against the same fake cluster (it holds
+        # the bulk docs; the alias was switched in by the Stage D build).
+        # wait_job stays INSIDE the patch: the worker runs in a thread
+        # and must observe the mocked seam while it works.
+        fake.search_calls.clear()
+        with unittest.mock.patch.object(
+                knowledge_api, "_es_request", side_effect=fake):
+            r = self.client.post(
+                f"/api/knowledge/collections/{coll['id']}"
+                "/search-acceptance")
+            self.assertIn(r.status_code, (200, 202),
+                          r.get_data(as_text=True))
+            job = self.wait_job(r.get_json()["job"]["job_id"])
+        self.assertEqual(job["status"], "succeeded", job)
+
+        builds = self.corpus_builds(coll["id"])
+        b = builds[0]
+        self.assertEqual(b["search_status"], "pass")
+        report = json.loads(b["search_detail"])
+        self.assertEqual(report["overall"], "pass")
+        self.assertEqual(report["failed"], [])
+        self.assertEqual(report["alias"], alias)
+        self.assertEqual(report["index"], b["es_index"])
+        self.assertEqual(report["expected_count"], blocks_total)
+        self.assertEqual(set(report["categories"]), set([
+            "count", "exact_block", "partial_text", "heading_filter",
+            "work_filter", "metadata_filter", "pagination",
+            "determinism", "absence", "latency"]))
+        for code, c in report["categories"].items():
+            self.assertEqual(c["status"], "pass",
+                             f"{code}: {c['detail']}")
+        # the acceptance only ever READ from the alias (search/count),
+        # never moved it
+        self.assertEqual(fake.alias_to_index.get(alias), b["es_index"])
+
+        # collection flags
+        det = self.client.get(
+            f"/api/knowledge/collections/{coll['id']}"
+        ).get_json()["collection"]
+        self.assertEqual(det["validation_status"], "accepted")
+
+        # the approve gate is open now
+        r = self.client.post(
+            f"/api/knowledge/index-builds/{b['iv_id']}/approve")
+        self.assertEqual(r.status_code, 200, r.get_data(as_text=True))
+        j = r.get_json()
+        self.assertTrue(j["ok"])
+        self.assertEqual(j["validation_status"], "accepted")
+        det = self.client.get(
+            f"/api/knowledge/collections/{coll['id']}"
+        ).get_json()["collection"]
+        self.assertEqual(det["current_index_build"], b["iv_id"])
+
+
+class TestPF_E02_SearchAcceptanceGuarded(_StageDPrep):
+    """PF-E02 — Stage E guards: honest BLOCKED, no fabricated results.
+
+    - no PCT_ES_URL and no Stage D build -> 409 no_corpus_build;
+    - ES configured, Stage D build done (ES success via the fake),
+      but a failing acceptance (forced count mismatch) ->
+      search_status='fail', validation_status='needs_review', and the
+      approve endpoint refuses with 409 acceptance_not_passed.
+    """
+
+    def setUp(self):
+        super().setUp()
+        os.environ["PCT_ES_URL"] = "http://es.fake:9200"
+        self.addCleanup(lambda: os.environ.pop("PCT_ES_URL", None))
+
+    def test_guards_and_failed_acceptance(self):
+        import unittest.mock
+        import knowledge_api
+        from factory._smoke_fixtures import make_docx
+        coll = self.make_collection()
+        tmp = tempfile.mkdtemp(prefix="pct-pf-e2-")
+        self.addCleanup(shutil.rmtree, tmp, ignore_errors=True)
+        p = os.path.join(tmp, "کتاب-ع2.docx")
+        make_docx(p, [
+            ("Normal", "عنوان: کتاب تست"),
+            ("Heading 1", "فصل اول"),
+            ("Normal", "متن فارسی تستی."),
+        ])
+        self.upload_and_process(p)
+
+        # guard 1: no Stage D build at all -> 409
+        r = self.client.post(
+            f"/api/knowledge/collections/{coll['id']}/search-acceptance")
+        self.assertEqual(r.status_code, 409, r.get_data(as_text=True))
+        self.assertEqual(r.get_json()["code"], "no_corpus_build")
+
+        # build Stage D against a fake cluster (alias switches in)
+        fake = _FakeSearchES()
+        with unittest.mock.patch.object(
+                knowledge_api, "_es_request",
+                side_effect=_make_fake_bulk(fake)):
+            code, j, job = self.corpus_build(coll["id"])
+        self.assertEqual(job["status"], "succeeded", job)
+
+        # now force a FAILED acceptance: the fake's count is wrong
+        # (simulates a stale/unflushed index) -> categories fail,
+        # overall 'fail', needs_review, approve refused.
+        real_count = fake.__call__
+
+        def broken(es_url, method, path, body=None, ndjson=False):
+            if method == "GET" and path.endswith("/_count"):
+                return {"count": 999999}
+            return real_count(es_url, method, path, body=body,
+                              ndjson=ndjson)
+
+        with unittest.mock.patch.object(
+                knowledge_api, "_es_request", side_effect=broken):
+            r = self.client.post(
+                f"/api/knowledge/collections/{coll['id']}"
+                "/search-acceptance")
+            self.assertIn(r.status_code, (200, 202),
+                          r.get_data(as_text=True))
+            job = self.wait_job(r.get_json()["job"]["job_id"])
+        self.assertEqual(job["status"], "succeeded", job)
+        b = self.corpus_builds(coll["id"])[0]
+        self.assertEqual(b["search_status"], "fail")
+        report = json.loads(b["search_detail"])
+        self.assertEqual(report["overall"], "fail")
+        self.assertIn("count", report["failed"])
+        det = self.client.get(
+            f"/api/knowledge/collections/{coll['id']}"
+        ).get_json()["collection"]
+        self.assertEqual(det["validation_status"], "needs_review")
+        # the approve gate must stay shut
+        r = self.client.post(
+            f"/api/knowledge/index-builds/{b['iv_id']}/approve")
+        self.assertEqual(r.status_code, 409, r.get_data(as_text=True))
+        self.assertEqual(r.get_json()["code"], "acceptance_not_passed")
+        # and the alias never moved (acceptance is read-only)
+        self.assertEqual(fake.alias_to_index.get(coll["es_alias"]),
+                         b["es_index"])
+
+        # unknown iv_id approve -> 404
+        r = self.client.post("/api/knowledge/index-builds/iv-nosuch/approve")
+        self.assertEqual(r.status_code, 404)
+
+
+class TestPF_E03_SearchAcceptanceBlockedNoES(_StageDPrep):
+    """PF-E03 — Stage E with NO PCT_ES_URL at all: the job runs,
+    records an honest BLOCKED on the build row (Persian reason),
+    fails with a clear error, and the collection stays pending."""
+
+    def test_blocked_without_es(self):
+        import knowledge_api
+        os.environ.pop("PCT_ES_URL", None)
+        from factory._smoke_fixtures import make_docx
+        coll = self.make_collection()
+        tmp = tempfile.mkdtemp(prefix="pct-pf-e3-")
+        self.addCleanup(shutil.rmtree, tmp, ignore_errors=True)
+        p = os.path.join(tmp, "کتاب-ع3.docx")
+        make_docx(p, [
+            ("Normal", "عنوان: کتاب بلاک"),
+            ("Normal", "متن بلاک."),
+        ])
+        self.upload_and_process(p)
+        # Stage D corpus-only (ES part blocked)
+        code, j, job = self.corpus_build(coll["id"])
+        self.assertEqual(job["status"], "succeeded", job)
+        b = self.corpus_builds(coll["id"])[0]
+        self.assertEqual(b["es_index_status"], "blocked")
+
+        r = self.client.post(
+            f"/api/knowledge/collections/{coll['id']}/search-acceptance")
+        self.assertIn(r.status_code, (200, 202), r.get_data(as_text=True))
+        job = self.wait_job(r.get_json()["job"]["job_id"])
+        self.assertEqual(job["status"], "failed", job)
+        self.assertIn("BLOCKED", job["error"])
+        b = self.corpus_builds(coll["id"])[0]
+        self.assertEqual(b["search_status"], "blocked")
+        detail = json.loads(b["search_detail"])
+        self.assertEqual(detail["status"], "blocked")
+        self.assertIn("PCT_ES_URL", detail["reason"])
+        det = self.client.get(
+            f"/api/knowledge/collections/{coll['id']}"
+        ).get_json()["collection"]
+        self.assertEqual(det["validation_status"], "pending")
+
+
+# ---------------------------------------------------------------------------
+# PCM-20.9 Final — Stage F: release bundle + audit trail (PF-Fxx)
+# ---------------------------------------------------------------------------
+
+def _release_paths(cid):
+    import knowledge_api
+    return os.path.join(knowledge_api.knowledge_data_dir(), "releases")
+
+
+class _StageFPrep(_StageDPrep):
+    """Shared setup: 2 processed books + a REAL Stage D corpus build
+    (ES blocked — no PCT_ES_URL), ready for the release stage."""
+
+    def setUp(self):
+        super().setUp()
+        os.environ.pop("PCT_ES_URL", None)
+
+    def _prep_with_corpus(self, n=2):
+        coll, rows = self._prep(n)
+        _, _j, job = self.corpus_build(coll["id"])
+        self.assertEqual(job["status"], "succeeded", job)
+        return coll, rows
+
+    def start_release(self, coll_pk):
+        r = self.client.post(
+            f"/api/knowledge/collections/{coll_pk}/release")
+        self.assertIn(r.status_code, (200, 202), r.get_data(as_text=True))
+        j = r.get_json()
+        self.assertTrue(j["ok"], j)
+        job = self.wait_job(j["job"]["job_id"])
+        return r, j, job
+
+    def releases(self, coll_pk):
+        r = self.client.get(
+            f"/api/knowledge/collections/{coll_pk}/releases")
+        self.assertEqual(r.status_code, 200, r.get_data(as_text=True))
+        return r.get_json()["releases"]
+
+
+class TestPF_F01_ReleaseBundleEndToEnd(_StageFPrep):
+    """PF-F01 — Stage F end-to-end (the REAL bundle).
+
+    2 books -> Stage D corpus -> POST /release:
+    - the corpus archive sha is re-verified on disk;
+    - the dumps layer = EXACTLY the corpus manifest's input_dumps, each
+      re-validated (d-1 V1..V11) with every file hash recomputed;
+    - a deterministic release zip (corpus + dumps + release-manifest +
+      README) is written;
+    - the release-manifest is a CHAINED hash: corpus archive sha,
+      dumps-root sha, pre-zip chain, zip sha — all recomputable;
+    - RAG is honestly BLOCKED (no PCT_RAG_INGEST_URL — nothing called);
+    - the download endpoint re-hashes the zip and serves it;
+    - the bundle unzips and every member matches the manifest.
+    """
+
+    def test_release_bundle(self):
+        import zipfile
+        coll, rows = self._prep_with_corpus(2)
+        cid = coll["collection_id"]
+        blocks_total = sum(r["blocks_count"] for r in rows)
+
+        r, j, job = self.start_release(coll["id"])
+        self.assertEqual(job["status"], "succeeded", job)
+        self.assertEqual(j["documents"], 2)
+
+        rels = self.releases(coll["id"])
+        self.assertEqual(len(rels), 1)
+        rel = rels[0]
+        self.assertTrue(rel["release_id"].startswith("rel-"))
+        self.assertEqual(rel["rag_status"], "blocked")
+        b = self.corpus_builds(coll["id"])[0]
+        self.assertEqual(rel["build_iv_id"], b["iv_id"])
+        self.assertEqual(rel["content_sha256"], b["content_sha256"])
+
+        # on disk: data zip + side-car manifest + readme
+        rel_dir = os.path.join(_release_paths(cid), rel["release_id"])
+        zip_path = rel["zip_path"]
+        self.assertTrue(os.path.isfile(zip_path))
+        self.assertEqual(self.sha256_file(zip_path), rel["zip_sha256"])
+        self.assertEqual(os.path.getsize(zip_path), rel["size_bytes"])
+        m_path = os.path.join(rel_dir, "release-manifest.json")
+        self.assertTrue(os.path.isfile(m_path))
+        self.assertTrue(os.path.isfile(os.path.join(rel_dir, "README.md")))
+
+        # side-car manifest (NOT inside the zip — the container cannot
+        # hash itself, exactly like corpus c-1)
+        with open(m_path, encoding="utf-8") as fh:
+            m = json.load(fh)
+        self.assertEqual(m["release_contract"], "rel-1")
+        self.assertEqual(m["release_id"], rel["release_id"])
+        self.assertEqual(m["collection_id"], cid)
+        self.assertEqual(m["data_zip"]["sha256"], rel["zip_sha256"])
+        self.assertEqual(m["data_zip"]["size_bytes"], rel["size_bytes"])
+
+        # the data zip itself (independent of the stored manifest)
+        with zipfile.ZipFile(zip_path) as z:
+            names = sorted(z.namelist())
+            bad = z.testzip()
+            self.assertIsNone(bad)
+            self.assertTrue(any(n.startswith("corpus/") for n in names))
+            self.assertTrue(any(n.startswith("dumps/") for n in names))
+            self.assertNotIn("release-manifest.json", names)
+            self.assertNotIn("README.md", names)
+            # every member's hash must match the manifest
+            for name, ent in m["corpus"]["files"].items():
+                self.assertEqual(self.sha256_file_from_bytes(
+                    z.read("corpus/" + name)), ent["sha256"], name)
+            for de in m["dumps"]["entries"]:
+                for fe in de["files"]:
+                    self.assertEqual(
+                        self.sha256_file_from_bytes(
+                            z.read(f"dumps/{de['file_id']}/{fe['name']}")),
+                        fe["sha256"], de["file_id"] + "/" + fe["name"])
+            # corpus archive inside the zip matches the recorded sha,
+            # and IS the Stage D content itself
+            self.assertEqual(self.sha256_file_from_bytes(
+                z.read("corpus/corpus-data.zip")),
+                m["corpus"]["archive"]["sha256"])
+            self.assertEqual(m["corpus"]["archive"]["sha256"],
+                             b["content_sha256"])
+            self.assertEqual(m["corpus"]["blocks_total"], blocks_total)
+            self.assertEqual(m["dumps"]["count"], 2)
+
+        # chained hashes: corpus archive -> dumps root -> data zip
+        ch = m["chained"]
+        self.assertEqual(ch["corpus_archive_sha256"],
+                         rel["content_sha256"])
+        expect_root = hashlib.sha256(
+            "|".join(sorted(e["dump_manifest_sha256"]
+                            for e in m["dumps"]["entries"])).encode()
+        ).hexdigest()
+        self.assertEqual(ch["dumps_root_sha256"], expect_root)
+        self.assertEqual(ch["data_zip_sha256"], rel["zip_sha256"])
+
+        # download: re-hashed and served
+        d = self.client.get(f"/api/knowledge/releases/{rel['release_id']}"
+                            "/download")
+        self.assertEqual(d.status_code, 200)
+        body = d.data
+        self.assertEqual(self.sha256_file_from_bytes(body),
+                         rel["zip_sha256"])
+        self.assertEqual(len(body), rel["size_bytes"])
+
+    @staticmethod
+    def sha256_file_from_bytes(data):
+        return hashlib.sha256(data).hexdigest()
+
+
+class TestPF_F02_ReleaseIdempotent(_StageFPrep):
+    """PF-F02 — same corpus content -> SAME release_id, zip reused
+    (no rewrite), exactly ONE release row."""
+
+    def test_release_idempotent(self):
+        coll, rows = self._prep_with_corpus(2)
+        _r, _j, job = self.start_release(coll["id"])
+        self.assertEqual(job["status"], "succeeded", job)
+        rels = self.releases(coll["id"])
+        self.assertEqual(len(rels), 1)
+        rel1 = rels[0]
+
+        # second release for the SAME content: new job run, but the bundle
+        # is reused (row count stays 1, same id, same zip hash)
+        _r, _j, job2 = self.start_release(coll["id"])
+        self.assertEqual(job2["status"], "succeeded", job2)
+        rels2 = self.releases(coll["id"])
+        self.assertEqual(len(rels2), 1)
+        self.assertEqual(rels2[0]["release_id"], rel1["release_id"])
+        self.assertEqual(rels2[0]["zip_sha256"], rel1["zip_sha256"])
+
+
+class TestPF_F03_ReleaseNoBuild(_StageFPrep):
+    """PF-F03 — release requires a Stage D corpus build: no build yet ->
+    409 no_corpus_build (honest, no fabricated bundle)."""
+
+    def test_release_blocked_without_corpus_build(self):
+        coll, rows = self._prep(2)
+        r = self.client.post(f"/api/knowledge/collections/{coll['id']}"
+                             "/release")
+        self.assertEqual(r.status_code, 409)
+        j = r.get_json()
+        self.assertFalse(j["ok"])
+        self.assertEqual(j["code"], "no_corpus_build")
+        self.assertEqual(self.releases(coll["id"]), [])
+
+
+class TestPF_F04_ReleaseStaleCorpus(_StageFPrep):
+    """PF-F04 — the corpus must match the CURRENT documents: a new upload
+    after the corpus build -> the release FAILS (stale corpus), forcing a
+    Stage D rebuild before a trustworthy release."""
+
+    def test_release_stale_corpus_fails(self):
+        coll, rows = self._prep_with_corpus(2)
+        # a brand-new document the corpus was NOT built from
+        from factory._smoke_fixtures import make_docx
+        tmp = tempfile.mkdtemp(prefix="pct-pf-f4-")
+        self.addCleanup(shutil.rmtree, tmp, ignore_errors=True)
+        p = os.path.join(tmp, "کتاب-جدید.docx")
+        make_docx(p, [("Normal", "متن کتاب جدید برای تست stale.")])
+        self.upload_and_process(p)
+
+        _r, _j, job = self.start_release(coll["id"])
+        self.assertEqual(job["status"], "failed", job)
+        self.assertIn("stale", (job["error"] or "").lower())
+        self.assertEqual(self.releases(coll["id"]), [])
+
+
+class TestPF_F05_ReleaseTamperDetection(_StageFPrep):
+    """PF-F05 — the download endpoint re-hashes the zip on disk: a
+    tampered bundle is REFUSED (409 hash_mismatch) and the tamper is
+    recorded in the audit trail."""
+
+    def test_download_refuses_tampered_zip(self):
+        coll, rows = self._prep_with_corpus(2)
+        _r, _j, _job = self.start_release(coll["id"])
+        rel = self.releases(coll["id"])[0]
+        # tamper with the zip on disk
+        with open(rel["zip_path"], "ab") as fh:
+            fh.write(b"tamper")
+        d = self.client.get(f"/api/knowledge/releases/{rel['release_id']}"
+                            "/download")
+        self.assertEqual(d.status_code, 409)
+        j = d.get_json()
+        self.assertFalse(j["ok"])
+        self.assertEqual(j["code"], "hash_mismatch")
+        # audit trail records the refusal
+        a = self.client.get(
+            f"/api/knowledge/collections/{coll['id']}/audit").get_json()
+        actions = [e["action"] for e in a["entries"]]
+        self.assertIn("download_hash_mismatch", actions)
+
+
+class TestPF_F06_ReleaseRagGuarded(_StageFPrep):
+    """PF-F06 — RAG is config-guarded (unknown RAG contract):
+    - with a fake PCT_RAG_INGEST_URL the release SUCCEEDS and the ingest
+      is attempted (here refused by the fake server -> rag_status='failed'
+      with the recorded error — the bundle is still produced);
+    - the ingest payload carries the real hashes (verifiable provenance).
+    """
+
+    def test_release_rag_attempted_when_configured(self):
+        import http.server
+        import threading
+        captured = {}
+
+        class Handler(http.server.BaseHTTPRequestHandler):
+            def do_POST(self):
+                length = int(self.headers.get("Content-Length", 0))
+                body = self.rfile.read(length)
+                captured["payload"] = json.loads(body.decode("utf-8"))
+                captured["auth"] = self.headers.get("Authorization", "")
+                self.send_response(503)
+                self.end_headers()
+                self.wfile.write(b"rag down")
+
+            def log_message(self, *a):
+                pass
+
+        srv = http.server.HTTPServer(("127.0.0.1", 0), Handler)
+        port = srv.server_address[1]
+        t = threading.Thread(target=srv.serve_forever, daemon=True)
+        t.start()
+        self.addCleanup(srv.shutdown)
+        os.environ["PCT_RAG_INGEST_URL"] = f"http://127.0.0.1:{port}/ingest"
+        os.environ["PCT_RAG_INGEST_TOKEN"] = "rag-test-token"
+        self.addCleanup(lambda: os.environ.pop("PCT_RAG_INGEST_URL", None))
+        self.addCleanup(lambda: os.environ.pop("PCT_RAG_INGEST_TOKEN", None))
+
+        coll, rows = self._prep_with_corpus(2)
+        _r, _j, job = self.start_release(coll["id"])
+        self.assertEqual(job["status"], "succeeded", job)  # bundle is fine
+        rel = self.releases(coll["id"])[0]
+        self.assertEqual(rel["rag_status"], "failed")
+        # the payload carried the real, verifiable provenance
+        pl = captured["payload"]
+        self.assertEqual(pl["kind"], "pct-release")
+        self.assertEqual(pl["contract"], "rel-1")
+        self.assertEqual(pl["release_id"], rel["release_id"])
+        self.assertEqual(pl["zip_sha256"], rel["zip_sha256"])
+        self.assertEqual(pl["collection_id"], coll["collection_id"])
+        self.assertEqual(captured["auth"], "Bearer rag-test-token")
+
+
+class TestPF_F07_AuditTrail(_StageFPrep):
+    """PF-F07 — the append-only audit trail: every pipeline/acceptance/
+    release action lands in knowledge_audit_log with a real actor
+    (sess-<sha8> for request actions, 'worker' for job actions)."""
+
+    def test_audit_trail_records_actions(self):
+        coll, rows = self._prep_with_corpus(2)
+        _r, _j, _job = self.start_release(coll["id"])
+
+        a = self.client.get(
+            f"/api/knowledge/collections/{coll['id']}/audit").get_json()
+        self.assertTrue(a["ok"])
+        self.assertGreater(a["count"], 0)
+        actions = {e["action"] for e in a["entries"]}
+        # corpus build (worker) + release (worker) are recorded
+        self.assertIn("corpus_built", actions)
+        self.assertIn("release_built", actions)
+        actors = {e["actor"] for e in a["entries"]}
+        self.assertIn("worker", actors)
+        for e in a["entries"]:
+            self.assertIn(e["status"], ("ok", "fail", "blocked"))
+            self.assertTrue(e["ts"])
+
+        # the same collection only — another collection's audit is clean
+        other = self.make_collection(name="دیگر", slug="pipeline-other")
+        a2 = self.client.get(
+            f"/api/knowledge/collections/{other['id']}/audit").get_json()
+        self.assertEqual(a2["count"], 0)
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)
