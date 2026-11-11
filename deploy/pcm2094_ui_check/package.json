@@ -1,0 +1,13 @@
+{
+  "name": "pcm2094-ui-check",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "PCM-20.9.4 mission 2.3 — real headless-UI verification of dashboard/studio.html (Knowledge Corpus Factory) against a real local Flask server.",
+  "scripts": {
+    "check": "node ui_check.mjs"
+  },
+  "dependencies": {
+    "puppeteer-core": "^24.0.0"
+  }
+}

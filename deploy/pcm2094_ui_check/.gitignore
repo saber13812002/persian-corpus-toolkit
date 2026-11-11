@@ -1,0 +1,4 @@
+# PCM-20.9.4 UI-check harness: sources are committed, artifacts are not.
+node_modules/
+results.json
+shots/

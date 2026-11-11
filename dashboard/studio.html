@@ -185,6 +185,34 @@
   .reg-form { display: flex; flex-direction: column; gap: 6px; margin-top: 10px; }
   .reg-form input { padding: 6px 10px; }
 
+  /* ── PCM-20.9.4: Knowledge Corpus Factory (pipeline dashboard) ── */
+  .pf-runbar { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; background: var(--panel); border: 1px solid var(--border); border-radius: var(--r-sm); padding: 10px 12px; margin-bottom: 8px; font-size: 12px; }
+  .pf-runbar .pf-rid { font-family: Consolas, monospace; direction: ltr; font-size: 11px; color: var(--dim); }
+  .pf-progress { height: 6px; background: var(--bg); border-radius: 3px; overflow: hidden; margin-bottom: 12px; display: none; }
+  .pf-progress > i { display: block; height: 100%; background: var(--green); transition: width 0.4s; width: 0; }
+  .pf-controls { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 12px; align-items: center; }
+  .pf-controls select { max-width: 150px; }
+  .pf-stages { display: flex; flex-direction: column; }
+  .pf-stage { background: var(--panel); border: 1px solid var(--border); border-inline-start: 3px solid var(--border); border-radius: var(--r-sm); padding: 10px 12px; }
+  .pf-stage.s-ok { border-inline-start-color: var(--green); }
+  .pf-stage.s-err { border-inline-start-color: var(--red); }
+  .pf-stage.s-warn { border-inline-start-color: var(--orange); }
+  .pf-stage.s-info { border-inline-start-color: var(--accent); }
+  .pf-stage-head { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; cursor: pointer; }
+  .pf-stage-head:hover { background: #16233b; border-radius: 4px; }
+  .pf-stage-head .pf-letter { font-family: Consolas, monospace; font-weight: 700; font-size: 12px; color: var(--accent); background: var(--card); border: 1px solid var(--border); border-radius: 4px; padding: 1px 7px; direction: ltr; }
+  .pf-stage-head .pf-name { font-size: 12px; font-weight: 600; }
+  .pf-stage-head .pf-acts { margin-inline-start: auto; display: flex; gap: 4px; flex-wrap: wrap; }
+  .pf-stage-body { margin-top: 8px; display: none; }
+  .pf-stage.open .pf-stage-body { display: block; }
+  .pf-stage-body .kv { font-size: 12px; grid-template-columns: 130px 1fr; }
+  .pf-conn { height: 14px; margin-inline-start: 22px; border-inline-start: 2px dashed var(--border); }
+  .pf-conn.done { border-inline-start-color: var(--green); border-inline-start-style: solid; }
+  .pf-sched { margin-top: 12px; border-top: 1px solid var(--border); padding-top: 12px; font-size: 12px; }
+  .pf-sched .sched-row { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-bottom: 6px; }
+  .pf-sched input[type="time"] { padding: 4px 8px; }
+  .pf-hint { color: var(--dim); font-size: 11px; margin-top: 6px; }
+
   /* ── responsive ── */
   @media (max-width: 1100px) {
     .studio { flex-direction: column; overflow-y: auto; height: auto; min-height: 100vh; }
@@ -353,6 +381,29 @@
     </div>
 
     <div id="stContent" style="display:none">
+      <div class="card" id="pipelineCard">
+        <h3><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 4h6v6H4zM14 4h6v6h-6zM4 14h6v6H4zM14 14h6v6h-6z"/></svg> Knowledge Corpus Factory — خط لوله کامل (A→F)</h3>
+        <div id="pfRunBar"><div class="t2" style="color:var(--dim);font-size:12px">در حال بارگذاری…</div></div>
+        <div id="pfProgress" class="pf-progress"><i></i></div>
+        <div id="pfProgressLabel" class="pf-hint" style="display:none"></div>
+        <div class="pf-controls">
+          <button type="button" class="btn btn-sm btn-primary" id="pfRunBtn">اجرای خط لوله کامل</button>
+          <select class="input" id="pfFromStage" title="ادامه از یک stage: stageهای قبلی checkpoint می‌مانند؛ stage انتخابی و بعد از آن دوباره اجرا می‌شوند">
+            <option value="A_IMPORT">از stage A</option>
+            <option value="B_PROCESS">از stage B</option>
+            <option value="C_SCHEMA">از stage C</option>
+            <option value="D_BUILD">از stage D</option>
+            <option value="E_ACCEPT">از stage E</option>
+            <option value="RELEASE">از stage F</option>
+          </select>
+          <button type="button" class="btn btn-sm" id="pfFromBtn">ادامه از stage</button>
+          <button type="button" class="btn btn-sm btn-ghost" id="pfPauseBtn" disabled>توقف</button>
+          <button type="button" class="btn btn-sm btn-ghost" id="pfResumeBtn" disabled>ادامه</button>
+        </div>
+        <div class="pf-stages" id="pfStages"></div>
+        <div class="pf-sched" id="pfSchedule"><div class="t2" style="color:var(--dim);font-size:12px">در حال بارگذاری schedule شبانه…</div></div>
+        <div id="pfHistory"></div>
+      </div>
       <div class="card">
         <h3><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="m12 2 9 5-9 5-9-5 9-5Zm-9 10 9 5 9-5m-18 5 9 5 9-5"/></svg> نسخه‌ها</h3>
         <dl class="kv" id="stVersions"></dl>
@@ -756,6 +807,7 @@ async function openCollection(id) {
   $('docDetailCard').style.display = 'none';
   setHash(id);
   stopQueuePolling();
+  stopPipelinePolling();
   REG_STATE.workId = null;
   REG_STATE.editionId = null;
   markActive();
@@ -818,6 +870,8 @@ async function renderDetail() {
     renderCompat();
     loadQueue();
     loadRegistry();
+    loadPipeline();
+    loadPipelineSchedule();
   } catch (e) {
     ws.style.display = 'none';
     $('wsEmpty').style.display = 'block';
@@ -1743,6 +1797,353 @@ async function renderCompat() {
   }
 }
 
+/* ═══════ PCM-20.9.4: Knowledge Corpus Factory — pipeline dashboard ═══════ */
+const PF_STAGE_INFO = {
+  A_IMPORT: ['A', 'ورود فایل‌های Word'],
+  B_PROCESS: ['B', 'پردازش (Word Factory)'],
+  C_SCHEMA: ['C', 'اسکیم (طراحی + اعتبارسنجی)'],
+  D_BUILD: ['D', 'پیکره canonical + ایندکس ES'],
+  E_ACCEPT: ['E', 'اعتبارسنجی جستجو (10 دسته)'],
+  RELEASE: ['F', 'Release + RAG'],
+};
+const PF_STATUS_FA = {
+  NOT_STARTED: ['شروع نشده', 'dim'],
+  READY: ['آماده', 'info'],
+  RUNNING: ['در حال اجرا', 'info'],
+  PAUSED: ['توقف‌شده', 'warn'],
+  STALE: ['قدیمی (job قطع)', 'warn'],
+  SUCCESS: ['موفق', 'ok'],
+  FAILED: ['ناموفق', 'err'],
+  NEEDS_REVIEW: ['نیاز به بررسی', 'warn'],
+  BLOCKED: ['بلاک', 'warn'],
+};
+const PF_RUN_FA = {
+  running: ['در حال اجرا', 'info'],
+  paused: ['توقف‌شده', 'warn'],
+  done: ['انجام شد', 'ok'],
+  failed: ['ناموفق', 'err'],
+};
+const PIPE_STATE = { timer: null, liveJob: null, lastRunStatus: null };
+function startPipelinePolling() {
+  if (PIPE_STATE.timer) return;
+  PIPE_STATE.timer = setInterval(() => { loadPipeline(); }, 2500);
+}
+function stopPipelinePolling() {
+  if (PIPE_STATE.timer) { clearInterval(PIPE_STATE.timer); PIPE_STATE.timer = null; }
+}
+function pfTime(s) { return (s || '').replace('T', ' ').slice(0, 19); }
+function ragBadge(s) {
+  const [fa, cls] = RAG_BADGE[s] || ['RAG: ناشناخته', 'dim'];
+  return '<span class="badge ' + cls + '">' + escHtml(fa) + '</span>';
+}
+async function loadPipeline() {
+  const id = state.activeId;
+  if (!id) { stopPipelinePolling(); return; }
+  let j;
+  try {
+    j = await fetchAPI('/api/knowledge/collections/' + id + '/pipeline/status');
+  } catch (e) {
+    $('pfRunBar').innerHTML = '<span class="t2" style="color:var(--dim);font-size:12px">بارگذاری خط لوله ناموفق بود: ' + escHtml(e.message) + '</span>';
+    stopPipelinePolling();
+    return;
+  }
+  if (!j || id !== state.activeId) { stopPipelinePolling(); return; }
+  PIPE_STATE.liveJob = null;
+  try {
+    const jj = await fetchAPI('/api/knowledge/jobs?collection_id=' + encodeURIComponent(j.collection_id));
+    if (jj && jj.jobs && id === state.activeId) {
+      const live = jj.jobs.find((x) => x.kind === 'pipeline_run' && (x.status === 'pending' || x.status === 'running'));
+      PIPE_STATE.liveJob = live || null;
+    }
+  } catch (e) { /* پیشرفت job اختیاری است */ }
+  if (id !== state.activeId) { stopPipelinePolling(); return; }
+  renderRunBar(j);
+  renderPipelineStages(j);
+  loadPipelineHistory(j.collection_id);
+  const prev = PIPE_STATE.lastRunStatus;
+  const now = j.run ? j.run.status : null;
+  if (now !== prev) {
+    PIPE_STATE.lastRunStatus = now;
+    if (now === 'done' || now === 'failed') {
+      /* the run just ended: refresh the corpus/builds/releases cards, which
+         are only loaded on open-collection or manual actions (PCM-20.9.4 2.3). */
+      loadCorpusBuilds();
+      loadReleases();
+      renderDetail();
+    }
+  }
+  if (j.run && j.run.status === 'running') startPipelinePolling();
+  else stopPipelinePolling();
+}
+function renderRunBar(j) {
+  const run = j.run;
+  const bar = $('pfRunBar');
+  if (!run) {
+    bar.innerHTML = '<span class="badge dim">بدون run</span>' +
+      '<span class="t2" style="color:var(--dim);font-size:12px">خط لوله هنوز برای این کالکشن اجرا نشده است.</span>';
+  } else {
+    const [fa, cls] = PF_RUN_FA[run.status] || [run.status, 'dim'];
+    let html = '<span class="badge ' + cls + '">' + escHtml(fa) + '</span>' +
+      '<span class="pf-rid">' + escHtml(run.run_id) + '</span>' +
+      '<span style="color:var(--dim)">trigger: ' + (run.trigger_type === 'nightly' ? 'شبانه' : 'دستی') + '</span>';
+    if (run.started_at) html += '<span style="color:var(--dim)">شروع: ' + escHtml(pfTime(run.started_at)) + '</span>';
+    if (run.finished_at) html += '<span style="color:var(--dim)">پایان: ' + escHtml(pfTime(run.finished_at)) + '</span>';
+    if (run.error) html += '<span class="row-err" title="' + escHtml(run.error) + '">خطا: ' + escHtml(run.error) + '</span>';
+    bar.innerHTML = html;
+  }
+  const running = run && run.status === 'running';
+  const paused = run && run.status === 'paused';
+  $('pfPauseBtn').disabled = !running;
+  $('pfResumeBtn').disabled = !paused;
+  $('pfRunBtn').disabled = running;
+  $('pfFromBtn').disabled = running;
+  const prog = $('pfProgress');
+  const lab = $('pfProgressLabel');
+  const nDone = j.stages.filter((s) => s.status === 'SUCCESS').length;
+  let pct = null;
+  if (PIPE_STATE.liveJob && PIPE_STATE.liveJob.total > 0) {
+    pct = Math.min(100, Math.round((PIPE_STATE.liveJob.progress / PIPE_STATE.liveJob.total) * 100));
+  }
+  if (running || paused) {
+    prog.style.display = 'block';
+    prog.firstElementChild.style.width = (pct != null ? pct : (nDone / j.stages.length * 100)) + '%';
+    lab.style.display = '';
+    lab.textContent = (pct != null
+      ? 'پیشرفت واقعی job: ' + PIPE_STATE.liveJob.progress + '/' + PIPE_STATE.liveJob.total +
+        (PIPE_STATE.liveJob.stage ? ' — ' + PIPE_STATE.liveJob.stage : '') + ' · '
+      : '') + 'stage کامل‌شده: ' + nDone + '/' + j.stages.length;
+  } else {
+    prog.style.display = 'none';
+    lab.style.display = 'none';
+  }
+}
+function renderPipelineStages(j) {
+  $('pfStages').innerHTML = j.stages.map((st, i) => {
+    const conn = i > 0
+      ? '<div class="pf-conn' + (j.stages[i - 1].status === 'SUCCESS' ? ' done' : '') + '" data-pfconn="' + i + '"></div>'
+      : '';
+    return conn + pfStageCard(st, j, i);
+  }).join('');
+}
+function pfStageCard(st, j, idx) {
+  const [letter, name] = PF_STAGE_INFO[st.stage] || [st.stage, st.label];
+  const [fa, cls] = PF_STATUS_FA[st.status] || [st.status, 'dim'];
+  const open = ['FAILED', 'RUNNING', 'PAUSED', 'NEEDS_REVIEW'].indexOf(st.status) >= 0 ? ' open' : '';
+  return '<div class="pf-stage s-' + cls + open + '" data-pfstage="' + escHtml(st.stage) + '">' +
+    '<div class="pf-stage-head">' +
+      '<span class="pf-letter">' + escHtml(letter) + '</span>' +
+      '<span class="pf-name">' + escHtml(name) + '</span>' +
+      '<span class="badge ' + cls + '">' + escHtml(fa) + '</span>' +
+      (st.error ? '<span class="row-err" title="' + escHtml(st.error) + '">⚠ ' + escHtml(st.error) + '</span>' : '') +
+      '<span class="pf-acts">' + pfStageActions(st) + '</span>' +
+    '</div>' +
+    '<div class="pf-stage-body">' + pfStageBody(st, j) + '</div>' +
+  '</div>';
+}
+function pfStageActions(st) {
+  let h = '';
+  if (st.stage === 'A_IMPORT') {
+    h += '<button type="button" class="btn btn-sm btn-primary" data-pf="import">افزودن فایل‌ها</button>' +
+      '<button type="button" class="btn btn-sm btn-ghost" data-pf="docs">لیست اسناد</button>';
+  } else if (st.stage === 'B_PROCESS') {
+    h += '<button type="button" class="btn btn-sm btn-ghost" data-pf="queue">صف پردازش</button>';
+  } else if (st.stage === 'C_SCHEMA') {
+    h += '<button type="button" class="btn btn-sm btn-ghost" data-pf="schema">مشاهده اسکیم</button>';
+  } else if (st.stage === 'D_BUILD') {
+    h += '<button type="button" class="btn btn-sm btn-primary" data-pf="build">ساخت پیکره</button>' +
+      '<button type="button" class="btn btn-sm btn-ghost" data-pf="corpus">پیکره + ES</button>';
+  } else if (st.stage === 'E_ACCEPT') {
+    h += '<button type="button" class="btn btn-sm btn-primary" data-pf="acceptance">اعتبارسنجی</button>';
+  } else if (st.stage === 'RELEASE') {
+    h += '<button type="button" class="btn btn-sm btn-primary" data-pf="release">ساخت Release</button>';
+  }
+  if (st.status === 'FAILED') {
+    h += '<button type="button" class="btn btn-sm" data-pf="retry" data-stage="' + escHtml(st.stage) + '">تلاش دوباره</button>';
+  }
+  return h;
+}
+function pfStageBody(st, j) {
+  const d = st.detail || {};
+  let h = '<dl class="kv">';
+  if (st.stage === 'A_IMPORT') {
+    h += row('اسناد کل', faNum(d.documents), true);
+    h += row('فایل واردشده (موفق + ناموفق)', faNum(d.uploaded), true);
+  } else if (st.stage === 'B_PROCESS') {
+    if (d.total !== undefined) {
+      h += row('صف: کل', faNum(d.total), true);
+      h += row('در انتظار', faNum(d.pending), true);
+      h += row('در حال اجرا', faNum(d.running), true);
+      h += row('موفق', faNum(d.succeeded), true);
+      h += row('نیاز به بررسی', faNum(d.needs_review), true);
+      h += row('ناموفق', faNum(d.failed), true);
+    }
+    if (d.subjob) h += row('job پردازش', '<span class="c-slug">' + escHtml(d.subjob) + '</span>');
+  } else if (st.stage === 'C_SCHEMA') {
+    if (d.schema_id) h += row('schema', '<span class="c-slug">' + escHtml(d.schema_id) + '</span>');
+    if (d.version) h += row('نسخه اسکیم', faNum(d.version), true);
+    if (d.blocks_scanned) h += row('بلوک‌های بررسی‌شده', faNum(d.blocks_scanned), true);
+    if (d.errors && d.errors.length) {
+      h += row('خطاهای اعتبارسنجی', d.errors.slice(0, 3).map((x) => '<div class="row-err">' + escHtml(x) + '</div>').join(''));
+    }
+  } else if (st.stage === 'D_BUILD') {
+    const b = j.latest_build;
+    const iv = d.iv_id || (b && b.iv_id);
+    if (iv || b) {
+      h += row('build', '<span class="c-slug">' + escHtml(iv || '—') + '</span>');
+      if (b && b.chunk_count != null) h += row('تعداد chunk', faNum(b.chunk_count), true);
+      if (b && b.es_index_status) h += row('این‌دکس ES', '<span class="c-slug">' + escHtml(b.es_index_status) + '</span>');
+      if (b && b.content_sha256) h += row('SHA-256 محتوا', '<span class="c-slug">' + escHtml(String(b.content_sha256).slice(0, 16) + '…') + '</span>');
+    }
+    if (d.subjob) h += row('job ساخت', '<span class="c-slug">' + escHtml(d.subjob) + '</span>');
+  } else if (st.stage === 'E_ACCEPT') {
+    const b = j.latest_build;
+    const ss = d.search_status || (b && b.search_status);
+    if (ss) h += row('search_status', '<span class="c-slug">' + escHtml(ss) + '</span>');
+    if (d.reason) h += row('دلیل', '<span style="color:var(--orange)">' + escHtml(d.reason) + '</span>');
+    if (b && b.search_status === 'pass') h += row('تأیید', 'بعد از PASS واقعی، build به‌صورت خودکار تأیید شد (index_approved).');
+  } else if (st.stage === 'RELEASE') {
+    const r = j.latest_release;
+    const rid = d.release_id || (r && r.release_id);
+    if (rid || r) {
+      h += row('release', '<span class="c-slug">' + escHtml(rid || '—') + '</span>');
+      if (r && r.zip_sha256) h += row('SHA-256 ZIP', '<span class="c-slug">' + escHtml(String(r.zip_sha256).slice(0, 16) + '…') + '</span>');
+      if (r && r.size_bytes != null) h += row('حجم ZIP', faNum(Math.round(r.size_bytes / 1024)) + ' KB', true);
+      if (r && r.release_id) h += row('دانلود', '<a href="/api/knowledge/releases/' + escHtml(r.release_id) + '/download" style="color:var(--accent)">دانلود بسته</a>');
+    }
+    const rag = d.rag_status || (r && r.rag_status);
+    if (rag) h += row('RAG', ragBadge(rag));
+  }
+  if (st.started_at) h += row('شروع stage', pfTime(st.started_at), true);
+  if (st.updated_at) h += row('آخرین به‌روزرسانی', pfTime(st.updated_at), true);
+  if (st.job_id) h += row('job id', '<span class="c-slug">' + escHtml(st.job_id) + '</span>');
+  if (!st.started_at && !st.detail) h += row('وضعیت', '<span style="color:var(--dim)">هنوز داده‌ای نیست — این stage اجرا نشده است.</span>');
+  h += '</dl>';
+  if (st.error) h += '<div class="error-box" style="display:block;margin-top:8px">' + escHtml(st.error) + '</div>';
+  return h;
+}
+async function loadPipelineHistory(cid) {
+  if (!state.collection || state.collection.collection_id !== cid) return;
+  let j;
+  try { j = await fetchAPI('/api/knowledge/collections/' + state.activeId + '/audit?limit=200'); }
+  catch (e) { return; }
+  if (!j || !state.collection || state.collection.collection_id !== cid) return;
+  const rows = (j.entries || []).filter((e) => e.stage === 'pipeline');
+  const box = $('pfHistory');
+  if (!rows.length) { box.innerHTML = ''; return; }
+  let h = '<div style="margin-top:12px;border-top:1px solid var(--border);padding-top:8px">' +
+    '<div class="t2" style="font-size:12px;margin-bottom:6px">تاریخچه اجرای خط لوله (audit log — فقط سطرهای pipeline)</div>' +
+    '<table class="docs-table"><thead><tr><th>زمان</th><th>رویداد</th><th>وضعیت</th><th>جزئیات</th></tr></thead><tbody>';
+  rows.slice(0, 20).forEach((e) => {
+    let det = '';
+    try {
+      const d = JSON.parse(e.detail_json || '{}');
+      const parts = [];
+      if (d.trigger) parts.push('trigger=' + d.trigger);
+      if (d.from_stage) parts.push('from=' + d.from_stage);
+      if (d.stage) parts.push('stage=' + d.stage);
+      if (d.status) parts.push('result=' + d.status);
+      if (d.run_id) parts.push(d.run_id);
+      if (d.error) parts.push('error: ' + d.error);
+      det = parts.join(' · ');
+    } catch (err) { det = ''; }
+    const [label, cls] = AUDIT_STATUS[e.status] || [e.status, 'dim'];
+    h += '<tr><td class="c-slug">' + escHtml(pfTime(e.ts)) + '</td>' +
+      '<td class="c-slug">' + escHtml(e.action) + '</td>' +
+      '<td><span class="badge ' + cls + '">' + escHtml(label) + '</span></td>' +
+      '<td class="c-slug" style="font-size:11px">' + escHtml(det) + '</td></tr>';
+  });
+  box.innerHTML = h + '</tbody></table></div>';
+}
+async function loadPipelineSchedule() {
+  if (!state.collection) return;
+  const cid = state.collection.collection_id;
+  const box = $('pfSchedule');
+  let j;
+  try { j = await fetchAPI('/api/knowledge/pipeline/schedules'); }
+  catch (e) { box.innerHTML = '<div class="t2" style="color:var(--dim);font-size:12px">بارگذاری schedule شبانه ناموفق بود.</div>'; return; }
+  if (!j) return;
+  if (!state.collection || state.collection.collection_id !== cid) return;
+  const mine = (j.schedules || []).find((s) => s.collection_id === cid);
+  const others = (j.schedules || []).filter((s) => s.collection_id !== cid);
+  let h = '<div class="t2" style="font-size:12px;margin-bottom:8px">Schedule شبانه (nightly)</div>';
+  h += '<div class="sched-row">' +
+    '<label style="display:flex;align-items:center;gap:6px;cursor:pointer"><input type="checkbox" id="pfSchedOn"' + (mine && mine.enabled ? ' checked' : '') + '> فعال‌سازی اجرای شبانه</label>' +
+    '<input type="time" class="input" id="pfSchedTime" dir="ltr" value="' + escHtml((mine && mine.cron_time) || '03:00') + '" step="60" style="width:110px">' +
+    '<button type="button" class="btn btn-sm" id="pfSchedSave">ذخیره schedule</button>' +
+  '</div>';
+  if (mine) {
+    h += '<div class="pf-hint">آخرین به‌روزرسانی: ' + escHtml(pfTime(mine.updated_at)) +
+      (mine.last_run_at ? ' · آخرین اجرا: ' + escHtml(pfTime(mine.last_run_at)) + ' (' + escHtml(mine.last_status || '—') + ')' : ' · هنوز اجرای شبانه‌ای ثبت نشده') + '</div>';
+  }
+  if (others.length) {
+    h += '<div class="pf-hint">سایر scheduleها: ' + others.map((s) => escHtml(s.collection_id) + ' (' + escHtml(s.cron_time) + (s.enabled ? '' : '، غیرفعال') + ')').join('، ') + '</div>';
+  }
+  h += '<div class="pf-hint">ذخیره فقط schedule را در DB ثبت می‌کند؛ اجرای واقعی نیاز به cron سرور (deploy/pcm209_nightly.sh) دارد که در این مأموریت فعال نمی‌شود.</div>';
+  box.innerHTML = h;
+}
+async function savePipelineSchedule() {
+  if (!state.activeId) return;
+  const on = $('pfSchedOn');
+  const tm = $('pfSchedTime');
+  if (!on || !tm) return;
+  try {
+    const j = await fetchAPI('/api/knowledge/pipeline/schedules', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ collection_id: state.activeId, enabled: on.checked, cron_time: tm.value || '03:00' }),
+    });
+    if (!j) return;
+    toast('Schedule ذخیره شد' + (on.checked ? '' : ' (غیرفعال)'));
+    loadPipelineSchedule();
+  } catch (e) {
+    toast(e.message || 'ذخیره schedule ناموفق بود', 'err');
+  }
+}
+async function pipelineAction(act, stageKey) {
+  if (!state.activeId) return;
+  const base = '/api/knowledge/collections/' + state.activeId + '/pipeline';
+  const post = (p, body) => fetchAPI(base + p, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: body ? JSON.stringify(body) : '{}',
+  });
+  try {
+    if (act === 'run') {
+      const j = await post('/run', {});
+      if (!j) return;
+      toast(j.queued ? 'خط لوله شروع شد (run: ' + (j.run_id || '') + ')' : 'run قبلاً فعال است (queued: false)');
+    } else if (act === 'from') {
+      const fs = $('pfFromStage').value;
+      const j = await post('/run', { from_stage: fs });
+      if (!j) return;
+      toast('ادامه از stage ' + fs + ' (run: ' + (j.run_id || '') + ')');
+    } else if (act === 'pause') {
+      const j = await post('/pause', null);
+      if (!j) return;
+      toast('خط لوله متوقف شد (paused)');
+    } else if (act === 'resume') {
+      const j = await post('/resume', null);
+      if (!j) return;
+      toast('ادامه خط لوله از checkpoint');
+    } else if (act === 'retry') {
+      const j = await post('/run', { from_stage: stageKey });
+      if (!j) return;
+      toast('تلاش دوباره از stage ' + stageKey + ' (run: ' + (j.run_id || '') + ')');
+    } else if (act === 'import') { openImportModal(); return; }
+    else if (act === 'docs') { const el = $('docsCard'); if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' }); return; }
+    else if (act === 'queue') { const el = $('queueCard'); if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' }); return; }
+    else if (act === 'schema') { const el = $('schemaCard'); if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' }); return; }
+    else if (act === 'corpus') { const el = $('corpusCard'); if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' }); return; }
+    else if (act === 'build') { await corpusBuild(); loadPipeline(); return; }
+    else if (act === 'acceptance') { await runAcceptance(); loadPipeline(); return; }
+    else if (act === 'release') { await buildRelease(); loadPipeline(); return; }
+    else return;
+    loadPipeline();
+  } catch (e) {
+    toast(e.message || 'عملیات خط لوله ناموفق بود', 'err');
+  }
+}
+
 /* ═══════ PCM-17: صف پردازش (batches + شمارنده‌های زنده) ═══════ */
 const BATCH_STATUS_FA = {
   planned: ['برنامه‌ریز', 'dim'],
@@ -2064,6 +2465,18 @@ $('corpusBuildBtn').addEventListener('click', corpusBuild);
 $('acceptanceBtn').addEventListener('click', runAcceptance);
 $('releaseBtn').addEventListener('click', buildRelease);
 $('auditRefreshBtn').addEventListener('click', loadAudit);
+/* ── PCM-20.9.4 pipeline dashboard listeners ── */
+$('pfRunBtn').addEventListener('click', () => pipelineAction('run'));
+$('pfFromBtn').addEventListener('click', () => pipelineAction('from'));
+$('pfPauseBtn').addEventListener('click', () => pipelineAction('pause'));
+$('pfResumeBtn').addEventListener('click', () => pipelineAction('resume'));
+$('pfStages').addEventListener('click', (e) => {
+  const btn = e.target.closest('button[data-pf]');
+  if (btn) { e.stopPropagation(); pipelineAction(btn.getAttribute('data-pf'), btn.getAttribute('data-stage')); return; }
+  const card = e.target.closest('.pf-stage');
+  if (card) card.classList.toggle('open');
+});
+$('pfSchedule').addEventListener('click', (e) => { if (e.target.closest('#pfSchedSave')) savePipelineSchedule(); });
 /* ── PCM-17 listeners ── */
 $('workNewBtn').addEventListener('click', openWorkModal);
 $('workClose').addEventListener('click', closeWorkModal);
@@ -2078,7 +2491,7 @@ $('colSearch').addEventListener('input', (e) => {
 $('subjectFilter').addEventListener('change', (e) => { state.subject = e.target.value; state.page = 1; loadCollections(); });
 $('prevPage').addEventListener('click', () => { if (state.page > 1) { state.page--; loadCollections(); } });
 $('nextPage').addEventListener('click', () => { if (state.page < state.totalPages) { state.page++; loadCollections(); } });
-$('backToTop').addEventListener('click', () => { stopQueuePolling(); state.activeId = null; setHash(null); markActive(); $('wsContent').style.display = 'none'; $('wsEmpty').style.display = 'block'; $('stContent').style.display = 'none'; $('stEmpty').style.display = 'block'; });
+$('backToTop').addEventListener('click', () => { stopQueuePolling(); stopPipelinePolling(); state.activeId = null; setHash(null); markActive(); $('wsContent').style.display = 'none'; $('wsEmpty').style.display = 'block'; $('stContent').style.display = 'none'; $('stEmpty').style.display = 'block'; });
 
 (async function init() {
   await checkAuth();
