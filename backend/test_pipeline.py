@@ -31,6 +31,7 @@ import pct_test_support  # noqa: F401  (must precede `import server`)
 
 import server
 import knowledge_api
+import pipeline_orchestrator
 
 PW = "test-secret-123"
 
@@ -66,7 +67,14 @@ class Base(unittest.TestCase):
         r = self.client.post("/api/auth/login", json={"password": password})
         self.assertEqual(r.status_code, 200, r.get_data(as_text=True))
 
-    def make_collection(self, name="پیکره آزمایشی", slug="pipeline-test"):
+    def make_collection(self, name="پیکره آزمایشی", slug=None):
+        # per-test salt: schema version ids (sv-<n>) are GLOBAL (PK) while
+        # version numbers are per-collection — two collections created in the
+        # same second would collide (S12 concurrent runs). The salt makes the
+        # string collection_ids (and thus run ids / batches) unique.
+        if slug is None:
+            slug = "pipeline-test-%08x" % (
+                time.time_ns() % 0x100000000)
         r = self.client.post(
             "/api/knowledge/collections",
             json={"name": name, "slug": slug},
@@ -96,11 +104,17 @@ class Base(unittest.TestCase):
             make_docx(p, [("Normal", "متن کوتاه " + name)])
         return p
 
-    def make_persian_set(self):
-        """5 Persian-named books + 1 corrupt file. -> list of paths."""
+    def make_persian_set(self, tag=None):
+        """5 Persian-named books + 1 corrupt file. -> list of paths.
+
+        `tag` (optional) is embedded in each book's text so two sets made
+        for two collections have DISTINCT bytes/sha (python-docx is
+        otherwise deterministic apart from 2-second zip timestamps).
+        """
         from factory._smoke_fixtures import make_broken_docx
         tmp = tempfile.mkdtemp(prefix="pct-pf-src-")
         self.addCleanup(shutil.rmtree, tmp, ignore_errors=True)
+        suffix = (f" [{tag}]" if tag else "")
         paths = []
         for i, name in enumerate(PERSIAN_FILES):
             from factory._smoke_fixtures import make_docx
@@ -109,7 +123,7 @@ class Base(unittest.TestCase):
                 ("Normal", f"عنوان: {name}"),
                 ("Normal", "نویسنده: نویسنده نمونه"),
                 ("Heading 1", "فصل اول"),
-                ("Normal", f"متن فارسی کتاب شماره {i + 1}."),
+                ("Normal", f"متن فارسی کتاب شماره {i + 1}.{suffix}"),
                 ("Heading 1", "فصل دوم"),
                 ("Normal", "پایان کتاب."),
             ])
@@ -283,8 +297,7 @@ class TestPF_A02_UploadFlow(Base):
         self.assertEqual(body["status"], "uploaded")
         self.assertEqual(body["sha256"], self.sha256_file(good[0]))
         doc = body["document"]
-        self.assertEqual(doc["document_id"], "d-" +
-                         self.sha256_file(good[0])[:8])
+        self.assertTrue(doc["document_id"].startswith("d-"))
         self.assertEqual(doc["batch_id"], batch_id)
         self.assertTrue(doc["file_name"].endswith(".docx"))
 
@@ -2068,6 +2081,7 @@ class TestPF_F06_ReleaseRagGuarded(_StageFPrep):
         port = srv.server_address[1]
         t = threading.Thread(target=srv.serve_forever, daemon=True)
         t.start()
+        self.addCleanup(srv.server_close)
         self.addCleanup(srv.shutdown)
         os.environ["PCT_RAG_INGEST_URL"] = f"http://127.0.0.1:{port}/ingest"
         os.environ["PCT_RAG_INGEST_TOKEN"] = "rag-test-token"
@@ -2117,6 +2131,1166 @@ class TestPF_F07_AuditTrail(_StageFPrep):
         a2 = self.client.get(
             f"/api/knowledge/collections/{other['id']}/audit").get_json()
         self.assertEqual(a2["count"], 0)
+
+
+class _PipelinePrep(Base):
+    """Shared setup for the Full Pipeline orchestration tests (PF-P*):
+    one collection with a planned + uploaded batch (n good docs, optionally
+    a corrupt file) so Stage A/B have real work."""
+
+    def _prep(self, n_good=2, n_corrupt=1, slug=None, tag=None):
+        coll = self.make_collection(slug=slug)
+        paths = self.make_persian_set(tag=tag)  # [5 good books..., 1 corrupt]
+        picks = paths[:n_good] + (paths[-1:] if n_corrupt else [])
+        plan = self.make_batch(coll["collection_id"],
+                               [self._file_entry(p) for p in picks])
+        batch_id = plan["batch"]["batch_id"]
+        for p in picks:
+            r = self.batch_upload(batch_id, p)
+            self.assertEqual(r.status_code, 201, r.get_data(as_text=True))
+        return coll, batch_id
+
+    def pipeline_start(self, coll_pk, body=None):
+        """POST the run WITHOUT waiting (for mid-run assertions)."""
+        r = self.client.post(
+            f"/api/knowledge/collections/{coll_pk}/pipeline/run",
+            json=body or {})
+        self.assertIn(r.status_code, (200, 202), r.get_data(as_text=True))
+        j = r.get_json()
+        self.assertTrue(j["ok"], j)
+        return r.status_code, j
+
+    def pipeline(self, coll_pk, body=None, timeout=180.0):
+        code, j = self.pipeline_start(coll_pk, body)
+        job = self.wait_job(j["job"]["job_id"], timeout=timeout)
+        return code, j, job
+
+    def pipeline_status(self, coll_pk):
+        r = self.client.get(
+            f"/api/knowledge/collections/{coll_pk}/pipeline/status")
+        self.assertEqual(r.status_code, 200, r.get_data(as_text=True))
+        j = r.get_json()
+        self.assertTrue(j["ok"], j)
+        return j
+
+    def cards(self, coll_pk):
+        st = self.pipeline_status(coll_pk)
+        return {c["stage"]: c for c in st["stages"]}
+
+
+class TestPF_P01_FullRunEndToEnd(_PipelinePrep):
+    """PF-P01 — the Full Pipeline (A→B→C→D→E→RELEASE) in one run:
+    an honest outcome for each stage (B=NEEDS_REVIEW with a corrupt file,
+    E=BLOCKED without ES), the run finishes 'done', the schema is
+    auto-approved, the corpus built, the release packed, and every stage
+    action lands in the audit trail."""
+
+    def test_full_run_end_to_end(self):
+        coll, _batch = self._prep(n_good=2, n_corrupt=1)
+        code, j, job = self.pipeline(coll["id"])
+        self.assertEqual(code, 202)
+        self.assertTrue(j["queued"])
+        self.assertTrue(j["run_id"].startswith("pr-"))
+        self.assertEqual(job["status"], "succeeded",
+                         job.get("error"))
+
+        st = self.pipeline_status(coll["id"])
+        run = st["run"]
+        self.assertEqual(run["status"], "done")
+        self.assertEqual(run["trigger_type"], "manual")
+        self.assertTrue(run["finished_at"])
+        cd = {c["stage"]: c for c in st["stages"]}
+        self.assertEqual(cd["A_IMPORT"]["status"], "SUCCESS")
+        self.assertEqual(cd["B_PROCESS"]["status"], "NEEDS_REVIEW")
+        self.assertEqual(cd["C_SCHEMA"]["status"], "SUCCESS")
+        self.assertEqual(cd["D_BUILD"]["status"], "SUCCESS")
+        self.assertEqual(cd["E_ACCEPT"]["status"], "BLOCKED")
+        self.assertEqual(cd["RELEASE"]["status"], "SUCCESS")
+        self.assertIsNotNone(cd["RELEASE"]["detail"])
+
+        # live queue counters: 2 processed, 1 failed (honest, not fabricated)
+        self.assertEqual(st["queue"]["succeeded"], 2)
+        self.assertEqual(st["queue"]["failed"], 1)
+
+        # Stage C auto-created + approved the default schema (route-identical)
+        conn = self._db()
+        try:
+            sv = conn.execute(
+                "SELECT * FROM knowledge_schema_versions "
+                "WHERE collection_id=?",
+                (coll["collection_id"],)).fetchone()
+            sv_id = "sv-%s-0001" % coll["collection_id"]
+            self.assertIsNotNone(sv)
+            self.assertEqual(sv["schema_id"], sv_id)
+            self.assertEqual(sv["status"], "approved")
+            cr = conn.execute(
+                "SELECT schema_version, current_index_build "
+                "FROM knowledge_collections WHERE id=?",
+                (coll["id"],)).fetchone()
+            self.assertEqual(cr["schema_version"], sv_id)
+            # no ES -> the build's index is honest, and NOT approved
+            self.assertIsNone(cr["current_index_build"])
+            b = st["latest_build"]
+            self.assertEqual(b["es_index_status"], "blocked")
+            self.assertEqual(b["search_status"], "blocked")
+            rel = st["latest_release"]
+            self.assertEqual(rel["rag_status"], "blocked")
+            self.assertTrue(rel["zip_sha256"])
+        finally:
+            conn.close()
+
+        # audit: pipeline actions recorded, statuses restricted to
+        # ok/fail/blocked (PF-F07 contract)
+        a = self.client.get(
+            f"/api/knowledge/collections/{coll['id']}/audit").get_json()
+        self.assertTrue(a["ok"])
+        actions = {e["action"] for e in a["entries"]}
+        self.assertIn("pipeline_started", actions)
+        self.assertIn("pipeline_done", actions)
+        self.assertIn("stage_completed", actions)
+        for e in a["entries"]:
+            self.assertIn(e["status"], ("ok", "fail", "blocked"))
+
+
+class TestPF_P02_RunLock(_PipelinePrep):
+    """PF-P02 — the per-collection singleton run is a natural lock:
+    a second start while one is active -> 409 conflicting_job; after it
+    finishes the same content re-runs idempotently (REUSED corpus +
+    release) and finishes 'done' again."""
+
+    def test_run_lock_conflict_and_idempotent_rerun(self):
+        coll, _batch = self._prep(n_good=1, n_corrupt=0)
+        code, j = self.pipeline_start(coll["id"])
+        self.assertEqual(code, 202)
+
+        # an active run locks the collection
+        r2 = self.client.post(
+            f"/api/knowledge/collections/{coll['id']}/pipeline/run", json={})
+        self.assertEqual(r2.status_code, 409, r2.get_data(as_text=True))
+        j2 = r2.get_json()
+        self.assertFalse(j2["ok"])
+        self.assertEqual(j2.get("code"), "conflicting_job")
+
+        # unknown collection -> 404
+        r404 = self.client.post(
+            "/api/knowledge/collections/999999/pipeline/run", json={})
+        self.assertEqual(r404.status_code, 404)
+
+        job = self.wait_job(j["job"]["job_id"], timeout=180.0)
+        self.assertEqual(job["status"], "succeeded", job.get("error"))
+        st = self.pipeline_status(coll["id"])
+        self.assertEqual(st["run"]["status"], "done")
+
+        # re-run the same (unchanged) content: idempotent, finishes again
+        _code, _j, job2 = self.pipeline(coll["id"])
+        self.assertEqual(job2["status"], "succeeded", job2.get("error"))
+        cd = self.cards(coll["id"])
+        self.assertEqual(cd["A_IMPORT"]["status"], "SUCCESS")
+        self.assertEqual(cd["B_PROCESS"]["status"], "SUCCESS")
+        self.assertEqual(cd["C_SCHEMA"]["status"], "SUCCESS")
+        self.assertEqual(cd["D_BUILD"]["status"], "SUCCESS")
+        self.assertEqual(cd["E_ACCEPT"]["status"], "BLOCKED")
+        self.assertEqual(cd["RELEASE"]["status"], "SUCCESS")
+        conn = self._db()
+        try:
+            sv = conn.execute(
+                "SELECT * FROM knowledge_schema_versions "
+                "WHERE collection_id=?",
+                (coll["collection_id"],)).fetchone()
+            self.assertIsNotNone(sv)
+            self.assertEqual(sv["status"], "approved")
+        finally:
+            conn.close()
+
+
+class TestPF_P03_CheckpointFromStage(_PipelinePrep):
+    """PF-P03 — `from_stage` checkpoint/restart: tamper the corpus archive,
+    restart from RELEASE (it must FAIL with a sha mismatch while the
+    earlier stages keep their checkpointed state), then restart from
+    D_BUILD (rebuild rewrites the archive deterministically -> done)."""
+
+    def test_from_stage_checkpoint_and_restart(self):
+        import pipeline_orchestrator as po
+        coll, _batch = self._prep(n_good=2, n_corrupt=0)
+        _c, _j, job = self.pipeline(coll["id"])
+        self.assertEqual(job["status"], "succeeded", job.get("error"))
+        self.assertEqual(self.pipeline_status(coll["id"])["run"]["status"],
+                         "done")
+
+        _root, _dumps, corpus = _corpus_build_paths(coll["id"],
+                                                    coll["collection_id"])
+        archive = os.path.join(corpus, "corpus-data.zip")
+        self.assertTrue(os.path.exists(archive))
+        bid = po._pipeline_batch_id(coll["collection_id"])
+        conn = self._db()
+        try:
+            pjob = conn.execute(
+                "SELECT retry_count FROM knowledge_jobs "
+                "WHERE job_key=?", ("process_batch:" + bid,)).fetchone()
+            self.assertIsNotNone(pjob)
+            base_retry = pjob["retry_count"]
+        finally:
+            conn.close()
+
+        # tamper the on-disk corpus archive
+        with open(archive, "ab") as f:
+            f.write(b"tamper")
+
+        # restart from RELEASE -> the stale archive must be detected
+        _c2, _j2, job2 = self.pipeline(coll["id"], {"from_stage": "RELEASE"})
+        self.assertEqual(job2["status"], "failed", job2.get("status"))
+        self.assertIn("sha mismatch", (job2.get("error") or ""))
+        st = self.pipeline_status(coll["id"])
+        self.assertEqual(st["run"]["status"], "failed")
+        cd = self.cards(coll["id"])
+        self.assertEqual(cd["RELEASE"]["status"], "FAILED")
+        self.assertIn("sha mismatch", cd["RELEASE"].get("error") or "")
+        # the earlier stages keep their checkpointed state (not re-run)
+        self.assertEqual(cd["D_BUILD"]["status"], "SUCCESS")
+        self.assertEqual(cd["B_PROCESS"]["status"], "SUCCESS")
+        conn = self._db()
+        try:
+            pjob2 = conn.execute(
+                "SELECT retry_count FROM knowledge_jobs "
+                "WHERE job_key=?", ("process_batch:" + bid,)).fetchone()
+            self.assertEqual(pjob2["retry_count"], base_retry)
+        finally:
+            conn.close()
+
+        # restart from D_BUILD -> the rebuild rewrites the archive
+        # (deterministic -> same content) and the run completes
+        _c3, _j3, job3 = self.pipeline(coll["id"], {"from_stage": "D_BUILD"})
+        self.assertEqual(job3["status"], "succeeded", job3.get("error"))
+        st3 = self.pipeline_status(coll["id"])
+        self.assertEqual(st3["run"]["status"], "done")
+        cd3 = self.cards(coll["id"])
+        self.assertEqual(cd3["D_BUILD"]["status"], "SUCCESS")
+        self.assertEqual(cd3["E_ACCEPT"]["status"], "BLOCKED")
+        self.assertEqual(cd3["RELEASE"]["status"], "SUCCESS")
+        self.assertEqual(cd3["B_PROCESS"]["status"], "SUCCESS")
+
+        # an unknown from_stage -> 400 with the list of valid stages
+        rb = self.client.post(
+            f"/api/knowledge/collections/{coll['id']}/pipeline/run",
+            json={"from_stage": "BOGUS"})
+        self.assertEqual(rb.status_code, 400)
+        jb = rb.get_json()
+        self.assertEqual(jb.get("code"), "unknown_stage")
+        self.assertEqual(jb.get("stages"),
+                         ["A_IMPORT", "B_PROCESS", "C_SCHEMA", "D_BUILD",
+                          "E_ACCEPT", "RELEASE"])
+
+
+class TestPF_P04_PauseResume(_PipelinePrep):
+    """PF-P04 — pause/resume of an active run: the worker self-interrupts
+    (job interrupted with ' [pipeline paused]'), the run row is 'paused',
+    and a resume re-enters at the checkpoint to finish 'done'."""
+
+    def test_pause_and_resume(self):
+        coll, _batch = self._prep(n_good=5, n_corrupt=1)
+        code, j = self.pipeline_start(coll["id"])
+        self.assertEqual(code, 202)
+        time.sleep(0.8)  # let the worker enter Stage B (process batch)
+
+        rp = self.client.post(
+            f"/api/knowledge/collections/{coll['id']}/pipeline/pause")
+        self.assertEqual(rp.status_code, 200, rp.get_data(as_text=True))
+        jp = rp.get_json()
+        self.assertTrue(jp["ok"])
+        self.assertEqual(jp["status"], "paused")
+
+        # the pipeline job self-interrupts
+        jrow = self.wait_job(j["job"]["job_id"], timeout=60.0)
+        self.assertEqual(jrow["status"], "interrupted", jrow.get("status"))
+        self.assertIn("pipeline paused", jrow.get("error") or "")
+        st = self.pipeline_status(coll["id"])
+        self.assertEqual(st["run"]["status"], "paused")
+        cd = self.cards(coll["id"])
+        self.assertTrue(any(c["status"] == "PAUSED" for c in cd.values()))
+
+        # pausing a non-running run -> 409 not_running
+        rp2 = self.client.post(
+            f"/api/knowledge/collections/{coll['id']}/pipeline/pause")
+        self.assertEqual(rp2.status_code, 409)
+        self.assertEqual(rp2.get_json().get("code"), "not_running")
+
+        # resume -> re-enters at the checkpoint and finishes
+        rr = self.client.post(
+            f"/api/knowledge/collections/{coll['id']}/pipeline/resume")
+        self.assertEqual(rr.status_code, 202, rr.get_data(as_text=True))
+        jr = rr.get_json()
+        self.assertTrue(jr["ok"])
+        self.assertTrue(jr["queued"])
+        jrow2 = self.wait_job(jr["job"]["job_id"], timeout=180.0)
+        self.assertEqual(jrow2["status"], "succeeded", jrow2.get("error"))
+        st2 = self.pipeline_status(coll["id"])
+        self.assertEqual(st2["run"]["status"], "done")
+        cd2 = self.cards(coll["id"])
+        self.assertEqual(cd2["B_PROCESS"]["status"], "NEEDS_REVIEW")
+        self.assertEqual(cd2["D_BUILD"]["status"], "SUCCESS")
+        self.assertEqual(cd2["E_ACCEPT"]["status"], "BLOCKED")
+        self.assertEqual(cd2["RELEASE"]["status"], "SUCCESS")
+        # the batch kept processing to completion: 5 good, 1 failed
+        self.assertEqual(st2["queue"]["succeeded"], 5)
+        self.assertEqual(st2["queue"]["failed"], 1)
+
+        # resuming a non-paused run -> 409 not_paused
+        rr2 = self.client.post(
+            f"/api/knowledge/collections/{coll['id']}/pipeline/resume")
+        self.assertEqual(rr2.status_code, 409)
+        self.assertEqual(rr2.get_json().get("code"), "not_paused")
+
+        # pausing a collection that never ran -> 409 no_run
+        fresh = self.make_collection(name="بدون اجرا", slug="pipe-fresh")
+        rp3 = self.client.post(
+            f"/api/knowledge/collections/{fresh['id']}/pipeline/pause")
+        self.assertEqual(rp3.status_code, 409)
+        self.assertEqual(rp3.get_json().get("code"), "no_run")
+
+
+class TestPF_P05_NightlySchedules(_PipelinePrep):
+    """PF-P05 — the nightly schedules: upsert/list + `run_nightly`
+    (a conflicting active run is skipped, a free collection is started
+    with trigger_type=nightly, and the schedule's last_* fields are
+    recorded honestly)."""
+
+    def test_nightly_schedules_and_run_nightly(self):
+        import pipeline_orchestrator as po
+        coll, _batch = self._prep(n_good=5, n_corrupt=1)
+        # invalid cron_time -> 400 bad_cron_time
+        rc = self.client.post("/api/knowledge/pipeline/schedules",
+                              json={"collection_id": coll["id"],
+                                    "cron_time": "25:99"})
+        self.assertEqual(rc.status_code, 400)
+        self.assertEqual(rc.get_json().get("code"), "bad_cron_time")
+
+        # unknown collection -> 404
+        rc4 = self.client.post("/api/knowledge/pipeline/schedules",
+                               json={"collection_id": 999999})
+        self.assertEqual(rc4.status_code, 404)
+
+        # upsert an enabled schedule (default cron 03:00)
+        ru = self.client.post("/api/knowledge/pipeline/schedules",
+                              json={"collection_id": coll["id"],
+                                    "enabled": True})
+        self.assertEqual(ru.status_code, 200, ru.get_data(as_text=True))
+        sch = ru.get_json()["schedule"]
+        self.assertEqual(sch["collection_id"], coll["collection_id"])
+        self.assertEqual(sch["enabled"], 1)
+        self.assertEqual(sch["cron_time"], "03:00")
+
+        lst = self.client.get("/api/knowledge/pipeline/schedules").get_json()
+        self.assertTrue(lst["ok"])
+        self.assertEqual(len(lst["schedules"]), 1)
+
+        # a manual run is active -> the nightly run is skipped (conflict)
+        _code, j = self.pipeline_start(coll["id"])
+        time.sleep(0.3)
+        conn = self._db()
+        try:
+            res = po.run_nightly(conn)
+        finally:
+            conn.close()
+        self.assertEqual(len(res), 1)
+        self.assertEqual(res[0]["status"], "skipped")
+        self.assertEqual(res[0]["detail"], "conflicting_job")
+        self.wait_job(j["job"]["job_id"], timeout=180.0)
+
+        # now free -> the nightly run starts (trigger_type=nightly)
+        conn = self._db()
+        try:
+            res2 = po.run_nightly(conn)
+        finally:
+            conn.close()
+        self.assertEqual(res2[0]["status"], "started")
+        run_id = res2[0]["detail"]
+        self.assertTrue(run_id.startswith("pr-"))
+        conn = self._db()
+        try:
+            srow = conn.execute(
+                "SELECT * FROM knowledge_pipeline_schedules "
+                "WHERE collection_id=?",
+                (coll["collection_id"],)).fetchone()
+            self.assertTrue(srow["last_run_at"])
+            self.assertEqual(srow["last_status"], "started")
+        finally:
+            conn.close()
+        st = self.pipeline_status(coll["id"])
+        self.assertEqual(st["run"]["trigger_type"], "nightly")
+        conn = self._db()
+        try:
+            rrow = conn.execute(
+                "SELECT job_id FROM knowledge_pipeline_runs WHERE run_id=?",
+                (run_id,)).fetchone()
+        finally:
+            conn.close()
+        jrow = self.wait_job(rrow["job_id"], timeout=180.0)
+        self.assertEqual(jrow["status"], "succeeded", jrow.get("error"))
+        self.assertEqual(self.pipeline_status(coll["id"])["run"]["status"],
+                         "done")
+
+        # a disabled schedule is not started
+        self.client.post("/api/knowledge/pipeline/schedules",
+                         json={"collection_id": coll["id"],
+                               "enabled": False})
+        conn = self._db()
+        try:
+            res3 = po.run_nightly(conn)
+        finally:
+            conn.close()
+        self.assertEqual(res3, [])
+
+
+class TestPF_M01_MultiVsSingle(Base):
+    """PF-M01 — mission 1.6: multi-file (batch) Word import must behave
+    IDENTICALLY to the single upload for the same DOCX content.
+
+    Two independent collections, one per path:
+      path 1 (single): POST collections/<id>/documents + process
+      path 2 (multi):  import/batches plan + per-file upload + batch process
+    The resulting document rows must match on every content/processing
+    field (same sha -> same file_id/store layout, same factory output);
+    the structural differences are exactly: which collection, the
+    per-(collection, content) document_id, and the batch linkage.
+    """
+
+    def test_multi_import_identical_to_single(self):
+        from factory._smoke_fixtures import make_docx
+        tmp = tempfile.mkdtemp(prefix="pct-pf-multi-")
+        self.addCleanup(shutil.rmtree, tmp, ignore_errors=True)
+        path = os.path.join(tmp, "کتاب-مقایسه‌ای.docx")
+        make_docx(path, [
+            ("Normal", "عنوان: کتاب مقایسه‌ای"),
+            ("Normal", "نویسنده: نویسنده نمونه"),
+            ("Heading 1", "فصل اول"),
+            ("Normal", "متن فارسی فصل اول."),
+            ("Heading 1", "فصل دوم"),
+            ("Normal", "پایان کتاب."),
+        ])
+        sha = self.sha256_file(path)
+        size = os.path.getsize(path)
+
+        # ── path 1: single upload + process (coll created FIRST so that
+        #    upload_and_process() targets it) ─────────────────────────
+        coll1 = self.make_collection(name="تک‌آپلود", slug="single-upload")
+        single_row = self.upload_and_process(path)
+        self.assertEqual(single_row["status"] in ("parsed", "needs_review"),
+                         True, single_row)
+
+        # ── path 2: batch plan + real per-file upload + batch process ──
+        coll2 = self.make_collection(name="چندآپلود", slug="multi-import")
+        plan = self.make_batch(coll2["collection_id"], [self._file_entry(path)])
+        batch_id = plan["batch"]["batch_id"]
+        r = self.batch_upload(batch_id, path)
+        self.assertEqual(r.status_code, 201, r.get_data(as_text=True))
+        self.assertEqual(r.get_json()["sha256"], sha)
+        doc_id = r.get_json()["document"]["document_id"]
+
+        body = self.process_batch(batch_id)
+        self.assertEqual(body["files_queued"], 1, body)
+        job = self.wait_job(body["job"]["job_id"])
+        self.assertEqual(job["status"], "succeeded", job)
+        docs = self.client.get(
+            f"/api/knowledge/collections/{coll2['id']}/documents"
+        ).get_json()["documents"]
+        multi_api = next(d for d in docs if d["document_id"] == doc_id)
+        self.assertIn(multi_api["status"], ("parsed", "needs_review"),
+                      multi_api)
+        # the API view is consistent with the single path's API view
+        # (document_id differs: it is per-collection by design)
+        for key in ("file_name", "sha256", "file_size", "file_id",
+                    "status", "blocks_count", "chars_count",
+                    "quality_status", "quality_score", "work_id",
+                    "edition_id", "volume_id", "error"):
+            self.assertEqual(single_row.get(key), multi_api.get(key),
+                             f"field mismatch: {key}")
+        self.assertEqual(single_row["document_id"].startswith("d-"), True)
+        self.assertEqual(multi_api["document_id"].startswith("d-"), True)
+        self.assertNotEqual(single_row["document_id"], multi_api["document_id"])
+
+        # ── the full-row comparison (DB, every column) ─────────────────
+        conn = self._db()
+        try:
+            single_db = dict(conn.execute(
+                "SELECT * FROM knowledge_collection_documents "
+                "WHERE document_id=?", (single_row["document_id"],)
+            ).fetchone())
+            multi_db = dict(conn.execute(
+                "SELECT * FROM knowledge_collection_documents "
+                "WHERE document_id=?", (doc_id,)).fetchone())
+        finally:
+            conn.close()
+        for key in ("sha256", "file_size", "file_id", "file_name",
+                    "relative_path", "status", "blocks_count",
+                    "chars_count", "quality_status", "quality_score",
+                    "parser_version", "norm_version", "work_id",
+                    "edition_id", "volume_id", "out_dir", "error"):
+            self.assertEqual(single_db.get(key), multi_db.get(key),
+                             f"field mismatch: {key}")
+        self.assertTrue(single_db["document_id"].startswith("d-"))
+        self.assertTrue(multi_db["document_id"].startswith("d-"))
+        self.assertNotEqual(single_db["document_id"], multi_db["document_id"])
+        self.assertEqual(multi_db["sha256"], sha)
+        self.assertEqual(multi_db["file_size"], size)
+        self.assertGreater(multi_db["blocks_count"], 0)
+
+        # expected differences: which collection, and batch linkage
+        self.assertEqual(single_db["collection_id"], coll1["collection_id"])
+        self.assertEqual(multi_db["collection_id"], coll2["collection_id"])
+        self.assertIsNone(single_db["batch_id"])
+        self.assertEqual(multi_db["batch_id"], batch_id)
+
+        # shared store layout: both paths stored the original at the same
+        # content-addressed path (files/<sha12>/f-<sha8>.docx)
+        stored = os.path.join(
+            knowledge_api.knowledge_data_dir(), "files", sha[:12],
+            "f-" + sha[:8] + ".docx")
+        self.assertTrue(os.path.isfile(stored), stored)
+
+        # per-file queue: the single path has NO queue row; the multi path
+        # has exactly one succeeded row for the same file_key
+        q1 = self._queue_rows(coll1["collection_id"])
+        q2 = self._queue_rows(coll2["collection_id"])
+        self.assertEqual(len(q1), 0)
+        self.assertEqual(len(q2), 1)
+        self.assertEqual(q2[0]["status"], "succeeded")
+        self.assertEqual(q2[0]["file_key"], "f-" + sha[:8])
+
+        # batch detail: 1 planned, 1 uploaded, 1 processed
+        det = self._batch_detail(batch_id)
+        self.assertEqual(det["batch"]["status"], "done")
+        self.assertEqual(det["batch"]["processed_count"], 1)
+        self.assertEqual(det["batch"]["failed_count"], 0)
+        self.assertEqual(det["plan_files"][0]["status"], "uploaded")
+        self.assertEqual(det["plan_files"][0]["document_id"], doc_id)
+
+
+# ===========================================================================
+# mission PCM-20.9.4 §2.2 — pipeline scenario tests (PF-S11..S19)
+#
+# The 20 required scenarios map onto:
+#   existing: P01 (full A-F run + RAG-blocked + audit), P02 (per-collection
+#   lock + idempotent re-run), P03 (from_stage checkpoint + retry after
+#   error), P04 (pause/resume), P05 (nightly in the test env), F06 (RAG
+#   failure 503), F07 (audit trail), E01/E02 (acceptance pass/fail + the
+#   approve gate);
+#   new:      S11 stop at each stage, S12 two independent collections,
+#   S13 schema failure, S14 corpus build failure, S15 acceptance failure
+#   (+ no approve before PASS), S16 release failure, S17 previous release
+#   untouched, S18 RAG success then failure, S19 worker-cut recovery.
+# ===========================================================================
+
+
+class TestPF_S11_FromStageMatrix(_PipelinePrep):
+    """PF-S11 — stop at / resume from EACH stage (scenarios 3 + 6).
+
+    After a completed A→F run, restart the pipeline from each of the six
+    stages: the earlier stages keep their checkpointed SUCCESS state
+    (their recorded started_at is byte-identical to the first run's —
+    skipped, not re-executed), the selected stage and everything after it
+    re-runs, and every restart ends 'done' with the same honest final
+    state (E=BLOCKED without ES; RELEASE reuses identical content).
+    """
+
+    EXPECTED = {  # honest final state: 1 good doc, no ES, no RAG URL
+        "A_IMPORT": "SUCCESS",
+        "B_PROCESS": "SUCCESS",
+        "C_SCHEMA": "SUCCESS",
+        "D_BUILD": "SUCCESS",
+        "E_ACCEPT": "BLOCKED",
+        "RELEASE": "SUCCESS",
+    }
+
+    def test_from_stage_matrix(self):
+        coll, _batch = self._prep(n_good=1, n_corrupt=0,
+                                  slug="s11-matrix")
+        _code, _j, job0 = self.pipeline(coll["id"])
+        self.assertEqual(job0["status"], "succeeded", job0.get("error"))
+        st0 = self.pipeline_status(coll["id"])
+        self.assertEqual(st0["run"]["status"], "done")
+        prev = {c["stage"]: c for c in st0["stages"]}
+        for skey, want in self.EXPECTED.items():
+            self.assertEqual(prev[skey]["status"], want, skey)
+
+        for from_stage, _label in pipeline_orchestrator.STAGES:
+            _code, _j, job = self.pipeline(coll["id"],
+                                           {"from_stage": from_stage})
+            self.assertEqual(job["status"], "succeeded",
+                             f"{from_stage}: {job.get('error')}")
+            st = self.pipeline_status(coll["id"])
+            self.assertEqual(st["run"]["status"], "done", from_stage)
+            self.assertEqual(st["run"]["trigger_type"], "manual")
+            cd = {c["stage"]: c for c in st["stages"]}
+            for skey, want in self.EXPECTED.items():
+                self.assertEqual(cd[skey]["status"], want,
+                                 f"{from_stage} -> {skey}")
+            # stages BEFORE from_stage: SUCCESS ones are checkpoints —
+            # carried over WITHOUT re-execution, so their recorded
+            # started_at equals the PREVIOUS run's (an earlier
+            # from_stage iteration may legitimately have re-run them,
+            # hence the per-iteration snapshot). BLOCKED / NEEDS_REVIEW
+            # ones are RE-EXECUTED when reached (documented design) but
+            # must land on the same honest state.
+            from_idx = pipeline_orchestrator.STAGE_KEYS.index(from_stage)
+            for idx, (skey, _l) in enumerate(pipeline_orchestrator.STAGES):
+                if idx >= from_idx:
+                    continue
+                if prev[skey]["status"] == "SUCCESS":
+                    self.assertEqual(cd[skey]["started_at"],
+                                     prev[skey]["started_at"],
+                                     f"{from_stage} -> {skey} re-executed")
+                else:
+                    self.assertEqual(cd[skey]["status"],
+                                     prev[skey]["status"],
+                                     f"{from_stage} -> {skey} state")
+            prev = cd
+
+
+class TestPF_S12_TwoCollections(_PipelinePrep):
+    """PF-S12 — two independent collections do not interfere (scenario 8).
+
+    Two collections (distinct slugs), each with its own uploaded batch,
+    start a full pipeline run at the same time: the per-collection run
+    row + job_key keep the runs isolated; both complete 'done' with
+    their own documents, builds and release; nothing leaks across.
+    """
+
+    def test_independent_collections(self):
+        coll1, _b1 = self._prep(n_good=1, n_corrupt=0, slug="s12-coll-one",
+                                tag="s12-coll-one")
+        coll2, _b2 = self._prep(n_good=1, n_corrupt=0, slug="s12-coll-two",
+                                tag="s12-coll-two")
+        code1, j1 = self.pipeline_start(coll1["id"])
+        code2, j2 = self.pipeline_start(coll2["id"])
+        self.assertIn(code1, (200, 202))
+        self.assertIn(code2, (200, 202))
+        job1 = self.wait_job(j1["job"]["job_id"], timeout=180.0)
+        job2 = self.wait_job(j2["job"]["job_id"], timeout=180.0)
+        self.assertEqual(job1["status"], "succeeded", job1.get("error"))
+        self.assertEqual(job2["status"], "succeeded", job2.get("error"))
+        st1 = self.pipeline_status(coll1["id"])
+        st2 = self.pipeline_status(coll2["id"])
+        self.assertEqual(st1["run"]["status"], "done")
+        self.assertEqual(st2["run"]["status"], "done")
+        self.assertNotEqual(st1["run"]["run_id"], st2["run"]["run_id"])
+        # each collection sees exactly its own corpus artifacts
+        self.assertEqual(st1["latest_build"]["collection_id"],
+                         coll1["collection_id"])
+        self.assertEqual(st2["latest_build"]["collection_id"],
+                         coll2["collection_id"])
+        self.assertEqual(st1["latest_release"]["collection_id"],
+                         coll1["collection_id"])
+        self.assertEqual(st2["latest_release"]["collection_id"],
+                         coll2["collection_id"])
+        # each collection holds its own copy of the same-named book (the
+        # files are generated per collection, so byte content/sha differs);
+        # the per-collection document ids do not collide across collections
+        d1 = self.client.get(
+            f"/api/knowledge/collections/{coll1['id']}/documents"
+        ).get_json()["documents"]
+        d2 = self.client.get(
+            f"/api/knowledge/collections/{coll2['id']}/documents"
+        ).get_json()["documents"]
+        self.assertEqual(len(d1), 1)
+        self.assertEqual(len(d2), 1)
+        self.assertEqual(d1[0]["file_name"], d2[0]["file_name"])
+        self.assertEqual(d1[0]["status"], "parsed")
+        self.assertEqual(d2[0]["status"], "parsed")
+        self.assertNotEqual(d1[0]["sha256"], d2[0]["sha256"])
+        self.assertNotEqual(d1[0]["document_id"], d2[0]["document_id"])
+
+
+class TestPF_S13_SchemaFailure(_PipelinePrep):
+    """PF-S13 — schema stage failure stops the run honestly (scenario 9).
+
+    The default schema fields are invalid -> Stage C FAILED (no schema
+    version row is created), the run ends 'failed' with D/E/RELEASE
+    NOT_STARTED. Once the fields are valid again, a from_stage=C_SCHEMA
+    restart completes the pipeline (retry after error).
+    """
+
+    def test_schema_failure_and_recovery(self):
+        import unittest.mock
+        coll, _batch = self._prep(n_good=1, n_corrupt=0)
+        with unittest.mock.patch.object(
+                knowledge_api, "_default_schema_fields", return_value=[]):
+            _code, _j, job = self.pipeline(coll["id"])
+        self.assertEqual(job["status"], "failed", job.get("error"))
+        st = self.pipeline_status(coll["id"])
+        self.assertEqual(st["run"]["status"], "failed")
+        self.assertIn("C_SCHEMA failed", st["run"]["error"] or "")
+        cd = {c["stage"]: c for c in st["stages"]}
+        self.assertEqual(cd["A_IMPORT"]["status"], "SUCCESS")
+        self.assertEqual(cd["B_PROCESS"]["status"], "SUCCESS")
+        self.assertEqual(cd["C_SCHEMA"]["status"], "FAILED")
+        self.assertIn("default schema fields invalid",
+                      cd["C_SCHEMA"]["error"] or "")
+        for skey in ("D_BUILD", "E_ACCEPT", "RELEASE"):
+            self.assertEqual(cd[skey]["status"], "NOT_STARTED", skey)
+        # no schema version row was created by the failed attempt
+        conn = self._db()
+        try:
+            n = conn.execute(
+                "SELECT COUNT(*) AS n FROM knowledge_schema_versions "
+                "WHERE collection_id=?",
+                (coll["collection_id"],)).fetchone()["n"]
+        finally:
+            conn.close()
+        self.assertEqual(n, 0)
+
+        # retry after error: restart from Stage C with the real (valid)
+        # default fields -> the run completes
+        _code, _j, job2 = self.pipeline(coll["id"],
+                                        {"from_stage": "C_SCHEMA"})
+        self.assertEqual(job2["status"], "succeeded", job2.get("error"))
+        st2 = self.pipeline_status(coll["id"])
+        self.assertEqual(st2["run"]["status"], "done")
+        cd2 = {c["stage"]: c for c in st2["stages"]}
+        self.assertEqual(cd2["C_SCHEMA"]["status"], "SUCCESS")
+        self.assertEqual(st2["latest_build"]["es_index_status"], "blocked")
+        self.assertEqual(st2["latest_release"]["rag_status"], "blocked")
+
+
+class TestPF_S14_BuildFailure(_PipelinePrep):
+    """PF-S14 — corpus build failure stops the run (scenario 10).
+
+    The corpus_build job kind is made to raise -> Stage D FAILED with the
+    worker's real error, the run ends 'failed', E/RELEASE never start and
+    no build row exists. Restoring the kind and restarting from Stage D
+    completes the run (retry after error).
+    """
+
+    def test_build_failure_and_recovery(self):
+        import unittest.mock
+        coll, _batch = self._prep(n_good=1, n_corrupt=0)
+
+        def boom(conn, job_id):
+            raise RuntimeError("boom build")
+
+        with unittest.mock.patch.dict(
+                knowledge_api._JOB_KINDS, {"corpus_build": boom}):
+            _code, _j, job = self.pipeline(coll["id"])
+        self.assertEqual(job["status"], "failed", job.get("error"))
+        st = self.pipeline_status(coll["id"])
+        self.assertEqual(st["run"]["status"], "failed")
+        cd = {c["stage"]: c for c in st["stages"]}
+        self.assertEqual(cd["A_IMPORT"]["status"], "SUCCESS")
+        self.assertEqual(cd["B_PROCESS"]["status"], "SUCCESS")
+        self.assertEqual(cd["C_SCHEMA"]["status"], "SUCCESS")
+        self.assertEqual(cd["D_BUILD"]["status"], "FAILED")
+        self.assertIn("boom build", cd["D_BUILD"]["error"] or "")
+        self.assertEqual(cd["E_ACCEPT"]["status"], "NOT_STARTED")
+        self.assertEqual(cd["RELEASE"]["status"], "NOT_STARTED")
+        conn = self._db()
+        try:
+            n = conn.execute(
+                "SELECT COUNT(*) AS n FROM knowledge_index_builds "
+                "WHERE collection_id=?",
+                (coll["collection_id"],)).fetchone()["n"]
+        finally:
+            conn.close()
+        self.assertEqual(n, 0)
+
+        _code, _j, job2 = self.pipeline(coll["id"], {"from_stage": "D_BUILD"})
+        self.assertEqual(job2["status"], "succeeded", job2.get("error"))
+        st2 = self.pipeline_status(coll["id"])
+        self.assertEqual(st2["run"]["status"], "done")
+        self.assertIsNotNone(st2["latest_build"]["content_sha256"])
+        self.assertIsNotNone(st2["latest_release"]["release_id"])
+
+
+class TestPF_S15_AcceptanceFailure(_PipelinePrep):
+    """PF-S15 — search acceptance failure + the approve gate (11 + 12).
+
+    Phase 1: a full run against a fake ES cluster passes acceptance ->
+    the run is 'done', the build is auto-approved.
+    Phase 2: a from_stage=E_ACCEPT restart with a broken _count fails the
+    acceptance -> the run is 'failed' (E FAILED, 'search acceptance did
+    not pass'), validation flips to 'needs_review', and the approve
+    endpoint refuses again (409 acceptance_not_passed) — no approve
+    before PASS.
+    Phase 3: another from_stage=E_ACCEPT restart against the healthy
+    cluster passes again -> the run is 'done', validation 'accepted'.
+    """
+
+    def setUp(self):
+        super().setUp()
+        os.environ["PCT_ES_URL"] = "http://es.fake:9200"
+        self.addCleanup(lambda: os.environ.pop("PCT_ES_URL", None))
+
+    def test_acceptance_fail_gate_and_repass(self):
+        import unittest.mock
+        coll, _batch = self._prep(n_good=1, n_corrupt=0)
+        fake = _FakeSearchES()
+        with unittest.mock.patch.object(
+                knowledge_api, "_es_request",
+                side_effect=_make_fake_bulk(fake)):
+            _code, _j, job1 = self.pipeline(coll["id"])
+        self.assertEqual(job1["status"], "succeeded", job1.get("error"))
+        st1 = self.pipeline_status(coll["id"])
+        self.assertEqual(st1["run"]["status"], "done")
+        b1 = st1["latest_build"]
+        self.assertEqual(b1["es_index_status"], "success")
+        self.assertEqual(b1["search_status"], "pass")
+        det1 = self.client.get(
+            f"/api/knowledge/collections/{coll['id']}"
+        ).get_json()["collection"]
+        self.assertEqual(det1["current_index_build"], b1["iv_id"])
+        self.assertEqual(det1["validation_status"], "accepted")
+
+        # phase 2: the acceptance now reports a wrong count (stale index)
+        real_call = fake.__call__
+
+        def broken(es_url, method, path, body=None, ndjson=False):
+            if method == "GET" and path.endswith("/_count"):
+                return {"count": 999999}
+            return real_call(es_url, method, path, body=body,
+                             ndjson=ndjson)
+
+        with unittest.mock.patch.object(
+                knowledge_api, "_es_request", side_effect=broken):
+            _code, _j, job2 = self.pipeline(coll["id"],
+                                            {"from_stage": "E_ACCEPT"})
+        self.assertEqual(job2["status"], "failed", job2.get("error"))
+        st2 = self.pipeline_status(coll["id"])
+        self.assertEqual(st2["run"]["status"], "failed")
+        cd2 = {c["stage"]: c for c in st2["stages"]}
+        self.assertEqual(cd2["E_ACCEPT"]["status"], "FAILED")
+        self.assertIn("search acceptance did not pass",
+                      cd2["E_ACCEPT"]["error"] or "")
+        b2 = st2["latest_build"]
+        self.assertEqual(b2["iv_id"], b1["iv_id"])
+        self.assertEqual(b2["search_status"], "fail")
+        report = json.loads(b2["search_detail"])
+        self.assertEqual(report["overall"], "fail")
+        self.assertIn("count", report["failed"])
+        # the approve gate is shut again — no approve before PASS
+        r = self.client.post(
+            f"/api/knowledge/index-builds/{b2['iv_id']}/approve")
+        self.assertEqual(r.status_code, 409, r.get_data(as_text=True))
+        self.assertEqual(r.get_json()["code"], "acceptance_not_passed")
+        det2 = self.client.get(
+            f"/api/knowledge/collections/{coll['id']}"
+        ).get_json()["collection"]
+        self.assertEqual(det2["validation_status"], "needs_review")
+        # the earlier approval pointer is not silently rewritten by the
+        # failed re-check (it still points at the build that passed once)
+        self.assertEqual(det2["current_index_build"], b1["iv_id"])
+
+        # phase 3: healthy cluster again -> the acceptance passes, the run
+        # completes, validation returns to 'accepted'
+        with unittest.mock.patch.object(
+                knowledge_api, "_es_request", side_effect=fake):
+            _code, _j, job3 = self.pipeline(coll["id"],
+                                            {"from_stage": "E_ACCEPT"})
+        self.assertEqual(job3["status"], "succeeded", job3.get("error"))
+        st3 = self.pipeline_status(coll["id"])
+        self.assertEqual(st3["run"]["status"], "done")
+        cd3 = {c["stage"]: c for c in st3["stages"]}
+        self.assertEqual(cd3["E_ACCEPT"]["status"], "SUCCESS")
+        det3 = self.client.get(
+            f"/api/knowledge/collections/{coll['id']}"
+        ).get_json()["collection"]
+        self.assertEqual(det3["validation_status"], "accepted")
+
+
+class TestPF_S16_ReleaseFailure(_PipelinePrep):
+    """PF-S16 — release stage failure (scenario 13).
+
+    The release job kind is made to raise -> RELEASE FAILED, the run
+    'failed', NO release row is created (nothing is half-published).
+    Restoring the kind and restarting from RELEASE completes the run and
+    produces exactly one release.
+    """
+
+    def test_release_failure_and_recovery(self):
+        import unittest.mock
+        coll, _batch = self._prep(n_good=1, n_corrupt=0)
+
+        def boom(conn, job_id):
+            raise RuntimeError("boom release")
+
+        with unittest.mock.patch.dict(
+                knowledge_api._JOB_KINDS, {"release": boom}):
+            _code, _j, job = self.pipeline(coll["id"])
+        self.assertEqual(job["status"], "failed", job.get("error"))
+        st = self.pipeline_status(coll["id"])
+        self.assertEqual(st["run"]["status"], "failed")
+        cd = {c["stage"]: c for c in st["stages"]}
+        self.assertEqual(cd["D_BUILD"]["status"], "SUCCESS")
+        self.assertEqual(cd["E_ACCEPT"]["status"], "BLOCKED")
+        self.assertEqual(cd["RELEASE"]["status"], "FAILED")
+        self.assertIn("boom release", cd["RELEASE"]["error"] or "")
+        self.assertIsNone(st["latest_release"])
+        conn = self._db()
+        try:
+            n = conn.execute(
+                "SELECT COUNT(*) AS n FROM knowledge_releases "
+                "WHERE collection_id=?",
+                (coll["collection_id"],)).fetchone()["n"]
+        finally:
+            conn.close()
+        self.assertEqual(n, 0)
+
+        _code, _j, job2 = self.pipeline(coll["id"],
+                                        {"from_stage": "RELEASE"})
+        self.assertEqual(job2["status"], "succeeded", job2.get("error"))
+        st2 = self.pipeline_status(coll["id"])
+        self.assertEqual(st2["run"]["status"], "done")
+        rels = self.client.get(
+            f"/api/knowledge/collections/{coll['id']}/releases"
+        ).get_json()["releases"]
+        self.assertEqual(len(rels), 1)
+        self.assertTrue(rels[0]["release_id"].startswith("rel-"))
+
+
+class TestPF_S17_ReleaseHistory(_PipelinePrep):
+    """PF-S17 — a new release never touches the previous one (14).
+
+    Run 1 produces a release for content A. A second document is added;
+    run 2 produces a release for the new content. The previous release
+    stays byte-identical on disk (zip re-hashed), its row is unchanged,
+    and the releases list shows both, newest first.
+    """
+
+    def test_previous_release_untouched(self):
+        from factory._smoke_fixtures import make_docx
+        coll, _batch = self._prep(n_good=1, n_corrupt=0)
+        _c, _j, job1 = self.pipeline(coll["id"])
+        self.assertEqual(job1["status"], "succeeded", job1.get("error"))
+        rels1 = self.client.get(
+            f"/api/knowledge/collections/{coll['id']}/releases"
+        ).get_json()["releases"]
+        self.assertEqual(len(rels1), 1)
+        rel1 = rels1[0]
+        row1_before = dict(rel1)
+        zip1 = rel1["zip_path"]
+        self.assertTrue(os.path.isfile(zip1))
+
+        # a second, different document -> new corpus content
+        tmp = tempfile.mkdtemp(prefix="pct-pf-s17-")
+        self.addCleanup(shutil.rmtree, tmp, ignore_errors=True)
+        p = os.path.join(tmp, "کتاب-سوم-S17.docx")
+        make_docx(p, [
+            ("Normal", "عنوان: کتاب سوم S17"),
+            ("Heading 1", "فصل اول"),
+            ("Normal", "متن فارسی ویژه S17."),
+        ])
+        self.upload_and_process(p)
+
+        _c, _j, job2 = self.pipeline(coll["id"])
+        self.assertEqual(job2["status"], "succeeded", job2.get("error"))
+        rels2 = self.client.get(
+            f"/api/knowledge/collections/{coll['id']}/releases"
+        ).get_json()["releases"]
+        self.assertEqual(len(rels2), 2)
+        rel2, rel1_after = rels2[0], rels2[1]
+        self.assertNotEqual(rel2["release_id"], rel1["release_id"])
+        self.assertNotEqual(rel2["content_sha256"], rel1["content_sha256"])
+        # the previous release's row is unchanged
+        for key in ("release_id", "build_iv_id", "content_sha256",
+                    "zip_path", "zip_sha256", "size_bytes", "rag_status",
+                    "created_at"):
+            self.assertEqual(rel1_after.get(key), row1_before.get(key), key)
+        # the previous zip on disk is still byte-identical (re-hashed)
+        self.assertTrue(os.path.isfile(zip1))
+        self.assertEqual(self.sha256_file(zip1), rel1["zip_sha256"])
+        self.assertEqual(os.path.getsize(zip1), rel1["size_bytes"])
+        # the new release is a different bundle on disk
+        self.assertTrue(os.path.isfile(rel2["zip_path"]))
+        self.assertNotEqual(rel2["zip_path"], zip1)
+        self.assertEqual(self.sha256_file(rel2["zip_path"]),
+                         rel2["zip_sha256"])
+
+
+class TestPF_S18_RagSuccessAndFailure(_PipelinePrep):
+    """PF-S18 — RAG ingest success, then failure, across releases (16).
+
+    A local HTTP fake stands in for the RAG indexer. Phase 1: it accepts
+    (200) -> the release is packed AND rag_status='success', the payload
+    carries the real provenance + Bearer token. Phase 2: a new document
+    is added and the fake is down (503) -> a NEW release is packed with
+    rag_status='failed' (the bundle is still produced), while the first
+    release's rag_status stays 'success' (its row is untouched).
+    """
+
+    def _rag_server(self):
+        import http.server
+        import threading
+        mode = {"code": 200}
+        captured = []
+
+        class Handler(http.server.BaseHTTPRequestHandler):
+            def do_POST(self):
+                length = int(self.headers.get("Content-Length", 0))
+                body = self.rfile.read(length)
+                captured.append({
+                    "payload": json.loads(body.decode("utf-8")),
+                    "auth": self.headers.get("Authorization", ""),
+                })
+                code = mode["code"]
+                self.send_response(code)
+                self.end_headers()
+                self.wfile.write(b"ok" if code == 200 else b"rag down")
+
+            def log_message(self, *a):
+                pass
+
+        srv = http.server.HTTPServer(("127.0.0.1", 0), Handler)
+        port = srv.server_address[1]
+        t = threading.Thread(target=srv.serve_forever, daemon=True)
+        t.start()
+        self.addCleanup(srv.server_close)
+        self.addCleanup(srv.shutdown)
+        os.environ["PCT_RAG_INGEST_URL"] = f"http://127.0.0.1:{port}/ingest"
+        os.environ["PCT_RAG_INGEST_TOKEN"] = "rag-test-token"
+        self.addCleanup(lambda: os.environ.pop("PCT_RAG_INGEST_URL", None))
+        self.addCleanup(lambda: os.environ.pop("PCT_RAG_INGEST_TOKEN", None))
+        return mode, captured
+
+    def test_rag_success_then_failure(self):
+        from factory._smoke_fixtures import make_docx
+        mode, captured = self._rag_server()
+        coll, _batch = self._prep(n_good=1, n_corrupt=0)
+
+        # phase 1: RAG up -> rag_status 'success'
+        mode["code"] = 200
+        _c, _j, job1 = self.pipeline(coll["id"])
+        self.assertEqual(job1["status"], "succeeded", job1.get("error"))
+        rels = self.client.get(
+            f"/api/knowledge/collections/{coll['id']}/releases"
+        ).get_json()["releases"]
+        self.assertEqual(len(rels), 1)
+        rel1 = rels[0]
+        self.assertEqual(rel1["rag_status"], "success")
+        self.assertEqual(len(captured), 1)
+        pl = captured[0]["payload"]
+        self.assertEqual(pl["kind"], "pct-release")
+        self.assertEqual(pl["contract"], "rel-1")
+        self.assertEqual(pl["release_id"], rel1["release_id"])
+        self.assertEqual(pl["zip_sha256"], rel1["zip_sha256"])
+        self.assertEqual(pl["collection_id"], coll["collection_id"])
+        self.assertTrue(pl["content_sha256"])
+        self.assertEqual(captured[0]["auth"], "Bearer rag-test-token")
+
+        # phase 2: a new document + RAG down -> the NEW release is
+        # 'failed', the previous release's row stays 'success'
+        tmp = tempfile.mkdtemp(prefix="pct-pf-s18-")
+        self.addCleanup(shutil.rmtree, tmp, ignore_errors=True)
+        p = os.path.join(tmp, "کتاب-دوم-S18.docx")
+        make_docx(p, [
+            ("Normal", "عنوان: کتاب دوم S18"),
+            ("Heading 1", "فصل اول"),
+            ("Normal", "متن فارسی ویژه S18."),
+        ])
+        self.upload_and_process(p)
+        mode["code"] = 503
+        _c, _j, job2 = self.pipeline(coll["id"])
+        self.assertEqual(job2["status"], "succeeded", job2.get("error"))
+        rels2 = self.client.get(
+            f"/api/knowledge/collections/{coll['id']}/releases"
+        ).get_json()["releases"]
+        self.assertEqual(len(rels2), 2)
+        rel2, rel1_after = rels2[0], rels2[1]
+        self.assertEqual(rel2["rag_status"], "failed")
+        self.assertEqual(rel1_after["release_id"], rel1["release_id"])
+        self.assertEqual(rel1_after["rag_status"], "success")
+        self.assertEqual(len(captured), 2)
+        self.assertEqual(captured[1]["payload"]["release_id"],
+                         rel2["release_id"])
+        self.assertEqual(captured[1]["payload"]["zip_sha256"],
+                         rel2["zip_sha256"])
+
+
+class TestPF_S19_WorkerCutRecovery(_PipelinePrep):
+    """PF-S19 — worker-cut recovery of a stale run (scenario 20).
+
+    After a completed run, the DB is back-dated to simulate a worker
+    death: the run row says 'running' (one stage mid-flight) and its job
+    row says 'running' with updated_at 15 minutes in the past.
+    - GET status recovers the stuck job -> 'interrupted'
+      (' [worker interrupted]') and shows the mid-flight stage STALE;
+    - POST /run is NOT a 409: the stale run is auto-failed
+      ('worker lost') and a fresh run reuses the SAME job row
+      (retry_count bumped) and completes 'done'.
+    """
+
+    def test_worker_cut_and_recover(self):
+        coll, _batch = self._prep(n_good=1, n_corrupt=0)
+        _c, j, job0 = self.pipeline(coll["id"])
+        self.assertEqual(job0["status"], "succeeded", job0.get("error"))
+        jid = j["job"]["job_id"]
+
+        # simulate the cut: the run is mid-D, the job row is 15 min stale
+        conn = self._db()
+        try:
+            fresh = {"status": "NOT_STARTED", "detail": None, "error": None,
+                     "job_id": None, "started_at": None, "updated_at": None}
+            done = {"status": "SUCCESS", "detail": {}, "error": None,
+                    "job_id": None, "started_at": "t", "updated_at": "t"}
+            states = {
+                "A_IMPORT": dict(done),
+                "B_PROCESS": dict(done),
+                "C_SCHEMA": dict(done),
+                "D_BUILD": dict(fresh),
+                "E_ACCEPT": dict(fresh),
+                "RELEASE": dict(fresh),
+            }
+            states["D_BUILD"]["status"] = "RUNNING"
+            conn.execute(
+                "UPDATE knowledge_pipeline_runs SET status='running', "
+                "error=NULL, finished_at=NULL, stage_states=?, "
+                "started_stage='D_BUILD' WHERE collection_id=?",
+                (json.dumps(states, ensure_ascii=False),
+                 coll["collection_id"]))
+            conn.execute(
+                "UPDATE knowledge_jobs SET status='running', error=NULL, "
+                "completed_at=NULL, updated_at=datetime('now','-15 minutes') "
+                "WHERE job_id=?", (jid,))
+            conn.commit()
+        finally:
+            conn.close()
+
+        # the status route recovers the stuck job -> STALE card
+        st = self.pipeline_status(coll["id"])
+        self.assertEqual(st["run"]["status"], "running")
+        cd = {c["stage"]: c for c in st["stages"]}
+        self.assertEqual(cd["A_IMPORT"]["status"], "SUCCESS")
+        self.assertEqual(cd["D_BUILD"]["status"], "STALE")
+        self.assertEqual(cd["E_ACCEPT"]["status"], "NOT_STARTED")
+        conn = self._db()
+        try:
+            jrow = conn.execute(
+                "SELECT * FROM knowledge_jobs WHERE job_id=?",
+                (jid,)).fetchone()
+            self.assertEqual(jrow["status"], "interrupted")
+            self.assertIn("[worker interrupted]", jrow["error"] or "")
+        finally:
+            conn.close()
+
+        # restart: NOT 409 — the stale run is auto-recovered and the SAME
+        # job row is re-executed (retry_count bumped)
+        code, j2 = self.pipeline_start(coll["id"])
+        self.assertIn(code, (200, 202))
+        self.assertEqual(j2["job"]["job_id"], jid)
+        job2 = self.wait_job(jid, timeout=180.0)
+        self.assertEqual(job2["status"], "succeeded", job2.get("error"))
+        conn = self._db()
+        try:
+            jrow2 = conn.execute(
+                "SELECT status, retry_count FROM knowledge_jobs "
+                "WHERE job_id=?", (jid,)).fetchone()
+        finally:
+            conn.close()
+        self.assertEqual(jrow2["status"], "succeeded")
+        self.assertEqual(jrow2["retry_count"], 1)
+        st2 = self.pipeline_status(coll["id"])
+        self.assertEqual(st2["run"]["status"], "done")
+        cd2 = {c["stage"]: c for c in st2["stages"]}
+        for skey in ("A_IMPORT", "B_PROCESS", "C_SCHEMA",
+                     "D_BUILD", "RELEASE"):
+            self.assertEqual(cd2[skey]["status"], "SUCCESS", skey)
+        self.assertEqual(cd2["E_ACCEPT"]["status"], "BLOCKED")
 
 
 if __name__ == "__main__":

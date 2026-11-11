@@ -89,8 +89,21 @@ def _index_alias(slug):
     return "pct-col-" + slug
 
 
-def _doc_id(sha256_hex: str):
-    return "d-" + sha256_hex[:8]
+def _doc_id(collection_id, sha256_hex):
+    """Deterministic per-(collection, content) document id:
+    d-<sha256("<cid>:<filesha>")[:12]>.
+
+    PCM-20.9 mission 1.6 — `document_id` is UNIQUE globally, so a
+    content-only id (the old d-<sha8>) turned "the same file in a second
+    collection" into a hard constraint violation (500 on the batch
+    upload). The id is now a pure function of (collection_id, sha256):
+    retries are idempotent, and the per-collection business key
+    (collection_id, sha256) is unchanged. Legacy rows keep their old
+    ids (backfill is untouched); they are still found by the
+    (collection_id, sha256) duplicate check.
+    """
+    return "d-" + hashlib.sha256(
+        f"{collection_id}:{sha256_hex}".encode("utf-8")).hexdigest()[:12]
 
 
 # ---------------------------------------------------------------------------
@@ -374,7 +387,9 @@ def ensure_knowledge_schema(db):
     -- approved_at set). Once approved a version's fields JSON is never
     -- modified — fixes mean a NEW version (immutable versioning).
     CREATE TABLE IF NOT EXISTS knowledge_schema_versions (
-        schema_id    TEXT PRIMARY KEY,        -- sv-<n> per collection
+        schema_id    TEXT PRIMARY KEY,        -- sv-<cid>-<n>: global PK,
+                                              -- <n> is the per-collection
+                                              -- version (1, 2, 3, ...)
         collection_id TEXT NOT NULL,
         version      INTEGER NOT NULL,        -- 1, 2, 3, ... per collection
         status       TEXT NOT NULL DEFAULT 'draft',  -- draft/approved
@@ -3095,10 +3110,10 @@ def register_knowledge_routes(app, get_db):
                (collection_id, document_id, file_name, relative_path, sha256,
                 file_size, file_id, status, created_at, updated_at)
                VALUES (?, ?, ?, ?, ?, ?, ?, 'uploaded', ?, ?)""",
-            (cid, _doc_id(sha), name, relative_path or None, sha, size,
-             file_id, now, now))
+            (cid, _doc_id(cid, sha), name, relative_path or None, sha, size,
+              file_id, now, now))
         db.commit()
-        doc = _doc_row(db, _doc_id(sha))
+        doc = _doc_row(db, _doc_id(cid, sha))
         return jsonify({"ok": True, "document": dict(doc),
                         "stored_path": "files/" + sha[:12] + "/" +
                                        os.path.basename(dst)}), 201
@@ -3580,7 +3595,7 @@ def register_knowledge_routes(app, get_db):
             os.remove(tmp)  # content already stored (same sha) — reuse
         else:
             shutil.move(tmp, dst)
-        doc_id = _doc_id(sha)
+        doc_id = _doc_id(cid, sha)
         db.execute(
             """INSERT INTO knowledge_collection_documents
                (collection_id, document_id, file_name, relative_path, sha256,
@@ -3937,7 +3952,10 @@ def register_knowledge_routes(app, get_db):
             "FROM knowledge_schema_versions WHERE collection_id=?",
             (cid,)).fetchone()
         version = row["v"] + 1
-        schema_id = f"sv-{version:04d}"
+        # schema_id is the GLOBAL primary key, but version is per-collection:
+        # embed the collection id so two collections can both hold a
+        # version-1 schema without a PK collision.
+        schema_id = f"sv-{cid}-{version:04d}"
         now = _now()
         db.execute(
             """INSERT INTO knowledge_schema_versions

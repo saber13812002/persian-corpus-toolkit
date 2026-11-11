@@ -1465,11 +1465,13 @@ from projects import register_project_routes
 from auth import ensure_auth_schema, seed_password, register_auth_routes
 from dashboard_api import register_dashboard_routes
 from knowledge_api import ensure_knowledge_schema, register_knowledge_routes
+from pipeline_orchestrator import register_pipeline_routes
 register_site_routes(app, get_db)
 register_project_routes(app, get_db)
 register_auth_routes(app, get_db)
 register_dashboard_routes(app, get_db)
 register_knowledge_routes(app, get_db)
+register_pipeline_routes(app, get_db)
 
 
 def _init_auth(db):
