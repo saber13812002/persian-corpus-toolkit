@@ -56,14 +56,15 @@
 │  • auth.py        — احراز هویت داشبورد (scrypt+cookie) │
 │  • dashboard_api.py — API خواندنی داشبورد ★           │
 │  • knowledge_api.py — ★ Word Studio/پایگاه دانش (PCM-14B)│
+│  • pipeline_orchestrator.py — پایپلاین کامل (PCM-20.9)   │
 │  • sites.py       — سایت‌های نام‌دار + فیلدها ★      │
 │  • sciences.py    — ۱۳ علم اصطلاح‌نامه               │
 │  • factory/       — ★ Word Factory: DOCX→JSONL + Dump d-1│
 │                   + Corpus Builder c-1 (PCM-16)         │
-│  • 11 test files — 200 تست (api/projects/dashboard/    │
+│  • 12 test files — 243 تست (api/projects/dashboard/    │
 │                     knowledge_api/factory/dump/work/    │
 │                     queue/corpus_builder/studio_api/    │
-│                     api_contract — قرارداد OpenAPI)    │
+│                     api_contract/pipeline) — OpenAPI    │
 ├────────────────────────────────────────────────────────┤
 │  Corpus Pipeline (corpus/)                             │
 │  • build_corpus.py / build_dataset.py / pipeline.py    │
@@ -86,6 +87,7 @@ persian-corpus-toolkit/
 │   ├── auth.py              # ★ احراز هویت داشبورد (PCM-09)
 │   ├── dashboard_api.py     # ★ API خواندنی داشبورد (PCM-04)
 │   ├── knowledge_api.py     # ★ Word Studio + پایگاه دانش (PCM-14B)
+│   ├── pipeline_orchestrator.py # ★ Full Pipeline A→B→C→D→E→RELEASE (PCM-20.9)
 │   ├── factory/             # ★ Word Factory: DOCX→JSONL (CLI + policy n-1 + dump.py)
 │   ├── sites.py             # ★ سایت‌ها و فیلدهای آماده
 │   ├── sciences.py          # ۱۳ علم
@@ -98,6 +100,10 @@ persian-corpus-toolkit/
 │   ├── test_dump.py         # ★ ۲۶ تست D01..D15 (Dump d-1 — PCM-14C.3)
 │   ├── test_work_registry.py# ★ ۱۰ تست RD-01..RD-07 (Work Registry — PCM-14D)
 │   ├── test_api_contract.py # ★ ۱۸ تست CT-01..CT-06 (قرارداد OpenAPI↔app — PCM-19)
+│   ├── test_queue.py        # ۹ تست (صف فایل — PCM-15)
+│   ├── test_corpus_builder.py # ★ ۲۴ تست C-01..C-16 (پیکره‌ساز c-1 — PCM-16)
+│   ├── test_studio_api.py   # ۷ تست (استودیو — PCM-17)
+│   ├── test_pipeline.py     # ★ ۴۳ تست PF (Factory + Pipeline + ۲۰ سناریو — PCM-20.9)
 │   ├── requirements.txt
 │   ├── Dockerfile
 │   └── thesaurus.db         # (gitignored)
@@ -285,9 +291,10 @@ cd backend && python -m unittest test_queue -v                               # 9
 cd backend && python -m unittest test_corpus_builder -v                       # 24/24 (پیکره‌ساز c-1 — PCM-16)
 cd backend && python -m unittest test_studio_api -v                           # 7/7 (استودیو PCM-17)
 cd backend && python -m unittest test_api_contract -v                         # 18/18 (قرارداد OpenAPI — PCM-19)
+cd backend && python -m unittest test_pipeline -v                             # 43/43 (Pipeline — PCM-20.9/20.9.4)
 cd backend && python -m unittest test_api test_projects test_dashboard \
   test_knowledge_api test_word_factory test_dump test_work_registry test_queue \
-  test_corpus_builder test_studio_api test_api_contract  # 200/200 (کل)
+  test_corpus_builder test_studio_api test_api_contract test_pipeline  # 243/243 (کل)
 cd extension && node test_popup.js                                            # 8/8
 node --check extension/popup.js extension/background.js extension/content_picker.js
 node -e "JSON.parse(require('fs').readFileSync('extension/manifest.json'))"
@@ -360,6 +367,13 @@ python server.py                          # لاگ بکند در stdout
 sqlite3 backend/thesaurus.db "SELECT COUNT(*) FROM project_pages"
 ```
 
+### اجرای دستی / بازیابی پایپلاین (PCM-20.9)
+- **اجرای دستی:** کارت «خط لوله» در `studio.html` → «اجرای کامل پایپلاین» (یا `POST /api/knowledge/collections/<id>/pipeline/run`).
+- **ادامه از stage:** انتخاب stage در «ادامه از» — stageهای قبل checkpoint می‌مانند (مثلاً بعد از شکست D، از RELEASE ادامه).
+- **توقف/ادامه:** pause → worker خودش را قطع و state ذخیره می‌کند؛ resume → از همان checkpoint ادامه.
+- **قطع‌شدن worker:** کارت‌ها STALE نشان می‌دهند؛ اجرای/resume بعدی run قدیمی را خودکار بازیابی می‌کند (بدون پاک‌سازی دستی DB).
+- **شبانه‌کاری:** schedule (HH:MM) در `knowledge_pipeline_schedules` ذخیره می‌شود؛ اجرای واقعی با `deploy/pcm209_nightly.sh` (cron) — در این مأموریت **فعال نشده**.
+
 ### وضعیت‌های باز (backlog)
 - رفع `sleep` ثابت و `waitComplete` در `background.js` (B1/B2 گزارش PCM-01)
 - `corpus/build_project_corpus.py` (خروجی پروژه به txt/jsonl)
@@ -393,6 +407,12 @@ sqlite3 backend/thesaurus.db "SELECT COUNT(*) FROM project_pages"
 | **PCM-17** تکمیل UI استودیو: کارت صف/بچ‌ها + کارت رجیستری اثر‌ها + `GET /import/batches` (افزایشی) + ستون رجیستری اسناد — evidence-based، فقط REST | ✅ (7 تست S + 182/182 — بدون deploy؛ سند: docs/PCM-17-STUDIO-UI.md) |
 | **PCM-18** ممیزی observability روی s52: اسکریپت خواندنی + گزارش (اجرای s52 مسدود — host unreachable، 5 timeout) | ✅ (اسکریپت + گزارش — اجرای s52 در انتظار دسترسی) |
 | **PCM-19** قرارداد API: تست‌های CT-01..CT-06 (200 کل) + به‌روزرسانی README/AGENTS/OpenAPI + GitLab CI (test-only) + نمونه کلاینت REST + چک‌کن OpenAPI | ✅ (18 تست CT + 200/200 — بدون deploy؛ سند: docs/openapi/README.md) |
+| **PCM-20** خروجی کامل JSON پیکره‌ی «تفسیر تسنیم» + ممیزی شماره صفحه (`deploy/pcm20_tasnim_export.py`) | ✅ (read-only روی سرور: 45,844 سند / 73MB؛ بدون deploy) |
+| **PCM-20.2** ممیزی عمیق خروجی واقعی + تطبیق با AI Dump Builder (`deploy/pcm20_2_tasnim_audit.py`) | ✅ (باگ parse_barg اثبات شد؛ adapter بدون تغییر کد Builder ممکن است؛ بدون deploy) |
+| **PCM-20.3** Tasnim Corpus Factory: `corpus/tasnim/` (13 ماژول) + 16 تست T — audit gate + پیکره‌ی canonical + دیتاست‌های نسخه‌شده + adapter Dump + diff + زنجیره‌ی manifest/provenance | ✅ (16 تست + رگرسیون کامل 200؛ بدون deploy؛ سند: docs/PCM-20.3-TASNIM-FORFACTORY.md) |
+| **PCM-20.4** پذیرش واقعی end-to-end تسنیم: snapshot واقعی 45,844 + 6 دیتاست + 3 build واقعی ai-dump-builder + زنجیره‌ی registry + 216 تست سبز | ✅ (acceptance PASS؛ بدون deploy؛ سند: docs/PCM-20.4-TASNIM-ACCEPTANCE.md) |
+| **PCM-20.9** Knowledge Studio/Factory + Full Pipeline orchestration (A→B→C→D→E→RELEASE) + checkpoint/`from_stage` + pause/resume + schedule شبانه | ✅ (43 تست PF + رگرسیون کامل 243 سبز؛ بدون deploy؛ سند: PCM-20.9-RECON.md §۸/§۱۲) |
+| **PCM-20.9.4** Maximum Execution: داشبورد خط لوله در استودیو (6 کارت stage + Run/ادامه-از-stage/Pause/Resume + schedule شبانه + تاریخچه + کارت‌های release) + 20 سناریوی پذیرش (S11–S19) + چک UI واقعی puppeteer 29/29 + قرارداد OpenAPI v1.2.0 (3 spec / 34 operation) | ✅ (243 تست سبز + 29 چک UI + 18 چک CT؛ بدون deploy؛ deploy s52 = مأموریت بعدی) |
 
 جزئیات معماری و نقشه‌ی راه نسخه‌ای (V0.1..V1.0): مستندات PCM-12 در [docs/](docs/) — `PCM-12-AUDIT.md` (وضعیت واقعی)، `PCM-12-ARCHITECTURE.md` (طراحی S2..S9)، `PCM-12-PRD.md` (الزامات)، `PCM-12-ROADMAP.md` (ترتیب اجرا)، `PCM-12-DATA-CONTRACTS.md` (schema/API/Prompt)، `PCM-12-AGENT-HANDOFF.md` (تصمیم‌ها و مرزها)، `PCM-12-ACCEPTANCE-REPORT.md` (گزارش آزمون پذیرش ۲۰ سناریو + ممیزی دسترسی s52)، `PCM-12-ACCEPTANCE-CHECKLIST.md` (چک‌لیست تأیید کاربری با Chrome) و `PCM-12.3-TEST-ISOLATION.md` (رفع ریشه‌ای F-01 + ممیزی امنیتی Grafana).
 

@@ -1,11 +1,12 @@
 openapi: 3.0.3
 info:
   title: "Persian Corpus Toolkit — Knowledge Studio: Canonical Pipeline & Release (PCM-20.9)"
-  version: 1.0.0
+  version: 1.2.0
   description: |
     PCM-20.9 additive extension of the Corpus Knowledge Studio API
     (`/api/knowledge/*`) covering the canonical-corpus pipeline stages
-    D/E and the final release bundle.
+    D/E, the final release bundle, and the Full Pipeline orchestrator
+    (run/pause/resume/status + nightly schedules) of RECON §8.
 
     Stage D — canonical corpus build (`c-1`):
     - POST /api/knowledge/collections/{coll_id}/corpus/build
@@ -23,6 +24,14 @@ info:
 
     Audit trail (append-only, PCM-20.9):
     - GET  /api/knowledge/collections/{coll_id}/audit
+
+    Pipeline orchestration (PCM-20.9, RECON §8):
+    - POST /api/knowledge/collections/{coll_id}/pipeline/run
+    - POST /api/knowledge/collections/{coll_id}/pipeline/pause
+    - POST /api/knowledge/collections/{coll_id}/pipeline/resume
+    - GET  /api/knowledge/collections/{coll_id}/pipeline/status
+    - GET  /api/knowledge/pipeline/schedules
+    - POST /api/knowledge/pipeline/schedules
 
     Guarantees:
     - Every stage runs as a `knowledge_jobs` row (202 + `job.job_id`);
@@ -63,15 +72,29 @@ paths:
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/JobResult"
+                allOf:
+                  - { $ref: "#/components/schemas/JobResult" }
+                  - type: object
+                    properties:
+                      documents: { type: integer, example: 12 }
         "202":
           description: Corpus build queued
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/JobResult"
+                allOf:
+                  - { $ref: "#/components/schemas/JobResult" }
+                  - type: object
+                    properties:
+                      documents: { type: integer, example: 12 }
         "401": { $ref: "#/components/responses/Unauthorized" }
         "404": { $ref: "#/components/responses/NotFound" }
+        "409":
+          description: No processed documents yet (no_processed_documents)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
   /api/knowledge/collections/{coll_id}/corpus/builds:
     get:
       tags: [pipeline]
@@ -170,7 +193,11 @@ paths:
         "401": { $ref: "#/components/responses/Unauthorized" }
         "404": { $ref: "#/components/responses/NotFound" }
         "409":
-          description: Acceptance not passed, or ES index not success
+          description: >-
+            Hard-gate failure — either the full search acceptance has not
+            passed (code: acceptance_not_passed, body carries search_status)
+            or the ES index is not success (code: es_not_success, body
+            carries es_index_status)
           content:
             application/json:
               schema:
@@ -256,6 +283,12 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/Error"
+        "410":
+          description: Zip file missing on disk (zip_missing) — release row exists but the file is gone
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
   /api/knowledge/collections/{coll_id}/audit:
     get:
       tags: [release]
@@ -263,8 +296,7 @@ paths:
       summary: Append-only audit trail of collection actions
       parameters:
         - { name: coll_id, in: path, required: true, schema: { type: integer } }
-        - { name: limit, in: query, required: false, schema: { type: integer, default: 100, maximum: 500 } }
-        - { name: offset, in: query, required: false, schema: { type: integer, default: 0 } }
+        - { name: limit, in: query, required: false, schema: { type: integer, default: 100, minimum: 1, maximum: 500 }, description: "Clamped to 1..500; there is no offset (newest first, LIMIT only)" }
       responses:
         "200":
           description: Audit entries (newest first)
@@ -279,6 +311,183 @@ paths:
                     type: array
                     items: { $ref: "#/components/schemas/AuditEntry" }
                   count: { type: integer, example: 7 }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+  /api/knowledge/collections/{coll_id}/pipeline/run:
+    post:
+      tags: [pipeline]
+      operationId: pipelineRun
+      summary: Start (or restart) the Full Pipeline run for this collection (job)
+      description: |
+        The run is a per-collection singleton (natural lock): while a run is
+        active (or paused), a second start returns 409 conflicting_job.
+        An optional `from_stage` restarts the run from that stage — stages
+        before it keep their checkpointed state; the stage and everything
+        after it is reset and re-executed.
+      parameters:
+        - { name: coll_id, in: path, required: true, schema: { type: integer } }
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                from_stage:
+                  type: string
+                  enum: [A_IMPORT, B_PROCESS, C_SCHEMA, D_BUILD, E_ACCEPT, RELEASE]
+      responses:
+        "200":
+          description: Idempotent hit — a run is already tracked (job reused)
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - { $ref: "#/components/schemas/JobResult" }
+                  - type: object
+                    properties:
+                      run_id: { type: string, example: "pr-0a1b2c3d" }
+        "202":
+          description: Pipeline run queued
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - { $ref: "#/components/schemas/JobResult" }
+                  - type: object
+                    properties:
+                      run_id: { type: string, example: "pr-0a1b2c3d" }
+        "400":
+          description: "Bad from_stage (code: unknown_stage; body lists valid stages)"
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409":
+          description: "A run is already active or paused (code: conflicting_job)"
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+  /api/knowledge/collections/{coll_id}/pipeline/pause:
+    post:
+      tags: [pipeline]
+      operationId: pipelinePause
+      summary: Pause the active pipeline run (the worker self-interrupts between stages)
+      parameters:
+        - { name: coll_id, in: path, required: true, schema: { type: integer } }
+      responses:
+        "200":
+          description: Run paused
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  ok: { type: boolean, example: true }
+                  run_id: { type: string, example: "pr-0a1b2c3d" }
+                  status: { type: string, enum: [paused] }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409":
+          description: No run yet (no_run) or the run is not running (not_running)
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+  /api/knowledge/collections/{coll_id}/pipeline/resume:
+    post:
+      tags: [pipeline]
+      operationId: pipelineResume
+      summary: Resume a paused pipeline run (checkpointed stages are skipped)
+      parameters:
+        - { name: coll_id, in: path, required: true, schema: { type: integer } }
+      responses:
+        "202":
+          description: Resume queued (job re-submitted with force_retry)
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - { $ref: "#/components/schemas/JobResult" }
+                  - type: object
+                    properties:
+                      run_id: { type: string, example: "pr-0a1b2c3d" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409":
+          description: No run yet (no_run) or the run is not paused (not_paused)
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+  /api/knowledge/collections/{coll_id}/pipeline/status:
+    get:
+      tags: [pipeline]
+      operationId: pipelineStatus
+      summary: Pipeline run + per-stage cards (UI statuses) + live queue counters
+      description: |
+        Card statuses: NOT_STARTED, READY (previous stage done, run active),
+        RUNNING, PAUSED, STALE (worker lost), SUCCESS, FAILED, NEEDS_REVIEW,
+        BLOCKED. BLOCKED/NEEDS_REVIEW are recorded and the run continues;
+        only FAILED stops the run.
+      parameters:
+        - { name: coll_id, in: path, required: true, schema: { type: integer } }
+      responses:
+        "200":
+          description: Pipeline status payload
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/PipelineStatus" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+  /api/knowledge/pipeline/schedules:
+    get:
+      tags: [pipeline]
+      operationId: pipelineSchedulesList
+      summary: List the nightly pipeline schedules
+      responses:
+        "200":
+          description: All schedules
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  ok: { type: boolean, example: true }
+                  schedules:
+                    type: array
+                    items: { $ref: "#/components/schemas/PipelineSchedule" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+    post:
+      tags: [pipeline]
+      operationId: pipelineScheduleUpsert
+      summary: Create or update the nightly schedule of a collection
+      parameters: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [collection_id]
+              properties:
+                collection_id: { type: integer, example: 12 }
+                enabled: { type: boolean, example: true }
+                cron_time: { type: string, pattern: "^([01]\\d|2[0-3]):[0-5]\\d$", default: "03:00", example: "03:00" }
+      responses:
+        "200":
+          description: Schedule upserted
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  ok: { type: boolean, example: true }
+                  schedule: { $ref: "#/components/schemas/PipelineSchedule" }
+        "400":
+          description: Bad collection_id (bad_collection_id) or bad cron_time (bad_cron_time)
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
         "401": { $ref: "#/components/responses/Unauthorized" }
         "404": { $ref: "#/components/responses/NotFound" }
 components:
@@ -345,15 +554,14 @@ components:
         created_at: { type: string }
     AuditEntry:
       type: object
-      description: knowledge_audit_log row (append-only)
+      description: One knowledge_audit_log row as returned by the audit endpoint (append-only)
       properties:
-        entry_id: { type: integer, example: 12 }
-        collection_id: { type: string, example: "c-01234567" }
-        actor: { type: string, example: "worker", description: sess-<sha8> or worker }
+        ts: { type: string }
+        actor: { type: string, example: "worker", description: "sess-<sha8> | worker | system" }
+        stage: { type: string, example: release, description: "import | process | schema | build | acceptance | release | pipeline | ..." }
         action: { type: string, example: release_built }
         status: { type: string, enum: [ok, fail, blocked] }
-        detail: { type: [string, "null"], description: JSON string }
-        ts: { type: string }
+        detail_json: { type: [string, "null"], description: "JSON string of the action detail" }
     Error:
       type: object
       properties:
@@ -361,6 +569,90 @@ components:
         code: { type: [string, "null"], example: no_corpus_build }
         field: { type: [string, "null"] }
         message: { type: string }
+    PipelineRun:
+      type: object
+      description: knowledge_pipeline_runs row
+      properties:
+        run_id: { type: string, example: "pr-0a1b2c3d" }
+        collection_id: { type: string, example: "c-01234567" }
+        status: { type: string, enum: [running, paused, done, failed] }
+        trigger_type: { type: string, enum: [manual, nightly] }
+        started_stage: { type: [string, "null"], example: A_IMPORT }
+        error: { type: [string, "null"] }
+        job_id: { type: [string, "null"], example: "j-0a1b2c3d" }
+        created_at: { type: string }
+        updated_at: { type: string }
+        finished_at: { type: [string, "null"] }
+    PipelineRunSummary:
+      type: object
+      description: The reduced run object returned by GET .../pipeline/status
+      properties:
+        run_id: { type: string, example: "pr-0a1b2c3d" }
+        status: { type: string, enum: [running, paused, done, failed] }
+        trigger_type: { type: string, enum: [manual, nightly] }
+        error: { type: [string, "null"] }
+        started_at: { type: [string, "null"] }
+        finished_at: { type: [string, "null"] }
+    PipelineStageCard:
+      type: object
+      description: One stage card of the pipeline status view
+      properties:
+        stage:
+          type: string
+          enum: [A_IMPORT, B_PROCESS, C_SCHEMA, D_BUILD, E_ACCEPT, RELEASE]
+        label: { type: string, example: "corpus build" }
+        status:
+          type: string
+          enum: [NOT_STARTED, READY, RUNNING, PAUSED, STALE, SUCCESS, FAILED, NEEDS_REVIEW, BLOCKED]
+        detail: { type: [string, "null"], description: JSON string of stage output }
+        error: { type: [string, "null"] }
+        job_id: { type: [string, "null"], example: "j-0a1b2c3d" }
+        started_at: { type: [string, "null"] }
+        updated_at: { type: [string, "null"] }
+    PipelineStatus:
+      type: object
+      description: GET .../pipeline/status payload
+      properties:
+        ok: { type: boolean, example: true }
+        collection_id: { type: string, example: "c-01234567" }
+        run:
+          allOf:
+            - { $ref: "#/components/schemas/PipelineRunSummary" }
+          nullable: true
+          description: null when no run was ever started
+        stages:
+          type: array
+          items: { $ref: "#/components/schemas/PipelineStageCard" }
+        queue:
+          type: object
+          description: Live per-file queue counters (PCM-15, queue_counters)
+          properties:
+            total: { type: integer }
+            pending: { type: integer }
+            running: { type: integer }
+            succeeded: { type: integer }
+            needs_review: { type: integer }
+            failed: { type: integer }
+            failed_with_safe_stage: { type: integer }
+            attempts_total: { type: integer }
+        latest_build:
+          allOf:
+            - { $ref: "#/components/schemas/IndexBuild" }
+          nullable: true
+        latest_release:
+          allOf:
+            - { $ref: "#/components/schemas/Release" }
+          nullable: true
+    PipelineSchedule:
+      type: object
+      description: knowledge_pipeline_schedules row (nightly)
+      properties:
+        collection_id: { type: string, example: "c-01234567" }
+        enabled: { type: integer, enum: [0, 1] }
+        cron_time: { type: string, example: "03:00" }
+        updated_at: { type: [string, "null"] }
+        last_run_at: { type: [string, "null"] }
+        last_status: { type: [string, "null"], example: started }
   responses:
     Unauthorized:
       description: Missing/invalid session

@@ -50,11 +50,11 @@ BACKUP:  /home/saber/backups/  (thesaurus-<TS>.db + pct-deploy-<TS>.tar.gz)
 ```bash
 cd backend && python -m unittest test_api test_projects test_dashboard \
   test_knowledge_api test_word_factory test_dump test_work_registry test_queue \
-  test_corpus_builder test_studio_api test_api_contract -v \
-  # 200 تست (رگرسیون کامل)
+  test_corpus_builder test_studio_api test_api_contract test_pipeline -v \
+  # 243 تست (رگرسیون کامل)
 ```
 
-- **200 تست**: `test_api.py` (8، فاز۱/۲ + پروژه)، `test_projects.py` (9، جریان CRUD)،
+- **243 تست**: `test_api.py` (8، فاز۱/۲ + پروژه)، `test_projects.py` (9، جریان CRUD)،
   `test_dashboard.py` (22، auth A01-A08 + داشبورد D01-D07)، `test_knowledge_api.py`
   (40، KB-01..KB-14 — PCM-14B)، `test_word_factory.py` (27، WF-01..WF-13 + on_stage
   PCM-15)، `test_dump.py` (26، D01..D15 — قرارداد Dump `d-1`، PCM-14C.3)،
@@ -63,7 +63,9 @@ cd backend && python -m unittest test_api test_projects test_dashboard \
   `test_corpus_builder.py` (24، C-01..C-16 — پیکره‌ساز `c-1`، PCM-16)،
   `test_studio_api.py` (7، S-01..S-04 — استودیو: فهرست بچ‌ها + paused +
   counters + رجیستری اسناد، PCM-17)، `test_api_contract.py` (18،
-  CT-01..CT-06 — قرارداد OpenAPI spec ↔ app زنده، PCM-19).
+  CT-01..CT-06 — قرارداد OpenAPI spec ↔ app زنده، PCM-19)، `test_pipeline.py`
+  (43، PF-A01..PF-P05 + PF-M01 + PF-S11..S19 — Knowledge Studio/Factory +
+  Full Pipeline orchestration + 20 سناریوی پذیرش، PCM-20.9/20.9.4).
 - **PCM-12.3 (رفع F-01):** هر سه ماژول اول `import pct_test_support` می‌کنند که
   یک DB موقت **مشترک** می‌سازد و `PCT_DB`/`PCT_DASHBOARD_PASSWORD` را **قبل از**
   `import server` ست می‌کند؛ سپس هر کلاس در `setUp` با
@@ -89,11 +91,21 @@ cd backend && python -m unittest test_api test_projects test_dashboard \
 - `knowledge_api.py` — Work Registry (PCM-14D): جدول‌های `knowledge_works`/
   `knowledge_editions`/`knowledge_volumes` + scopeهای `work/edition/volume` متادیتا
   + `/api/knowledge/metadata/resolve` (سند: `docs/PCM-14D-WORK-REGISTRY.md`).
-- `docs/openapi/` — مشخصه‌های OpenAPI (PCM-14D + PCM-15؛ 19 operation) + راهنمای
-  اپراتور (PCM-19) · `.gitlab-ci.yml` — CI فقط تست (رگرسیون 200 + چک OpenAPI +
-  نمونه کلاینت؛ **بدون job deploy**؛ `deploy/pcm19_openapi_check.py`).
-- داشبورد: HTML+JS تک‌صفحه‌ای بدون framework در `dashboard/index.html`؛ همه‌ی
-  fetchها `credentials: same-origin` و 401 → overlay ورود.
+- `pipeline_orchestrator.py` — Full Pipeline runner (A→B→C→D→E→RELEASE، job
+  `pipeline_run`، checkpoint/`from_stage`، pause/resume، stage cards) + Nightly
+  (`knowledge_pipeline_schedules` + `run_nightly`، PCM-20.9؛ سند:
+  `PCM-20.9-RECON.md` §۸/§۱۲ + `deploy/pcm209_nightly.sh`).
+- `dashboard/studio.html` — Knowledge Corpus Factory: کارت خط لوله با 6 کارت
+  stage (A_IMPORT..RELEASE) + کنترل‌های Run/ادامه-از-stage/توقف/ادامه +
+  schedule شبانه + تاریخچه audit + کارت‌های corpus/builds/releases
+  (PCM-20.9.4؛ چک UI واقعی: `deploy/pcm2094_ui_check/ui_check.mjs` — 29 چک).
+- `docs/openapi/` — مشخصه‌های OpenAPI (PCM-14D + PCM-15 + PCM-20.9؛ 3 spec /
+  34 operation؛ spec PCM-20.9 = 15 operation، v1.2.0) + راهنمای اپراتور (PCM-19)
+  · `.gitlab-ci.yml` — CI فقط تست (رگرسیون 243 + چک OpenAPI + نمونه کلاینت؛
+  **بدون job deploy**؛ `deploy/pcm19_openapi_check.py`).
+- داشبورد: HTML+JS تک‌صفحه‌ای بدون framework در `dashboard/index.html` و
+  `dashboard/studio.html` (Knowledge Studio)؛ همه‌ی fetchها
+  `credentials: same-origin` و 401 → overlay ورود.
 
 ## ۶. نقشه‌ی راه (ترتیب اجرا)
 
@@ -123,6 +135,8 @@ cd backend && python -m unittest test_api test_projects test_dashboard \
 | **PCM-20.2** ممیزی عمیق خروجی واقعی + تطبیق با AI Dump Builder (`deploy/pcm20_2_tasnim_audit.py`) | ✅ (باگ parse_barg اثبات شد؛ adapter بدون تغییر کد Builder ممکن است؛ بدون deploy) |
 | **PCM-20.3** Tasnim Corpus Factory: `corpus/tasnim/` (13 ماژول) + 16 تست T — audit gate + پیکره‌ی canonical (RAW/NORMALIZED جدا) + V01–V08 + dataset‌های 1/10/50/90/100 + adapter Dump سازگار با builder + diff + زنجیره‌ی manifest/provenance (immutable، append-only) | ✅ (16 تست + رگرسیون کامل 200؛ بدون deploy؛ سند: docs/PCM-20.3-TASNIM-FORFACTORY.md؛ embedding/Neo4j = مأموریت بعدی) |
 | **PCM-20.4** پذیرش واقعی end-to-end تسنیم: snapshot واقعی 45,844 صفحه (SHA verify + GATE 1.5 truncation) → پیکره‌ی canonical v0001 → 6 دیتاست نسخه‌شده (شامل 1 جلد + fixture افزایشی با diff/immutable) → 3 خروجی Dump + **3 build واقعی ai-dump-builder** (mock embedding؛ بدون LiteLLM/Neo4j/collection عملیاتی) + زنجیره‌ی registry 17-entry + 216 تست سبز (200 رگرسیون + 16 T؛ 0 skip) | ✅ (acceptance PASS؛ بدون deploy؛ سند: docs/PCM-20.4-TASNIM-ACCEPTANCE.md؛ embedding/Neo4j واقعی = PCM-20.5) |
+| **PCM-20.9** Knowledge Studio → Knowledge Corpus Factory: Stage A (multi-import با plan/upload/process واقعی) + B (retry-failed) + C (schema versions + validate dry-run) + D (corpus build c-1 + ES guarded) + E (search acceptance 10 دسته + approve) + Release (bundle قطعی + RAG guarded + audit log) + **Full Pipeline orchestrator** (`pipeline_orchestrator.py`: run/pause/resume/status + checkpoint `from_stage` + قفل per-collection + `deploy/pcm209_nightly.sh` + 6 endpoint جدید) | ✅ (43 تست PF + رگرسیون کامل 243 سبز؛ بدون deploy؛ سند: PCM-20.9-RECON.md §۸/§۱۲) |
+| **PCM-20.9.4** Maximum Execution: داشبورد خط لوله در استودیو (6 کارت stage متصل + Run/ادامه-از-stage/Pause/Resume + schedule شبانه + تاریخچه + کارت‌های release) + 20 سناریوی پذیرش (PF-S11..S19) + چک UI واقعی puppeteer 29/29 + رفع باگ UI (refresh کارت‌ها بعد از پایان run) + قرارداد OpenAPI v1.2.0 (7 خطای قرارداد رفع‌شده) | ✅ (243 تست سبز + 29 چک UI + 18 چک CT؛ بدون deploy؛ deploy s52 = مأموریت بعدی) |
 
 گزارش‌ها: `گزارش-PCM-0X.md` (۱۱ بخش: وضعیت قبل، طراحی، مهاجرت، فایل/API، تست،
 نتیجه production، SHA+لینک، git status، بکاپ/rollback، موارد باقی‌مانده، روش تست دستی).

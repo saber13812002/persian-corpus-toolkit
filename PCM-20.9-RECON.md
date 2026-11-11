@@ -365,26 +365,62 @@ Jobs: 44 مورد، همه succeeded. صف خالی. **ES: نه روی 9200/9300
   کارت «ردیابی اقدامات» در UI (فیلتر stage/action).
 - `test_pipeline`: 28/28 سبز (A5+B3+C3+D4+E3+F7+T0... A..F).
 
-### OpenAPI — ✅ (spec سوم + CT به‌روز)
-- `docs/openapi/pcm209-pipeline-release.openapi.yaml` — ۹ operation جدید
-  (corpus/build، corpus/builds، index-builds/<iv_id>، search-acceptance،
-  index-builds/<iv_id>/approve، release، releases، download، audit) + schemas
-  (JobObject/JobResult/IndexBuild/Release/AuditEntry/Error).
-- `test_api_contract`: `SPECS` به ۳ spec؛ `len(specs)==3`؛ `_path_url` مقدار عددی
-  برای `coll_id` (converter `<int:...>`).
-- `deploy/pcm19_openapi_check.py`: **3 specs, 28 operations** — OK.
+ ### Full Pipeline (orchestrator) + Nightly — ✅ (تست‌های PF-P01..P05 سبز)
+- `backend/pipeline_orchestrator.py` — runner کامل A_IMPORT→B_PROCESS→C_SCHEMA→D_BUILD
+  →E_ACCEPT→RELEASE روی job `pipeline_run` (kind در `ka._JOB_KINDS` ثبت شد) +
+  `register_pipeline_routes` (wire در `server.py`؛ ۶ endpoint جدید):
+  - `POST /collections/<id>/pipeline/run` (اختیاری `from_stage`) → 202/200 + `run_id` +
+    job؛ 409 `conflicting_job` (run فعال یا paused)؛ 400 `unknown_stage` (بدنه `stages`).
+  - `POST .../pipeline/pause` / `.../pipeline/resume` — pause = self-interrupt worker
+    (`error=' [pipeline paused]'`، run `paused`)؛ resume = submit مجدد `force_retry`
+    (idempotent). 409: `no_run` / `not_running` / `not_paused`.
+  - `GET .../pipeline/status` — کارت هر stage با وضعیت UI (NOT_STARTED/READY/RUNNING/
+    PAUSED/STALE/SUCCESS/FAILED/NEEDS_REVIEW/BLOCKED) + run + `queue_counters` +
+    `latest_build` + `latest_release` + recover خودکار jobs کُند/قطع‌شده.
+  - `GET/POST /api/knowledge/pipeline/schedules` — جدول `knowledge_pipeline_schedules`
+    (cron_time `HH:MM`، validation regex؛ 400 `bad_cron_time`/`bad_collection_id`) +
+    `run_nightly(db)` (فقط scheduleهای enabled؛ conflicting → skipped).
+- جدول‌های additive: `knowledge_pipeline_runs` (run_id `pr-<sha8>`، `collection_id`
+  یکتا = قفل طبیعی per-collection، `stage_states` JSON checkpointed بعد از هر stage) +
+  `knowledge_pipeline_schedules` (بدون DROP/RENAME).
+- checkpoint: `from_stage` فقط stageهای از-آن-بعد را reset می‌کند؛ retry_count ساب‌jobها
+  در restart تغییر نمی‌کند (force_retry روی همان job_key)؛ tamper آرشیو corpus →
+  RELEASE fail (sha mismatch) و restart از D_BUILD سبز.
+- `deploy/pcm209_nightly.sh` — cron host: backup DB + integrity + `run_nightly` با
+  wait-loop تا jobs terminal (deadline 6h، poll 15s) + integrity مجدد.
+- تست‌ها (PF-P01..P05 در `test_pipeline.py`): P01 run کامل (B NEEDS_REVIEW با فایل
+  خراب، E BLOCKED بدون ES، RELEASE SUCCESS)؛ P02 قفل run + 409 + rerun idempotent؛
+  P03 from_stage + tamper + 400 `unknown_stage`؛ P04 pause (interrupt) → resume → done +
+  409s؛ P05 schedules upsert/list + `run_nightly` (skipped conflicting / started) +
+  trigger_type `nightly`.
+- `test_pipeline`: 33/33 سبز (A5+B3+C3+D4+E3+F7+P5).
 
-### وضعیت رگرسیون (آخرین اجرا)
-- `test_pipeline`: 28/28 سبز (A5+B3+C3+D4+E3+F7 = ۲۵ کلاس، ۲۸ تست).
-- رگرسیون کامل روی **Python 3.13** (با PyYAML، هم‌شکل CI): **228 تست → OK، 0 skip**
-  (200 موجود + 28 pipeline؛ CT-01..06 با ۳ spec سبز).
-- روی Python 3.14 (32-bit، بدون PyYAML): 228 تست → OK (10 skip CT، پیشین).
+ ### OpenAPI — ✅ (spec سوم به‌روز + CT سبز)
+- `docs/openapi/pcm209-pipeline-release.openapi.yaml` (v1.1.0) — مجموعاً ۱۵ operation:
+  ۹ قبلی (corpus/build، corpus/builds، index-builds/<iv_id>، search-acceptance،
+  index-builds/<iv_id>/approve، release، releases، download، audit) + ۶ جدید
+  (pipelineRun، pipelinePause، pipelineResume، pipelineStatus، pipelineSchedulesList،
+  pipelineScheduleUpsert) + schemas (JobObject/JobResult/IndexBuild/Release/AuditEntry/
+  Error/PipelineRun/PipelineStageCard/PipelineStatus/PipelineSchedule).
+- نکته: descriptionهای شامل `code:` در YAML باید quote شوند (یک `ScannerError` در
+  regression ریشه‌یابی و رفع شد).
+- `test_api_contract`: 3 spec؛ `_path_url` مقدار عددی برای `coll_id`
+  (converter `<int:...>`).
+- `deploy/pcm19_openapi_check.py`: **3 specs, 34 operations** — OK.
+
+ ### وضعیت رگرسیون (آخرین اجرا)
+- `test_pipeline`: 33/33 سبز (A5+B3+C3+D4+E3+F7+P5 = ۳۰ کلاس، ۳۳ تست).
+- رگرسیون کامل روی **Python 3.13** (با PyYAML، هم‌شکل CI): **233 تست → OK، 0 skip**
+  (200 موجود + 28 pipeline قبلی + ۵ PF-P؛ CT-01..06 با ۳ spec سبز).
+- baseline قبل از شروع (Phase 0): 228 تست OK (log: `backend/baseline-2091.log`).
 - UI: کارت «ریلیز پیکره» (Build + releases + RAG badge) + کارت «ردیابی اقدامات»
   (audit log با فیلتر) + JS syntax OK (node).
 
-### باقی‌مانده
-- Pipeline runner + schedule (nightly hook) + UI pipeline dashboard (چند stage زنجیره‌ای).
-- deploy/pcm209_deploy.sh + اجرای واقعی روی s52 (host در دسترس نبود).
+ ### باقی‌مانده
+- UI pipeline dashboard (کارت stage‌های زنجیره‌ای + دکمه‌های Run/Pause/Resume) در
+  `dashboard/studio.html` — APIها آماده‌اند.
+- deploy/pcm209_deploy.sh + cron `pcm209_nightly.sh` روی s52 + اجرای واقعی
+  (host در زمان recon در دسترس نبود).
 - `گزارش-PCM-20.9-KNOWLEDGE-STUDIO-FACTORY.md` (24 بخش) + راهنمای اپراتور فارسی.
 
 ---
