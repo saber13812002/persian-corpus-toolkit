@@ -294,3 +294,67 @@ deploy/pcm2096_audit_host3.sh=b0402cbe9753da24162e64d8fc331339b588f3a3
 - شرط 1: اجرا‌ی واقعی دپلوی نیاز به مجوز صریح دارد (B1) — اسکریپت آماده است.
 - شرط 2: ES/RAG در production نیستند → Stage D(ES)/E/RAG در production BLOCKED گزارش می‌دهند (B2).
 - شرط 3: scheduler شبانه opt-in است (B3).
+
+---
+
+## §27. اجرای بازبینی مستقل (Verification Run — 2026-11-12)
+
+این بخش در یک نشست بازبینی مستقل و پس از commit گزارش (`f4cd01e`) اجرا شد تا اعداد و ادعاهای بخش‌های قبل با شواهد زنده تطبیق داده شوند. هیچ تغییری روی production انجام نشد (همه‌ی دسترسی‌ها فقط‌خواندنی).
+
+### 27.1 وضعیت Git در زمان بازبینی
+
+- شاخه: `pcm-20.9-pipeline-orchestration`؛ درخت کاری **تمیز**؛ `HEAD == origin/pcm-20.9-pipeline-orchestration == f4cd01ea2e1b0f7f5a4c1f3edb4a239fba60bb41`.
+- توجه: در §3 مقدار HEAD برابر `222a72d` ثبت شده بود؛ آن مقدار در زمان نوشتن گزارش درست بود و commit گزارش (`f4cd01e`) پس از آن HEAD را یک گام جلو برد. رفتار کد/داده تغییری نکرده است.
+
+### 27.2 رگرسیون کامل (بازاجرا)
+
+- `python -m unittest test_api … test_api_contract test_pipeline` → **Ran 243 tests … OK** (~164s، 0 skip، 0 fail).
+- `test_pipeline` به‌تنهایی → **Ran 43 tests … OK** (~88s).
+
+### 27.3 OpenAPI
+
+- `deploy/pcm19_openapi_check.py` → **OpenAPI check passed: 3 specs, 34 operations** (14 + 5 + 15).
+
+### 27.4 چک واقعی-UI (شواهد ذخیره‌شده)
+
+- `deploy/pcm2094_ui_check/results.json` (تاریخ `2026-11-11T15:50:53Z`): **۲۹ چک، ۲۹ pass، ۰ fail**؛ `page_errors = []`؛ `xhr_count = 137`؛ خطاهای console فقط 401/404/409ِ عمدیِ سناریوها (ورود/مسیر ناموجود/تعارض) هستند که خودِ چک‌ها آن‌ها را تأیید کرده‌اند.
+
+### 27.5 دروازه‌ی هویت دپلوی (۱۶ blob-SHA)
+
+- با اسکریپت `deploy/pcm2096_deploy.sh` (آرایه‌ی `EXPECT`) تطبیق داده شد: **۱۶ ورودی، ۰ mismatch** نسبت به `git rev-parse HEAD:<path>` روی HEAD فعلی (`f4cd01e`). یعنی دپلوی همچنان به همین commit قفل می‌شود.
+
+### 27.6 سینتکس اسکریپت‌ها
+
+- `bash -n` روی `deploy/pcm2096_deploy.sh`، `deploy/pcm2096_rollback.sh`، `deploy/pcm209_nightly.sh` → هر سه **OK**.
+
+### 27.7 همگام‌سازی مستندات
+
+- `AGENTS.md` و `readme.md` شامل `test_pipeline` در دستور رگرسیون و عدد **۲۴۳** هستند (بدون باقی‌مانده‌ی «۲۰۰/۲۳۳»).
+
+### 27.8 داشبورد (بازبینی ساختاری)
+
+- `dashboard/studio.html`: `dir=rtl` ✓؛ بخش «Knowledge Corpus Factory» ✓؛ هر شش کلید stage (`A_IMPORT … RELEASE`) ✓؛ `escHtml` ✓؛ کنترل‌های `run/from/pause/resume/retry` و `pipeline/status` و `pipeline/schedules` به API واقعی متصل‌اند ✓.
+
+### 27.9 ممیزی Production (بازتأیید فقط‌خواندنی، SSH)
+
+- میزبان: **AI-TOOLS** (`172.30.0.133`) قابل‌دسترسی؛ `nproc = 20`؛ uptime ≈ ۱۲ روز.
+- container `persian-corpus-toolkit-backend-1`: **Up 44 hours** (رشد طبیعی نسبت به ۲۳h گزارش‌شده).
+- `crontab -l` کاربر `saber`: **۰ خط** (scheduler فعال نیست).
+- Elasticsearch `127.0.0.1:9200`: **HTTP 000 / در دسترس نیست** (ES روی host نیست → Stage D/E در production BLOCKED؛ مطابق §9).
+- SQLite `backend/thesaurus.db`: `PRAGMA quick_check` = **ok**؛ شمارنده‌ها: **۳ کالکشن / ۴۴ سند / ۴۶ job** — دقیقاً مطابق §17.
+
+### 27.10 جمع‌بندی بازبینی
+
+همه‌ی ادعاهای کلیدی گزارش (۲۴۳ تست، ۴۳ تست پایپ‌لاین، ۳spec/۳۴op، ۲۹/۲۹ UI، ۱۶/۱۶ blob-gate، سینتکس اسکریپت‌ها، همگام‌سازی مستندات، و اعداد production) **با شواهد زنده تأیید شدند**. هیچ مورد تعداد ساختگی یا تست skip‌شده یافت نشد. تنها اختلاف، مقدار HEAD در §3 است که صرفاً ناشی از commit شدن خودِ گزارش است.
+
+**نتیجه‌ی بازبینی مستقل: تأیید — READY WITH CONDITIONS (بدون تغییر).**
+
+| بخش | وضعیت | شواهد | اقدام باقی‌مانده |
+|---|---|---|---|
+| §27 Git بازبینی | ✅ | HEAD=f4cd01e؛ درخت تمیز؛ sync با origin | — |
+| §27 رگرسیون | ✅ | 243/243 OK؛ 43/43 pipeline OK | — |
+| §27 OpenAPI | ✅ | 3 specs / 34 ops | — |
+| §27 UI واقعی | ✅ | results.json: 29/29 pass، 0 page error | — |
+| §27 blob-gate | ✅ | 16/16 مطابق HEAD | — |
+| §27 سینتکس | ✅ | 3 اسکریپت bash -n OK | — |
+| §27 production | ✅ | AI-TOOLS؛ integrity ok؛ 3/44/46؛ ES غایب؛ cron خالی | اجرای دپلوی = مجوز صریح (B1) |
