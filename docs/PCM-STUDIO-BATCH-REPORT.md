@@ -89,7 +89,7 @@ cd backend && python -m unittest test_api test_projects test_dashboard \
 | `574b990` | feat(knowledge): approve-all documents endpoint |
 | `a724d00` | docs(openapi): declare process-all / pause / approve-all operations |
 | `3caa5f7` | feat(studio-ui): toolbar buttons پردازش همه / توقف پردازش / تأیید همه |
-| `eceb2fb` | docs: این گزارش + خط roadmap در AGENTS.md |
+| `2c7c283` | docs: این گزارش + خط roadmap در AGENTS.md |
 
 ## ۷. git status
 
