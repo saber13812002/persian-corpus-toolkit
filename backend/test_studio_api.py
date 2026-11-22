@@ -370,5 +370,37 @@ class TestS04_DocRegistryIds(Base):
                             for e in w["editions"]), w["editions"])
 
 
+class TestS11_StatusCounts(Base):
+    """S-11: list documents carries server-side status_counts (page-independent)."""
+
+    def test_s11_status_counts_match_db(self):
+        self.login()
+        coll = self.make_collection(slug="s11")
+        self.upload(coll["id"], self._make_book("good.docx"))
+
+        j = self.client.get(
+            f"/api/knowledge/collections/{coll['id']}/documents"
+        ).get_json()
+        self.assertIn("status_counts", j)
+        self.assertEqual(j["status_counts"].get("uploaded"), 1)
+
+        conn = self._db()
+        try:
+            rows = conn.execute(
+                "SELECT status, COUNT(*) n FROM knowledge_collection_documents"
+                " WHERE collection_id=? GROUP BY status",
+                (coll["collection_id"],)).fetchall()
+            expected = {r["status"]: r["n"] for r in rows}
+        finally:
+            conn.close()
+        self.assertEqual(j["status_counts"], expected)
+
+        # page independence: identical map at per_page=1
+        j2 = self.client.get(
+            f"/api/knowledge/collections/{coll['id']}/documents?per_page=1"
+        ).get_json()
+        self.assertEqual(j2["status_counts"], expected)
+
+
 if __name__ == "__main__":
     unittest.main()

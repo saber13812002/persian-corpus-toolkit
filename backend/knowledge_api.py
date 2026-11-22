@@ -3391,6 +3391,11 @@ def register_knowledge_routes(app, get_db):
         total = db.execute(
             f"SELECT COUNT(*) AS n FROM knowledge_collection_documents {where_sql}",
             params).fetchone()["n"]
+        counts = db.execute(
+            "SELECT status, COUNT(*) AS n FROM knowledge_collection_documents"
+            " WHERE collection_id = ? GROUP BY status",
+            (row["collection_id"],)).fetchall()
+        status_counts = {c["status"]: c["n"] for c in counts}
         rows = db.execute(
             f"""SELECT id, document_id, file_name, relative_path, sha256,
                        file_size, file_id, work_id, edition_id, volume_id,
@@ -3402,7 +3407,8 @@ def register_knowledge_routes(app, get_db):
             (*params, per_page, (page - 1) * per_page)).fetchall()
         return jsonify({"documents": [dict(r) for r in rows],
                         "total": total, "page": page, "per_page": per_page,
-                        "total_pages": (total + per_page - 1) // per_page})
+                        "total_pages": (total + per_page - 1) // per_page,
+                        "status_counts": status_counts})
 
     @app.route("/api/knowledge/documents/<doc_id>", methods=["GET"])
     @require_auth
