@@ -1035,6 +1035,11 @@ def queue_scope(batch_id):
     return f"batch:{batch_id}" if batch_id else None
 
 
+def collection_scope(collection_id):
+    """PCM-STUDIO-BATCH — pause scope for a whole-collection job."""
+    return f"collection:{collection_id}"
+
+
 def queue_is_paused(conn, scope):
     """True when the given scope exists and is paused."""
     if not scope:
@@ -2033,6 +2038,63 @@ def _job_kind_process_batch(conn, job_id):
     conn.commit()
 
 
+def _job_kind_process_collection(conn, job_id):
+    """PCM-STUDIO-BATCH — whole-collection worker (mirror of the batch worker).
+
+    Per document: ensure its queue row -> mark running (attempts+1) -> run the
+    factory with the on_stage lifecycle -> terminal state. Honours the
+    collection pause scope: when paused, the job stops cleanly (remaining docs
+    stay pending) and marks itself interrupted (retryable — re-pressing
+    process-all resumes, because the worker re-evaluates the doc list).
+    """
+    r = conn.execute("SELECT job_key, collection_id FROM knowledge_jobs "
+                     "WHERE job_id=?", (job_id,)).fetchone()
+    coll = r["collection_id"]
+    scope = collection_scope(coll)
+
+    _queue_ensure_rows(conn, coll, None)
+    docs = conn.execute(
+        """SELECT document_id, file_name, sha256 FROM
+             knowledge_collection_documents
+            WHERE collection_id = ? AND status IN ('uploaded','failed')
+            ORDER BY id""", (coll,)).fetchall()
+    total = len(docs)
+    done = 0
+    paused_now = _now()
+    for d in docs:
+        if queue_is_paused(conn, scope):
+            # clean stop: remaining docs stay pending in the queue
+            _job_progress(conn, job_id, done, total, "paused")
+            conn.execute(
+                """UPDATE knowledge_jobs
+                     SET status='interrupted', stage='paused',
+                          error=COALESCE(error,'') || ' [paused by user]',
+                          updated_at=? WHERE job_id=?""",
+                (paused_now, job_id))
+            conn.commit()
+            return
+        file_key = "f-" + d["sha256"][:8]
+        t0 = time.time()
+        on_stage = _queue_start(conn, coll, file_key, t0)
+        try:
+            _process_document(conn, coll, d["document_id"], on_stage=on_stage)
+        except Exception as e:  # noqa: BLE001 — keep going, record per doc
+            err = f"{type(e).__name__}: {e}"
+            conn.execute(
+                "UPDATE knowledge_collection_documents SET status='failed', "
+                "error=?, updated_at=? WHERE document_id=?",
+                (err, _now(), d["document_id"]))
+            conn.commit()
+            # safety net: if the failure happened before the factory ran the
+            # queue row is still 'running' — finalize it (no dangling rows).
+            q = _queue_row(conn, coll, file_key)
+            if q and q["status"] == "running":
+                _queue_finish(conn, coll, file_key, "failed", error=err)
+        done += 1
+        _job_progress(conn, job_id, done, total,
+                      f"document {d['document_id']}")
+
+
 def _job_kind_process_batch_retry(conn, job_id):
     """PCM-20.9 Stage B — retry only the FAILED files of a batch.
 
@@ -3017,6 +3079,7 @@ def _release_readme(coll, build, manifest, dumps_entries):
 
 _JOB_KINDS["process_document"] = _job_kind_process_document
 _JOB_KINDS["process_batch"] = _job_kind_process_batch
+_JOB_KINDS["process_collection"] = _job_kind_process_collection
 _JOB_KINDS["process_batch_retry"] = _job_kind_process_batch_retry
 _JOB_KINDS["corpus_build"] = _job_kind_corpus_build
 _JOB_KINDS["search_acceptance"] = _job_kind_search_acceptance
@@ -3619,6 +3682,34 @@ def register_knowledge_routes(app, get_db):
         _refresh_book_count(db, d["collection_id"])
         db.commit()
         return jsonify({"ok": True, "document": dict(_doc_row(db, doc_id))})
+
+    @app.route("/api/knowledge/collections/<int:coll_id>/documents/process-all",
+               methods=["POST"])
+    @require_auth
+    def knowledge_process_all_documents(coll_id):
+        """PCM-STUDIO-BATCH: one idempotent job over ALL uploaded/failed docs."""
+        db = get_db()
+        ensure_knowledge_schema(db)
+        _recover_interrupted(db)
+        row = _collection_row(db, coll_id)
+        if not row:
+            return jsonify({"ok": False, "message": "کالکشن پیدا نشد"}), 404
+        n = db.execute(
+            "SELECT COUNT(*) AS n FROM knowledge_collection_documents"
+            " WHERE collection_id=? AND status IN ('uploaded','failed')",
+            (row["collection_id"],)).fetchone()["n"]
+        if n == 0:
+            return jsonify({"ok": False, "code": "no_files_to_process",
+                            "message": "هیچ سند پردازش‌نشده‌ای وجود ندارد"}), 409
+        # re-pressing the button after a pause = resume
+        queue_set_paused(db, collection_scope(row["collection_id"]), False)
+        job, created = _submit_job(
+            db, f"process_collection:{row['collection_id']}",
+            "process_collection", row["collection_id"], None, total=n,
+            idempotency_key=f"collection:{row['collection_id']}",
+            force_retry=True)
+        return jsonify({"ok": True, "job": job, "files_queued": n,
+                        "resubmitted": not created}), (202 if created else 200)
 
     # ── Import batches (folder-based registration, PCM-14B §2) ─────────
 

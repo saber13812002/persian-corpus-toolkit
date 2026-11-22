@@ -402,5 +402,92 @@ class TestS11_StatusCounts(Base):
         self.assertEqual(j2["status_counts"], expected)
 
 
+class TestS05_ProcessAllValidation(Base):
+    """S-05: process-all auth / 404 / 409."""
+
+    def test_s05a_unauthenticated_401(self):
+        r = self.client.post(
+            "/api/knowledge/collections/1/documents/process-all")
+        self.assertEqual(r.status_code, 401)
+
+    def test_s05b_unknown_collection_404(self):
+        self.login()
+        r = self.client.post(
+            "/api/knowledge/collections/999999/documents/process-all")
+        self.assertEqual(r.status_code, 404)
+        self.assertFalse(r.get_json()["ok"])
+
+    def test_s05c_no_files_409(self):
+        self.login()
+        coll = self.make_collection(slug="s05c")
+        r = self.client.post(
+            f"/api/knowledge/collections/{coll['id']}/documents/process-all")
+        self.assertEqual(r.status_code, 409, r.get_data(as_text=True))
+        self.assertEqual(r.get_json()["code"], "no_files_to_process")
+
+
+class TestS06_ProcessAllHappy(Base):
+    """S-06: one job over all uploaded/failed docs, queue rows terminal."""
+
+    def test_s06_two_books_processed(self):
+        self.login()
+        coll = self.make_collection(slug="s06")
+        good = self._make_book("one.docx")
+        from factory._smoke_fixtures import make_broken_docx
+        tmp = tempfile.mkdtemp(prefix="pct-studio-corrupt-")
+        self.addCleanup(shutil.rmtree, tmp, ignore_errors=True)
+        corrupt = make_broken_docx(os.path.join(tmp, "two.docx"))
+        self.upload(coll["id"], good)
+        self.upload(coll["id"], corrupt)
+        r = self.client.post(
+            f"/api/knowledge/collections/{coll['id']}/documents/process-all")
+        self.assertEqual(r.status_code, 202, r.get_data(as_text=True))
+        j = r.get_json()
+        self.assertTrue(j["ok"])
+        self.assertEqual(j["files_queued"], 2)
+        self.assertFalse(j["resubmitted"])
+        row = self.wait_job(j["job"]["job_id"])
+        self.assertEqual(row["status"], "succeeded", row)
+        self.assertEqual(row["total"], 2)
+        self.assertEqual(row["progress"], 2)
+        docs = self._docs(coll["id"])
+        self.assertEqual(len(docs), 2)
+        statuses = sorted(d["status"] for d in docs)
+        self.assertEqual(statuses, ["failed", "parsed"])
+        conn = self._db()
+        try:
+            n_open = conn.execute(
+                "SELECT COUNT(*) n FROM knowledge_file_queue"
+                " WHERE collection_id=? AND status IN ('pending','running')",
+                (coll["collection_id"],)).fetchone()["n"]
+        finally:
+            conn.close()
+        self.assertEqual(n_open, 0)
+
+
+class TestS07_ProcessAllIdempotency(Base):
+    """S-07: second POST while running -> same job, no second worker."""
+
+    def test_s07_second_post_no_second_worker(self):
+        self.login()
+        coll = self.make_collection(slug="s07")
+        self.upload(coll["id"], self._make_book("one.docx"))
+        url = f"/api/knowledge/collections/{coll['id']}/documents/process-all"
+        r1 = self.client.post(url)
+        self.assertEqual(r1.status_code, 202, r1.get_data(as_text=True))
+        r2 = self.client.post(url)
+        self.assertEqual(r2.status_code, 200, r2.get_data(as_text=True))
+        j2 = r2.get_json()
+        self.assertTrue(j2["resubmitted"])
+        self.assertEqual(j2["job"]["job_id"],
+                         r1.get_json()["job"]["job_id"])
+        row = self.wait_job(j2["job"]["job_id"])
+        self.assertEqual(row["status"], "succeeded", row)
+        jobs = self.client.get("/api/knowledge/jobs").get_json()["jobs"]
+        mine = [x for x in jobs if x["kind"] == "process_collection"
+                and x["collection_id"] == coll["collection_id"]]
+        self.assertEqual(len(mine), 1)
+
+
 if __name__ == "__main__":
     unittest.main()
