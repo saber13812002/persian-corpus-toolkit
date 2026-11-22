@@ -3711,6 +3711,25 @@ def register_knowledge_routes(app, get_db):
         return jsonify({"ok": True, "job": job, "files_queued": n,
                         "resubmitted": not created}), (202 if created else 200)
 
+    @app.route("/api/knowledge/collections/<int:coll_id>/documents/pause",
+               methods=["POST"])
+    @require_auth
+    def knowledge_pause_all_documents(coll_id):
+        """PCM-STUDIO-BATCH: pause the whole-collection processing job."""
+        db = get_db()
+        ensure_knowledge_schema(db)
+        _recover_interrupted(db)
+        row = _collection_row(db, coll_id)
+        if not row:
+            return jsonify({"ok": False, "message": "کالکشن پیدا نشد"}), 404
+        scope = collection_scope(row["collection_id"])
+        queue_set_paused(db, scope, True)
+        ctrl = db.execute(
+            "SELECT paused, updated_at FROM knowledge_queue_control"
+            " WHERE scope=?", (scope,)).fetchone()
+        return jsonify({"ok": True, "paused": True, "scope": scope,
+                        "queue_control": dict(ctrl)})
+
     # ── Import batches (folder-based registration, PCM-14B §2) ─────────
 
     @app.route("/api/knowledge/import/batches", methods=["POST"])

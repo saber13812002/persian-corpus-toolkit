@@ -27,6 +27,7 @@ import sqlite3
 import tempfile
 import time
 import unittest
+from unittest import mock
 
 import pct_test_support  # noqa: F401  (must precede `import server`)
 
@@ -487,6 +488,64 @@ class TestS07_ProcessAllIdempotency(Base):
         mine = [x for x in jobs if x["kind"] == "process_collection"
                 and x["collection_id"] == coll["collection_id"]]
         self.assertEqual(len(mine), 1)
+
+
+class TestS08_PauseResume(Base):
+    """S-08: pause endpoint sets the scope; paused run stops clean; resume finishes."""
+
+    def test_s08_pause_stops_cleanly_and_resume_finishes(self):
+        self.login()
+        coll = self.make_collection(slug="s08")
+        good = self._make_book("one.docx")
+        from factory._smoke_fixtures import make_broken_docx
+        tmp = tempfile.mkdtemp(prefix="pct-studio-corrupt-")
+        self.addCleanup(shutil.rmtree, tmp, ignore_errors=True)
+        corrupt = make_broken_docx(os.path.join(tmp, "two.docx"))
+        self.upload(coll["id"], good)
+        self.upload(coll["id"], corrupt)
+        url = f"/api/knowledge/collections/{coll['id']}/documents"
+
+        r = self.client.post(f"{url}/pause")
+        self.assertEqual(r.status_code, 200, r.get_data(as_text=True))
+        j = r.get_json()
+        self.assertTrue(j["paused"])
+        scope = f"collection:{coll['collection_id']}"
+        self.assertEqual(j["scope"], scope)
+        conn = self._db()
+        try:
+            row = conn.execute(
+                "SELECT paused FROM knowledge_queue_control WHERE scope=?",
+                (scope,)).fetchone()
+        finally:
+            conn.close()
+        self.assertTrue(row and row["paused"])
+
+        # paused run: the worker stops before the first file (deterministic)
+        with mock.patch("knowledge_api.queue_is_paused",
+                        return_value=True):
+            r = self.client.post(f"{url}/process-all")
+            self.assertEqual(r.status_code, 202, r.get_data(as_text=True))
+            row = self.wait_job(r.get_json()["job"]["job_id"])
+        self.assertEqual(row["status"], "interrupted", row)
+        self.assertIn("paused", row["error"] or "")
+        for d in self._docs(coll["id"]):
+            self.assertEqual(d["status"], "uploaded")
+
+        # resume: same endpoint clears the flag and re-executes the job
+        r2 = self.client.post(f"{url}/process-all")
+        self.assertEqual(r2.status_code, 202, r2.get_data(as_text=True))
+        row2 = self.wait_job(r2.get_json()["job"]["job_id"])
+        self.assertEqual(row2["status"], "succeeded", row2)
+        statuses = sorted(d["status"] for d in self._docs(coll["id"]))
+        self.assertEqual(statuses, ["failed", "parsed"])
+        conn = self._db()
+        try:
+            p = conn.execute(
+                "SELECT paused FROM knowledge_queue_control WHERE scope=?",
+                (scope,)).fetchone()
+        finally:
+            conn.close()
+        self.assertFalse(p["paused"])
 
 
 if __name__ == "__main__":
