@@ -340,6 +340,18 @@
             <svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2Z"/></svg>
             واردسازی چندگانه (فهرست فایل‌ها)
           </button>
+          <button type="button" class="btn" id="procAllBtn" disabled>
+            <svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="m5 3 14 9-14 9V3Z"/></svg>
+            <span id="procAllLabel">پردازش همه (۰)</span>
+          </button>
+          <button type="button" class="btn" id="pauseAllBtn" disabled>
+            <svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M8 5v14M16 5v14"/></svg>
+            توقف پردازش
+          </button>
+          <button type="button" class="btn" id="apprAllBtn" disabled>
+            <svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="m4 12 5 5L20 6"/></svg>
+            <span id="apprAllLabel">تأیید همه (۰)</span>
+          </button>
           <span class="spacer"></span>
           <span class="badge dim" id="docsTotal">۰ سند</span>
         </div>
@@ -1382,6 +1394,7 @@ async function renderDocs() {
     if (!j) return;
     state.docs = j.documents;
     state.docsTotal = j.total || 0;
+    state.docStatusCounts = j.status_counts || {};
     renderStageStrip();
     $('docsTotal').textContent = faNum(j.total) + ' سند';
     if (!state.docs.length) {
@@ -1405,6 +1418,7 @@ async function renderDocs() {
     body.querySelectorAll('tr.clickable').forEach((tr) => {
       tr.addEventListener('click', () => openDocument(tr.getAttribute('data-docid')));
     });
+    updateDocsToolbar();
   } catch (e) {
     body.innerHTML = '<div class="error-box" style="display:block">' + escHtml(e.message) + '</div>';
   }
@@ -1597,8 +1611,15 @@ function refreshJobs() {
     const active = state.jobs.filter((x) => ['pending', 'running', 'validating', 'parsing'].includes(x.status));
     const el = $('jobsPane');
     if (el) renderJobsPane(active);
+    state.collJobActive = active.some((x) =>
+      x.kind === 'process_collection' && x.collection_id === state.activeId);
+    updateDocsToolbar();
     if (active.length) {
-      if (!state._jobTimer) state._jobTimer = setTimeout(() => { state._jobTimer = null; refreshJobs(); }, 2500);
+      if (!state._jobTimer) state._jobTimer = setTimeout(() => {
+        state._jobTimer = null;
+        refreshJobs();
+        if (state.collJobActive) renderDocs();
+      }, 2500);
     }
   }).catch(() => {});
 }
@@ -1631,6 +1652,42 @@ async function triggerApprove(docId) {
     await fetchAPI('/api/knowledge/documents/' + docId + '/approve', { method: 'POST' });
     toast('سند تأیید شد');
     await Promise.all([renderDocs(), renderDetail()]);
+  } catch (e) { toast(e.message, 'err'); }
+}
+function updateDocsToolbar() {
+  const sc = state.docStatusCounts || {};
+  const np = (sc.uploaded || 0) + (sc.failed || 0);
+  const na = (sc.parsed || 0) + (sc.needs_review || 0);
+  const pb = $('procAllBtn'), ab = $('apprAllBtn'), pab = $('pauseAllBtn');
+  if (!pb) return;
+  pb.disabled = np <= 0;
+  $('procAllLabel').textContent = 'پردازش همه (' + faNum(np) + ')';
+  ab.disabled = na <= 0;
+  $('apprAllLabel').textContent = 'تأیید همه (' + faNum(na) + ')';
+  pab.disabled = !state.collJobActive;
+}
+async function triggerProcessAll() {
+  try {
+    const j = await fetchAPI('/api/knowledge/collections/' + state.activeId +
+      '/documents/process-all', { method: 'POST' });
+    toast('پردازش ' + faNum(j.files_queued) + ' سند آغاز شد');
+    refreshJobs();
+  } catch (e) { toast(e.message, 'err'); }
+}
+async function triggerPauseAll() {
+  try {
+    await fetchAPI('/api/knowledge/collections/' + state.activeId +
+      '/documents/pause', { method: 'POST' });
+    toast('توقف پس از پایان سند جاری ثبت شد');
+    refreshJobs();
+  } catch (e) { toast(e.message, 'err'); }
+}
+async function triggerApproveAll() {
+  try {
+    const j = await fetchAPI('/api/knowledge/collections/' + state.activeId +
+      '/documents/approve-all', { method: 'POST' });
+    toast(faNum(j.approved) + ' سند تأیید شد');
+    await renderDocs();
   } catch (e) { toast(e.message, 'err'); }
 }
 async function triggerDetach(docId) {
@@ -2172,6 +2229,9 @@ $('editReset').addEventListener('click', () => { if (state.collection) renderDet
 /* ── PCM-14B listeners ── */
 $('docFileInput').addEventListener('change', onDocFile);
 $('importBtn').addEventListener('click', openImportModal);
+$('procAllBtn').addEventListener('click', () => triggerProcessAll());
+$('pauseAllBtn').addEventListener('click', () => triggerPauseAll());
+$('apprAllBtn').addEventListener('click', () => triggerApproveAll());
 $('importClose').addEventListener('click', closeImportModal);
 $('importCancel').addEventListener('click', closeImportModal);
 $('importModal').addEventListener('click', (e) => { if (e.target === $('importModal')) closeImportModal(); });
