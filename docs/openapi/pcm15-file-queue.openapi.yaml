@@ -286,6 +286,98 @@ paths:
                       - { type: "null" }
         "401": { $ref: "#/components/responses/Unauthorized" }
         "404": { $ref: "#/components/responses/NotFound" }
+  /api/knowledge/collections/{coll_id}/documents/process-all:
+    post:
+      tags: [queue]
+      operationId: processAllDocuments
+      summary: Process ALL uploaded/failed documents of a collection (one idempotent job)
+      parameters:
+        - { name: coll_id, in: path, required: true, schema: { type: integer } }
+      responses:
+        "200":
+          description: Job already pending/running — same job returned (resubmitted)
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  ok: { type: boolean, example: true }
+                  job: { type: object }
+                  files_queued: { type: integer, example: 2 }
+                  resubmitted: { type: boolean, example: true }
+        "202":
+          description: Job created and worker started
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  ok: { type: boolean, example: true }
+                  job: { type: object }
+                  files_queued: { type: integer, example: 2 }
+                  resubmitted: { type: boolean, example: false }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409":
+          description: Nothing to process
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  ok: { type: boolean, example: false }
+                  code: { type: string, example: no_files_to_process }
+                  message: { type: string }
+  /api/knowledge/collections/{coll_id}/documents/pause:
+    post:
+      tags: [queue]
+      operationId: pauseCollectionDocuments
+      summary: Pause the whole-collection processing job (clean stop at next file boundary)
+      parameters:
+        - { name: coll_id, in: path, required: true, schema: { type: integer } }
+      responses:
+        "200":
+          description: Pause flag set (scope = collection:<coll_id>)
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  ok: { type: boolean, example: true }
+                  paused: { type: boolean, example: true }
+                  scope: { type: string, example: "collection:c-01234567" }
+                  queue_control: { $ref: "#/components/schemas/QueueControl" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+  /api/knowledge/collections/{coll_id}/documents/approve-all:
+    post:
+      tags: [queue]
+      operationId: approveAllDocuments
+      summary: Atomically approve every parsed/needs_review document (audit-logged)
+      parameters:
+        - { name: coll_id, in: path, required: true, schema: { type: integer } }
+      responses:
+        "200":
+          description: All candidate documents approved
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  ok: { type: boolean, example: true }
+                  approved: { type: integer, example: 5 }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409":
+          description: No parsed/needs_review documents to approve
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  ok: { type: boolean, example: false }
+                  code: { type: string, example: no_docs_to_approve }
+                  message: { type: string }
 components:
   securitySchemes:
     cookieAuth:
