@@ -1,0 +1,79 @@
+t+1m pending=1610 total=418
+t+2m pending=1587 total=442
+t+3m pending=1564 total=464
+t+4m pending=1541 total=487
+t+5m pending=1517 total=511
+t+6m pending=1493 total=535
+t+7m pending=1471 total=557
+t+8m pending=1447 total=581
+t+9m pending=1425 total=603
+t+10m pending=1403 total=625
+t+11m pending=1380 total=648
+t+12m pending=1358 total=671
+t+13m pending=1334 total=694
+t+14m pending=1312 total=717
+t+15m pending=1288 total=740
+t+16m pending=1266 total=763
+t+17m pending=1243 total=785
+t+18m pending=1220 total=808
+t+19m pending=1197 total=831
+t+20m pending=1174 total=854
+t+21m pending=1150 total=878
+t+22m pending=1127 total=901
+t+23m pending=1104 total=924
+t+24m pending=1082 total=946
+t+25m pending=1059 total=969
+t+26m pending=1037 total=991
+t+27m pending=1013 total=1015
+t+28m pending=990 total=1038
+t+29m pending=967 total=1062
+t+30m pending=943 total=1085
+t+31m pending=920 total=1108
+t+32m pending=897 total=1131
+t+33m pending=874 total=1155
+t+34m pending=850 total=1178
+t+35m pending=827 total=1201
+t+36m pending=804 total=1224
+t+37m pending=781 total=1247
+t+38m pending=758 total=1271
+t+39m pending=734 total=1294
+t+40m pending=711 total=1317
+t+41m pending=688 total=1340
+t+42m pending=670 total=1358
+t+43m pending=650 total=1378
+t+44m pending=628 total=1400
+t+45m pending=605 total=1423
+t+46m pending=583 total=1445
+t+47m pending=560 total=1468
+t+48m pending=538 total=1490
+t+49m pending=514 total=1514
+t+50m pending=492 total=1536
+t+51m pending=470 total=1559
+t+52m pending=447 total=1581
+t+53m pending=424 total=1604
+t+54m pending=401 total=1627
+t+55m pending=379 total=1649
+t+56m pending=357 total=1671
+t+57m pending=335 total=1693
+t+58m pending=312 total=1716
+t+59m pending=290 total=1739
+t+60m pending=266 total=1762
+t+61m pending=243 total=1785
+t+62m pending=221 total=1807
+t+63m pending=199 total=1829
+t+64m pending=177 total=1851
+t+65m pending=154 total=1874
+t+66m pending=131 total=1897
+t+67m pending=108 total=1920
+t+68m pending=85 total=1943
+t+69m pending=62 total=1966
+t+70m pending=40 total=1989
+---final---
+  [1834/1877] Speech #2497... inserted - خطبه&zwnj;های نماز جمعه&zwnj;ی تهران (23227 chars)
+  [1835/1877] Speech #2496... inserted - بیانات در دیدار اعضای شورای عالی مجمع جهانی اهل&zwnj;بیت(ع) (22404 chars)
+  [1836/1877] Speech #2492... inserted - بیانات در دیدار اعضاى شوراى عالى مجمع التّقریب بین المذاهب ا (9112 chars)
+  [1837/1877] Speech #2491... inserted - بیانات در آغاز درس خارج فقه&zwnj; (349 chars)
+  [1838/1877] Speech #2490... ALIVE
+---status---
+{"complete":false,"last_crawled_at":"2026-11-22 03:55:11","pending":39,"pending_by_year":{"1370":37,"1383":2},"queued":2028,"total":1989}
+

@@ -594,4 +594,45 @@ been restarted, no prod file changed, prod `khamenei_speeches` = 151
 | `d714dad` | M4 — crawler E2E (36/0) + runner + evidence |
 | `c14e348` | M5 — extension acceptance + round-trip probe + evidence |
 | `569094b` | M6 — human UI (machine-verified) + HUMAN-TEST-GUIDE + screenshot |
-| (this commit) | M7 gate + M8 final reports |
+| `249a98e` | M7 gate + M8 final reports |
+| (this commit) | M9 — queue drain (prod 1877 + staging 70) + evidence |
+
+## 9. M9 — Queue drain (owner request, 2026-11-22)
+
+Owner ran the human test (extension year walk back to ~1376, ~1800 items) and asked: crawl everything so the queues empty. The walk seeded the **production** queue (the owner's browser was running the prod extension build); staging was untouched (verified: staging pending stayed at 70).
+
+### 9.1 Pre-drain state (real, measured)
+
+Env | pending | total | notes |
+|---|---|---|---|
+PROD `corpus.ai.ismc.ir` (:5055) | **1877** (1370–1402, 31 years; no 1389/1401) | 151 | last crawl 2026-08-15; queued=2028 = expected final |
+STAGING (`pct-staging.ai.ismc.ir`, :5056) | 70 (all 1398) | 245 | unchanged by the owner's walk |
+
+Safety first (AGENTS §2.1): online backup **before** any write —
+`sqlite3 thesaurus.db ".backup /home/saber/backups/thesaurus-pre-drain-20261122-0230.db"` + `PRAGMA integrity_check` = `ok` (1,667,608,576 B).
+
+### 9.2 Drain run (real)
+
+Tool: the proven M4 crawler `corpus/scrape_khamenei.py` (git blob `d12b76d6`, scp'd to s52 `/tmp/pcm-ext07-m9-scrape_khamenei.py`, sha256-verified `1cef20bb…` — the prod dir's own copy is the OLD pre-EXT-06 file, so it was run from `/tmp`, prod dir untouched). Unfiltered mode → `fetch_pending_ids` → crawled exactly the pending queue (no discovery, no hijack), `--max 5000 --delay 2`, `setsid` background, log `/tmp/pcm-ext07-m9-prod-drain.log` (pulled to `evidence/pcm-ext07-m9-prod-drain.log`, 262,628 B; watchdog `evidence/pcm-ext07-m9-watch.log`).
+
+- Started 2026-11-22 02:31 UTC, finished 03:56:54 UTC (~85 min, ~22 pages/min — page fetch dominates the 2 s delay).
+- Final line: `✅ Done! Results: {"inserted": 1877, "updated": 0, "skipped": 0, "errors": 0}`
+- Zero `error`/`fail` lines in the log (grep verified).
+
+### 9.3 Post-drain verification (real)
+
+Check | Prod | Staging |
+|---|---|---|
+crawl-status | `pending:0, total:2028, complete:true` | `pending:0, total:315, complete:true` |
+with_date | 2028/2028 (without_date=0) | 315/315 |
+duplicate `speech_id` rows | 0 | 0 |
+`PRAGMA integrity_check` | ok | ok |
+total_chars | 21,420,676 | 1,412,651 |
+by_year | 1370:131 … 1404:39 (33 years; 1389 has no speeches — matches source) | 1398:73, 1400:35, 1401:43, 1402:56, 1403:69, 1404:39 |
+dedup re-check | `--scrape 1138` → `status: skipped` (date 1383/03/22) | staging drain: 70/70 inserted, 0 errors |
+
+Prod went 151 → **2028** speeches (exactly `queued`=2028); staging 245 → 315.
+
+### 9.4 Verdict
+
+**M9 PASS** — both queues empty (pending=0 in both envs), all inserted rows dated, zero duplicates, integrity ok, rollback available (`thesaurus-pre-drain-20261122-0230.db` + pre-image tag from §7.4 if ever needed). The M7 **code** deploy gate is unaffected: this was owner-approved data ingestion only (no code, image, or container change on prod).
