@@ -3730,6 +3730,35 @@ def register_knowledge_routes(app, get_db):
         return jsonify({"ok": True, "paused": True, "scope": scope,
                         "queue_control": dict(ctrl)})
 
+    @app.route("/api/knowledge/collections/<int:coll_id>/documents/approve-all",
+               methods=["POST"])
+    @require_auth
+    def knowledge_approve_all_documents(coll_id):
+        """PCM-STUDIO-BATCH: atomically approve every parsed/needs_review doc."""
+        db = get_db()
+        ensure_knowledge_schema(db)
+        row = _collection_row(db, coll_id)
+        if not row:
+            return jsonify({"ok": False, "message": "کالکشن پیدا نشد"}), 404
+        n = db.execute(
+            "SELECT COUNT(*) AS n FROM knowledge_collection_documents"
+            " WHERE collection_id=? AND status IN ('parsed','needs_review')",
+            (row["collection_id"],)).fetchone()["n"]
+        if n == 0:
+            return jsonify({"ok": False, "code": "no_docs_to_approve",
+                            "message": "هیچ سند parsed/needs_review "
+                                       "برای تأیید وجود ندارد"}), 409
+        db.execute(
+            "UPDATE knowledge_collection_documents"
+            " SET status='approved', updated_at=?"
+            " WHERE collection_id=? AND status IN ('parsed','needs_review')",
+            (_now(), row["collection_id"]))
+        _refresh_book_count(db, row["collection_id"])
+        _audit_log(db, row["collection_id"], "documents", "approved_all",
+                   "ok", {"count": n})
+        db.commit()
+        return jsonify({"ok": True, "approved": n})
+
     # ── Import batches (folder-based registration, PCM-14B §2) ─────────
 
     @app.route("/api/knowledge/import/batches", methods=["POST"])

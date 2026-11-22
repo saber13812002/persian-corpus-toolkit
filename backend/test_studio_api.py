@@ -21,6 +21,7 @@ Follows the PCM-12.3 rule: import pct_test_support FIRST, then server.
 """
 import hashlib
 import io
+import json
 import os
 import shutil
 import sqlite3
@@ -546,6 +547,70 @@ class TestS08_PauseResume(Base):
         finally:
             conn.close()
         self.assertFalse(p["paused"])
+
+
+class TestS09_ApproveAllValidation(Base):
+    """S-09: approve-all auth / 404 / 409."""
+
+    def test_s09a_unauthenticated_401(self):
+        r = self.client.post(
+            "/api/knowledge/collections/1/documents/approve-all")
+        self.assertEqual(r.status_code, 401)
+
+    def test_s09b_unknown_collection_404(self):
+        self.login()
+        r = self.client.post(
+            "/api/knowledge/collections/999999/documents/approve-all")
+        self.assertEqual(r.status_code, 404)
+        self.assertFalse(r.get_json()["ok"])
+
+    def test_s09c_no_candidates_409(self):
+        self.login()
+        coll = self.make_collection(slug="s09c")
+        r = self.client.post(
+            f"/api/knowledge/collections/{coll['id']}/documents/approve-all")
+        self.assertEqual(r.status_code, 409, r.get_data(as_text=True))
+        self.assertEqual(r.get_json()["code"], "no_docs_to_approve")
+
+
+class TestS10_ApproveAllHappy(Base):
+    """S-10: only parsed/needs_review flip; uploaded untouched; one audit row."""
+
+    def test_s10_approves_only_parsed_and_needs_review(self):
+        self.login()
+        coll = self.make_collection(slug="s10")
+        self.upload(coll["id"], self._make_book("one.docx"))
+        r = self.client.post(
+            f"/api/knowledge/collections/{coll['id']}/documents/process-all")
+        self.assertEqual(r.status_code, 202, r.get_data(as_text=True))
+        self.wait_job(r.get_json()["job"]["job_id"])
+        # second doc stays 'uploaded' — not a candidate (distinct bytes)
+        from factory._smoke_fixtures import make_broken_docx
+        tmp = tempfile.mkdtemp(prefix="pct-studio-corrupt-")
+        self.addCleanup(shutil.rmtree, tmp, ignore_errors=True)
+        self.upload(coll["id"], make_broken_docx(os.path.join(tmp, "two.docx")))
+
+        r = self.client.post(
+            f"/api/knowledge/collections/{coll['id']}/documents/approve-all")
+        self.assertEqual(r.status_code, 200, r.get_data(as_text=True))
+        self.assertEqual(r.get_json()["approved"], 1)
+        statuses = sorted(d["status"] for d in self._docs(coll["id"]))
+        self.assertEqual(statuses, ["approved", "uploaded"])
+
+        conn = self._db()
+        try:
+            rows = conn.execute(
+                "SELECT detail_json FROM knowledge_audit_log"
+                " WHERE collection_id=? AND action='approved_all'",
+                (coll["collection_id"],)).fetchall()
+        finally:
+            conn.close()
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(json.loads(rows[0]["detail_json"])["count"], 1)
+
+        r2 = self.client.post(
+            f"/api/knowledge/collections/{coll['id']}/documents/approve-all")
+        self.assertEqual(r2.status_code, 409)
 
 
 if __name__ == "__main__":
