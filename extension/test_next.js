@@ -290,6 +290,60 @@ const specEq = (actual, expected) =>
     assert.match(r.why, /عبور/);
   });
 
+  // ── PCM-EXT-09: path-number — only the numeric PATH SEGMENT advances ──
+  const pnum = (url, step = 1) => advanceUrl(url, { next_param: "path-number", next_step: step });
+  await t("spec: path-number", () =>
+    specEq(parseNextSpec({ next_param: "path-number" }), { kind: "pathNumber" }));
+  await t("pathnum: islam.se /questions/4/<slug> -> 5 (slug untouched)", () =>
+    assert.strictEqual(
+      pnum("https://islam.stackexchange.com/questions/4/what-is-the-purpose-of-having-the-concept-of-fasting-in-islam"),
+      "https://islam.stackexchange.com/questions/5/what-is-the-purpose-of-having-the-concept-of-fasting-in-islam"));
+  await t("pathnum: digits inside the slug are NOT touched", () =>
+    assert.strictEqual(
+      pnum("https://x.test/questions/4/what-is-page-9-of-vol-2"),
+      "https://x.test/questions/5/what-is-page-9-of-vol-2"));
+  await t("pathnum: zero-padded segment kept padded (04 -> 05)", () =>
+    assert.strictEqual(pnum("https://x.test/qa/04/slug-a"), "https://x.test/qa/05/slug-a"));
+  await t("pathnum: width grows when needed (09 -> 10)", () =>
+    assert.strictEqual(pnum("https://x.test/qa/09/slug-a"), "https://x.test/qa/10/slug-a"));
+  await t("pathnum: step 2 (4 -> 6)", () =>
+    assert.strictEqual(pnum("https://islam.stackexchange.com/questions/4/abc", 2),
+      "https://islam.stackexchange.com/questions/6/abc"));
+  await t("pathnum: first numeric segment wins (/users/7/2024/notes)", () =>
+    assert.strictEqual(pnum("https://x.test/users/7/2024/notes"), "https://x.test/users/8/2024/notes"));
+  await t("pathnum: query string preserved", () =>
+    assert.strictEqual(
+      pnum("https://islam.stackexchange.com/questions/4/abc?tab=votes"),
+      "https://islam.stackexchange.com/questions/5/abc?tab=votes"));
+  await t("pathnum: hash fragment preserved", () =>
+    assert.strictEqual(
+      pnum("https://islam.stackexchange.com/questions/4/abc#comment-9"),
+      "https://islam.stackexchange.com/questions/5/abc#comment-9"));
+  await t("pathnum: no fully-numeric segment -> throw", () =>
+    throws(() => pnum("https://x.test/questions/what-is-fast/"), /رجکس/));
+  await t("pathnum: contrast with url-number (last number wins)", () =>
+    assert.strictEqual(
+      advanceUrl("https://x.test/book/2/page-15.html", { next_param: "url-number", next_step: 1 }),
+      "https://x.test/book/2/page-16.html"));
+  await t("pathnum: pageNumberOf from the numeric segment", () => {
+    const p = { next_param: "path-number", next_step: 1 };
+    assert.strictEqual(
+      pageNumberOf("https://islam.stackexchange.com/questions/4/what-is-fasting", p), 4);
+    assert.strictEqual(pageNumberOf("https://x.test/qa/04/slug-a", p), 4);
+    assert.strictEqual(pageNumberOf("https://x.test/about", p), null);
+  });
+  await t("pathnum: stop rule at limit (5 -> stop before 6)", () => {
+    const p = { next_param: "path-number", stop_number: "5" };
+    const at = checkStopUrl("https://islam.stackexchange.com/questions/5/abc", p);
+    assert.strictEqual(at.done, true);
+    assert.match(at.why, /رسید/);
+    assert.strictEqual(
+      checkStopUrl("https://islam.stackexchange.com/questions/4/abc", p).done, false);
+    const r = checkStopUrl("https://islam.stackexchange.com/questions/6/abc", p);
+    assert.strictEqual(r.done, true);
+    assert.match(r.why, /عبور/);
+  });
+
   // ── PCM-EXT-04: توقف بر مبنای تکرار محتوا ─────────────────────────────
   await t("content: auto mode joins ALL values, sorted by key", () => {
     const p = { stop_field: "" };

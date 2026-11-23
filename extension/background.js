@@ -365,6 +365,10 @@ let reading = false;
 //   '<param>'                       → legacy: increment ?<param>=N query param
 //   'next-link' | 'next-link:<css>' → follow the next-page link found on the page
 //   'url-number'                    → last number in the path, +step, zero-pad kept
+//   'path-number'                   → PCM-EXT-09: first FULLY numeric path
+//                                     segment, +step, zero-pad kept; the
+//                                     site-written slug stays untouched
+//                                     (/questions/4/<slug> → /questions/5/<slug>)
 //   'regex:<pattern>'               → exactly one digit capture group, +step
 //   'hash'                          → PCM-EXT-08: hash-based SPA; the page's own
 //                                     «آیه بعد» button (viewer(S,A)) is the
@@ -378,6 +382,7 @@ function parseNextSpec(project) {
   }
   if (spec === 'hash') return { kind: 'hash' };
   if (spec === 'url-number') return { kind: 'number' };
+  if (spec === 'path-number') return { kind: 'pathNumber' };
   if (spec.indexOf('regex:') === 0) return { kind: 'regex', pattern: spec.slice('regex:'.length).trim() };
   return { kind: 'param', param: spec };
 }
@@ -426,6 +431,14 @@ function pageNumberOf(url, project) {
   const spec = parseNextSpec(project);
   if (spec.kind === 'hash') {
     return hashNumber(u.hash.replace(/^#/, ''));
+  }
+  if (spec.kind === 'pathNumber') {
+    // PCM-EXT-09: اولین بخشِ کاملاً عددی مسیر (/questions/4/<slug> → 4)
+    const segs = u.pathname.split('/');
+    for (let i = 0; i < segs.length; i += 1) {
+      if (/^\d+$/.test(segs[i])) return parseInt(segs[i], 10);
+    }
+    return null;
   }
   if (spec.kind === 'param') {
     const v = u.searchParams.get(spec.param);
@@ -509,6 +522,22 @@ function advanceUrl(url, project) {
     const run = runs[runs.length - 1];
     const idx = next.pathname.lastIndexOf(run);
     next.pathname = next.pathname.slice(0, idx) + bumpNumber(run, step) + next.pathname.slice(idx + run.length);
+    return next.toString();
+  }
+  if (spec.kind === 'pathNumber') {
+    // PCM-EXT-09: فقط «بخش»ی که کاملاً عدد باشد جلو می‌رود (مثل
+    // /questions/4/<slug> → /questions/5/<slug>) و بقیهٔ مسیر — یعنی slug
+    // متنی که خود سایت نوشته — دست نمی‌خورد. تفاوت با 'number': آن یکی
+    // آخرین توالی عدد مسیر را می‌گیرد (هرجا بود)، این یکی اولین بخشِ
+    // تمام‌عددی را.
+    const segs = next.pathname.split('/');
+    let found = -1;
+    for (let i = 0; i < segs.length; i += 1) {
+      if (/^\d+$/.test(segs[i])) { found = i; break; }
+    }
+    if (found < 0) throw new Error('بخشِ کاملاً عددی در مسیر نیست — از رجکس استفاده کن');
+    segs[found] = bumpNumber(segs[found], step);
+    next.pathname = segs.join('/');
     return next.toString();
   }
   if (spec.kind === 'regex') {

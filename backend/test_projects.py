@@ -441,5 +441,95 @@ class HashUrlTests(unittest.TestCase):
                          "https://gharaati.ir/تفسیر-نور/#numsooreh=2&numayeh=9")
 
 
+class PathNumberUrlTests(unittest.TestCase):
+    """PCM-EXT-09: the 6th next-page method — increment ONLY the numeric path
+    segment (e.g. islam.stackexchange.com /questions/4/<slug> -> /questions/5/),
+    leaving the site-written slug untouched. The extension side (advanceUrl /
+    pageNumberOf / checkStopUrl) is tested in extension/test_next.js; here the
+    backend contract: the spec string 'path-number' is a free-form next_param
+    that must survive create/update, and pages with different numbers are
+    distinct pages while the same number dedups — the URL identity is the full
+    path (slug included), so a changed number is a new page even if the site
+    reuses the slug pattern.
+    """
+
+    def setUp(self):
+        pct_test_support.reset_db()
+        self.client = server.app.test_client()
+
+    def _create(self, **extra):
+        payload = {
+            "name": "Islam StackExchange",
+            "host": "islam.stackexchange.com",
+            "start_url":
+                "https://islam.stackexchange.com/questions/4/what-is-the-purpose-of-fasting",
+            "next_mode": "url_param",
+            "next_param": "path-number",
+            "next_step": 1,
+        }
+        payload.update(extra)
+        r = self.client.post("/api/projects", json=payload)
+        self.assertEqual(r.status_code, 200)
+        return r.get_json()["project"]
+
+    def test_pn01_path_number_spec_accepted_on_create(self):
+        p = self._create()
+        self.assertEqual(p["next_param"], "path-number")
+        self.assertEqual(p["next_mode"], "url_param")
+        self.assertEqual(p["next_step"], 1)
+        self.assertEqual(
+            p["start_url"],
+            "https://islam.stackexchange.com/questions/4/what-is-the-purpose-of-fasting")
+
+    def test_pn02_spec_preserved_on_update(self):
+        p = self._create()
+        r = self.client.post(
+            f"/api/projects/{p['id']}",
+            json={"next_param": "path-number", "next_step": 2})
+        self.assertEqual(r.status_code, 200)
+        proj = r.get_json()["project"]
+        self.assertEqual(proj["next_param"], "path-number")
+        self.assertEqual(proj["next_step"], 2)
+
+    def test_pn03_distinct_numbers_are_distinct_pages(self):
+        p = self._create()
+        base = "https://islam.stackexchange.com/questions/"
+        r1 = self.client.post(f"/api/projects/{p['id']}/pages", json={
+            "url": base + "4/what-is-the-purpose-of-fasting",
+            "values": {"t": "جواب ۴"}})
+        self.assertEqual(r1.get_json()["status"], "inserted")
+        r2 = self.client.post(f"/api/projects/{p['id']}/pages", json={
+            "url": base + "5/another-question-slug",
+            "values": {"t": "جواب ۵"}})
+        self.assertEqual(r2.get_json()["status"], "inserted")
+        proj = r2.get_json()["project"]
+        self.assertEqual(proj["saved_count"], 2)
+        self.assertEqual(
+            proj["cursor_url"], base + "5/another-question-slug")
+
+    def test_pn04_same_number_same_slug_skipped(self):
+        p = self._create()
+        url = "https://islam.stackexchange.com/questions/4/what-is-the-purpose-of-fasting"
+        r1 = self.client.post(f"/api/projects/{p['id']}/pages",
+                              json={"url": url, "values": {"t": "متن"}})
+        self.assertEqual(r1.get_json()["status"], "inserted")
+        r2 = self.client.post(f"/api/projects/{p['id']}/pages",
+                              json={"url": url, "values": {"t": "متن"}})
+        self.assertEqual(r2.get_json()["status"], "skipped")
+        proj = r2.get_json()["project"]
+        self.assertEqual(proj["saved_count"], 1)
+        self.assertEqual(proj["skipped_count"], 1)
+
+    def test_pn05_cursor_url_numbered_path_preserved_in_report(self):
+        p = self._create()
+        r = self.client.post(f"/api/projects/{p['id']}/report", json={
+            "cursor_url":
+                "https://islam.stackexchange.com/questions/42/some-question",
+            "message": "خوانده شد"})
+        self.assertEqual(
+            r.get_json()["project"]["cursor_url"],
+            "https://islam.stackexchange.com/questions/42/some-question")
+
+
 if __name__ == "__main__":
     unittest.main()

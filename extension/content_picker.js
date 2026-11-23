@@ -105,6 +105,7 @@
           <option value="nextlink">لینک صفحه بعد در صفحه</option>
           <option value="hash">دکمهٔ «آیه بعد» (hash سوره/آیه)</option>
           <option value="number">عدد در آدرس (ساده)</option>
+          <option value="pathnumber">عددِ بالای مسیر (slug دست‌نخورده)</option>
           <option value="regex">رجکس (دقیق)</option>
           <option value="none">بدون قانون</option>
         </select>
@@ -348,6 +349,7 @@
     }
     if (spec === 'hash') return { mode: 'hash', detail: '' };
     if (spec === 'url-number') return { mode: 'number', detail: '' };
+    if (spec === 'path-number') return { mode: 'pathnumber', detail: '' };
     if (spec.indexOf('regex:') === 0) return { mode: 'regex', detail: spec.slice('regex:'.length).trim() };
     if (spec) return { mode: 'param', detail: spec };
     return { mode: 'none', detail: '' };
@@ -360,8 +362,28 @@
     if (mode === 'nextlink') return detail ? 'next-link:' + detail : 'next-link';
     if (mode === 'hash') return 'hash';
     if (mode === 'number') return 'url-number';
+    if (mode === 'pathnumber') return 'path-number';
     if (mode === 'regex') return detail ? 'regex:' + detail : '';
     return '';
+  }
+
+  // PCM-EXT-09: پیش‌نمایش آدرس بعدی برای روش‌های عددیِ «از آدرس» (بدون DOM).
+  // همان منطق advanceUrl در background.js: اولین بخشِ کاملاً عددی مسیر + گام.
+  function advancePreview(specStr, url, step) {
+    const u = new URL(url);
+    const segs = u.pathname.split('/');
+    let found = -1;
+    for (let i = 0; i < segs.length; i += 1) {
+      if (/^\d+$/.test(segs[i])) { found = i; break; }
+    }
+    if (found < 0) throw new Error('عددِ کاملی در مسیر آدرس نیست');
+    const n = parseInt(segs[found], 10) + (Number(step) || 1);
+    if (!Number.isFinite(n)) throw new Error('گام نامعتبر است');
+    segs[found] = (segs[found].length > 1 && segs[found][0] === '0')
+      ? String(n).padStart(segs[found].length, '0')
+      : String(n);
+    u.pathname = segs.join('/');
+    return u.href;
   }
 
   const NEXT_DETAIL = {
@@ -369,6 +391,7 @@
     nextlink: { show: true, ph: 'مثلا: a[rel=next] — خالی = خودکار', hint: 'اگر CSS لینک «بعدی» را می‌دانی بنویس؛ وگرنه خالی بگذار تا خودکار از rel=next، متن «بعدی/ادامه/Next» و عدد آدرس کشف شود.' },
     hash: { show: false, ph: '', hint: 'برای صفحات hash-based مثل تفسیر گرااتی: دکمهٔ «آیه بعد» (viewer(S,A)) پیدا شده و آدرس بعدی ساخته می‌شود ...#numsooreh=S&numayeh=A. حد عددی توقف = سوره×10000+شمارهٔ hash (مثلا 2:8 → 20008). آدرس mp3 را با نقطهٔ css روی عنصر source + «مدرک src» بردار.' },
     number: { show: false, ph: '', hint: 'آخرین عدد مسیر + گام؛ صفرهای پیشین حفظ می‌شوند: 001→002 و 1→2 (هم p_ghazal-495.html و هم sh495 را پوشش می‌دهد).' },
+    pathnumber: { show: false, ph: '', hint: 'فقط اولین «بخشِ کاملاً عددی» مسیر جلو می‌رود و بقیهٔ آدرس (slug متن‌دار که خود سایت نوشته) دست نمی‌خورد: /questions/4/<slug> → /questions/5/<slug>. صفرهای پیشین حفظ می‌شوند. حد عددی توقف = همان عدد.' },
     regex: { show: true, ph: 'مثلا: p_ghazal-(\\d+)\\.html یا sh(\\d+)', hint: 'الگو روی مسیر آدرس خوانده می‌شود و باید دقیقا یک گروه ( ) با محتوای عددی داشته باشد؛ بعد از +گام، عرض صفرها حفظ می‌شود.' },
     none: { show: false, ph: '', hint: 'فقط همین صفحه خوانده می‌شود؛ خواندن خودکار ادامه پیدا نمی‌کند.' },
   };
@@ -624,6 +647,14 @@
       nextNote = result.nextUrl
         ? ` — آیهٔ بعد: ${result.nextUrl}`
         : ' — هشدار: دکمهٔ «آیه بعد» روی این صفحه پیدا نشد (شاید آخر سوره باشد).';
+    } else if (spec === 'path-number') {
+      // PCM-EXT-09: پیشروی از خود آدرس می‌آید (نه DOM)؛ بعدی را همین‌جا
+      // محاسبه کن تا کاربر در آزمایش ببیند.
+      try {
+        nextNote = ` — صفحهٔ بعد: ${advancePreview('path-number', result.url, project.next_step)}`;
+      } catch (e) {
+        nextNote = ' — هشدار: ' + e.message;
+      }
     }
     const started = await chrome.runtime.sendMessage({
       action: 'startReading',
