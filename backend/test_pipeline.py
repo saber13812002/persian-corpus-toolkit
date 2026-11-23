@@ -856,6 +856,102 @@ class TestPF_C01_SchemaLifecycle(Base):
         self.assertEqual(j["versions"][0]["version"], 2)  # newest first
         self.assertEqual(j["approved"]["schema_id"], sv1["schema_id"])
 
+    def test_second_collection_first_schema_no_id_collision(self):
+        """PF-C01.2 — schema_id must be globally unique.
+
+        User flow: open collection A, press «نسخه جدید», switch to
+        collection B, press «نسخه جدید» again. version is per-collection
+        (both are 1), so the id must come from a GLOBAL key or the
+        second insert collides on the PRIMARY KEY and the API 500s.
+        """
+        c1 = self.make_collection("کتابخانه یک", "schema-col-1")
+        c2 = self.make_collection("کتابخانه دو", "schema-col-2")
+
+        r = self.client.post(
+            f"/api/knowledge/collections/{c1['collection_id']}/schema",
+            json={"description": "اسکیم یک"})
+        self.assertEqual(r.status_code, 201, r.get_data(as_text=True))
+        sv1 = r.get_json()["schema"]
+        self.assertEqual(sv1["version"], 1)
+
+        # the second collection's FIRST schema (version 1 again)
+        r = self.client.post(
+            f"/api/knowledge/collections/{c2['collection_id']}/schema",
+            json={"description": "اسکیم دو"})
+        self.assertEqual(r.status_code, 201, r.get_data(as_text=True))
+        sv2 = r.get_json()["schema"]
+        self.assertEqual(sv2["version"], 1)
+        self.assertNotEqual(sv2["schema_id"], sv1["schema_id"])
+
+        # both versions are resolvable by id, scoped to their collection
+        r = self.client.get(
+            f"/api/knowledge/collections/{c2['collection_id']}/schema/"
+            f"{sv2['schema_id']}")
+        self.assertEqual(r.status_code, 200, r.get_data(as_text=True))
+        self.assertEqual(r.get_json()["schema"]["collection_id"],
+                         c2["collection_id"])
+        r = self.client.get(
+            f"/api/knowledge/collections/{c1['collection_id']}/schema/"
+            f"{sv1['schema_id']}")
+        self.assertEqual(r.status_code, 200, r.get_data(as_text=True))
+        self.assertEqual(r.get_json()["schema"]["collection_id"],
+                         c1["collection_id"])
+
+        # ── the COMPLETE path on the second collection (user: «کامل مسیر
+        # رو تا آخر») — a real document in c2, then validate + approve the
+        # second-collection schema end to end.
+        from factory._smoke_fixtures import make_docx
+        tmp = tempfile.mkdtemp(prefix="pct-pf-c12-")
+        self.addCleanup(shutil.rmtree, tmp, ignore_errors=True)
+        p = os.path.join(tmp, "کتاب دوم.docx")
+        make_docx(p, [
+            ("Normal", "عنوان: کتاب دوم"),
+            ("Normal", "نویسنده: نویسنده نمونه"),
+            ("Heading 1", "فصل اول"),
+            ("Normal", "متن فارسی کتاب دوم."),
+            ("Heading 1", "فصل دوم"),
+            ("Normal", "پایان کتاب."),
+        ])
+        with open(p, "rb") as fh:
+            raw = fh.read()
+        r = self.client.post(
+            f"/api/knowledge/collections/{c2['id']}/documents",
+            data={"file": (io.BytesIO(raw), os.path.basename(p))},
+            content_type="multipart/form-data")
+        self.assertEqual(r.status_code, 201, r.get_data(as_text=True))
+        docs = self.client.get(
+            f"/api/knowledge/collections/{c2['id']}/documents").get_json()
+        for d in docs["documents"]:
+            r = self.client.post(
+                f"/api/knowledge/documents/{d['document_id']}/process")
+            self.assertIn(r.status_code, (200, 202), r.get_data(as_text=True))
+            job = self.wait_job(r.get_json()["job"]["job_id"])
+            self.assertEqual(job["status"], "succeeded", job)
+
+        # validate against the REAL blocks of c2 (honest, non-empty)
+        r = self.client.post(
+            f"/api/knowledge/collections/{c2['collection_id']}/schema/"
+            f"{sv2['schema_id']}/validate")
+        self.assertEqual(r.status_code, 200, r.get_data(as_text=True))
+        rep = r.get_json()["report"]
+        self.assertTrue(rep["ok"], rep)
+        self.assertGreater(rep["documents_scanned"], 0)
+        self.assertGreater(rep["blocks_scanned"], 0)
+
+        # approve — and the collection must point at ITS OWN schema
+        r = self.client.post(
+            f"/api/knowledge/collections/{c2['collection_id']}/schema/"
+            f"{sv2['schema_id']}/approve")
+        self.assertEqual(r.status_code, 200, r.get_data(as_text=True))
+        det = self.client.get(
+            f"/api/knowledge/collections/{c2['id']}").get_json()["collection"]
+        self.assertEqual(det["schema_version"], sv2["schema_id"])
+        # collection one is untouched by all of that (schema_version keeps
+        # its default 's-1' — no schema was approved there)
+        det1 = self.client.get(
+            f"/api/knowledge/collections/{c1['id']}").get_json()["collection"]
+        self.assertEqual(det1["schema_version"], "s-1")
+
 
 class TestPF_C02_SchemaValidation(Base):
     """PF-C02 — Stage C: field validation & honest failure reporting.

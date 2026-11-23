@@ -374,7 +374,7 @@ def ensure_knowledge_schema(db):
     -- approved_at set). Once approved a version's fields JSON is never
     -- modified — fixes mean a NEW version (immutable versioning).
     CREATE TABLE IF NOT EXISTS knowledge_schema_versions (
-        schema_id    TEXT PRIMARY KEY,        -- sv-<n> per collection
+        schema_id    TEXT PRIMARY KEY,        -- sv-<sha8(collection:version)> global
         collection_id TEXT NOT NULL,
         version      INTEGER NOT NULL,        -- 1, 2, 3, ... per collection
         status       TEXT NOT NULL DEFAULT 'draft',  -- draft/approved
@@ -4364,7 +4364,12 @@ def register_knowledge_routes(app, get_db):
             "FROM knowledge_schema_versions WHERE collection_id=?",
             (cid,)).fetchone()
         version = row["v"] + 1
-        schema_id = f"sv-{version:04d}"
+        # schema_id is the GLOBAL primary key; the version is per-collection,
+        # so an id built from the version alone (sv-0001) collides as soon as
+        # a SECOND collection creates its first version -> IntegrityError/500
+        # (user report: «نسخه جدید» on the 2nd collection). Deterministic
+        # global id from (collection, version) — unique and stable.
+        schema_id = short_id("sv", f"{cid}:v{version}")
         now = _now()
         db.execute(
             """INSERT INTO knowledge_schema_versions
