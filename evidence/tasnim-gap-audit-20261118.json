@@ -1,0 +1,141 @@
+{
+ "gate": {
+  "barg_reparse": {
+   "differs_from_export_barg": 44801,
+   "equals_item_index_plus_1": 45800,
+   "with_parsed_barg": 45809,
+   "with_raw_barg": 45844
+  },
+  "distinct_url_sections": 6,
+  "duplicate_content_hash": {
+   "extra_rows": 0,
+   "value_count": 0,
+   "values": {}
+  },
+  "duplicate_item_index": {
+   "extra_rows": 9,
+   "value_count": 9,
+   "values": {
+    "2": [
+     11700,
+     11710
+    ],
+    "3": [
+     11701,
+     11711
+    ],
+    "4": [
+     11702,
+     11712
+    ],
+    "9": [
+     11703,
+     11729
+    ],
+    "14": [
+     11704,
+     11735
+    ],
+    "19": [
+     11705,
+     11740
+    ],
+    "24": [
+     11706,
+     11745
+    ],
+    "25": [
+     11707,
+     11746
+    ],
+    "26": [
+     11708,
+     11747
+    ]
+   }
+  },
+  "incomplete_empty": 35,
+  "item_index": {
+   "count": 45844,
+   "distinct": 45835,
+   "dup_count": 9,
+   "max": 91077,
+   "min": 0,
+   "missing_count": 45243,
+   "missing_runs": [
+    [
+     3649,
+     11182
+    ],
+    [
+     11205,
+     39003
+    ],
+    [
+     44957,
+     49956
+    ],
+    [
+     55699,
+     55701
+    ],
+    [
+     55715,
+     59590
+    ],
+    [
+     89280,
+     90310
+    ]
+   ]
+  },
+  "missing_item_index": 0,
+  "no_barg": 35,
+  "quality_flag_counts": {
+   "dup_item_index": 18,
+   "empty": 35,
+   "missing_item_index": 0,
+   "no_barg": 35,
+   "ok": 33399,
+   "short": 12366,
+   "truncated_at_2000": 28
+  },
+  "record_count": 45844,
+  "short_lt_20": 12366,
+  "text_len": {
+   "histogram": {
+    "0_empty": 35,
+    "100_499": 4688,
+    "1_19": 12366,
+    "2000_exact": 28,
+    "20_99": 10861,
+    "500_1999": 17866,
+    "gt_2000": 0
+   },
+   "max": 2000,
+   "p50": 64,
+   "p90": 1710,
+   "p99": 1985
+  },
+  "truncated_at_2000": 28,
+  "url_section_histogram": {
+   "": 5966,
+   "تفسیر تسنیم جلد (1)": 9,
+   "تفسیر تسنیم جلد (12)": 22,
+   "تفسیر تسنیم جلد (47)": 9391,
+   "تفسیر تسنیم جلد (56)": 29689,
+   "تفسیر تسنیم جلد (80)": 767
+  },
+  "volume_strategy_census": {
+   "none": 5966,
+   "text": 0,
+   "url_section": 39878
+  }
+ },
+ "kind": "tasnim-audit",
+ "source": {
+  "jsonl_path": "C:\\Users\\s.tabatabaei\\Documents\\saberprojects\\persian-corpus-toolkit\\data\\tasnim\\pcm20_4\\source-snapshot\\tasnim-corpus.jsonl",
+  "jsonl_sha256": "fd927b663733fe0530afdf76d6deb6b42f3b40d807297e60722fe3b0e79e96b5",
+  "summary_sha256": "1b96b1b07c1acca11ebfcd75e3cd8f5f706c76955e6023e30923f6dc7a2fc733"
+ }
+}
