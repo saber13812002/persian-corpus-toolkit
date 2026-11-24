@@ -47,6 +47,9 @@ let creatingProject = false;
 function bindProject() {
   document.getElementById('btnCreateProject').addEventListener('click', createProject);
   document.getElementById('btnEditPoints').addEventListener('click', editPoints);
+  // PCM-EXT-10 (v3.13): «ویرایش» = پنل روی صفحه (مودال دوم) برای تنظیم «روش صفحه بعد»،
+  // حد توقف و سرعت — حتی حین خواندن باز می‌شود و ویرایش‌ها با «ذخیره تنظیمات» اعمال می‌شوند.
+  document.getElementById('btnEditSettings').addEventListener('click', editPoints);
   document.getElementById('btnTestProject').addEventListener('click', testProject);
   document.getElementById('btnStopRead').addEventListener('click', stopReading);
   document.getElementById('projectSelect').addEventListener('change', (e) => {
@@ -265,7 +268,10 @@ async function refreshProject() {
     hint.textContent = n
       ? `${n} نقطه وصل شده: ${project.points.map((p) => p.tag).join('، ')}`
       : 'روی متن تفسیر کلیک کن، اسم نقطه را بنویس، ذخیره کن. برای عوض کردنش ویرایش را بزن.';
-    if (project.pages_per_minute) document.getElementById('pagesPerMinute').value = project.pages_per_minute;
+    // PCM-EXT-10 (v3.13): اگر کاربر وسط تایپ است، پل ۳ ثانیه‌ای ورودی را بازنویسی
+    // نکند (focus guard) — در غیر این صورت سرعت تازه ذخیره‌شده اعمال شود.
+    const paceEl = document.getElementById('pagesPerMinute');
+    if (project.pages_per_minute && document.activeElement !== paceEl) paceEl.value = project.pages_per_minute;
     if (project.last_message || project.status === 'running') {
       setReport(
         `${project.last_message || project.status} — ذخیره ${project.saved_count || 0}، رد ${project.skipped_count || 0}، خطا ${project.failed_count || 0}`

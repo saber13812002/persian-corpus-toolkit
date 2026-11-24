@@ -11,6 +11,10 @@
   let busy = false;
   let poll = null;
   let runState = null;
+  // PCM-EXT-10 (v3.13): snapshot of «آخرین تنظیمات همگام‌شده» از سرور — پل ۴ ثانیه‌ای
+  // فقط فیلدی را بازنویسی می‌کند که کاربر دست نخورده باشد (عبارت هنوز با اسنپ‌شات یکی
+  // است)؛ وگرنه ویرایش در حال کاربر حفظ می‌شود.
+  let syncedSettings = null;
   // PCM-EXT-03: باید با RUN_LOCK_TTL بک‌اند یکی باشد (ثانیه).
   const RUN_LOCK_TTL_SEC = 180;
   // قفل بین‌مرورگری: آیا همین پروژه را نشست/مرورگر دیگری همین حالا می‌خواند؟
@@ -127,6 +131,12 @@
         <button class="primary" id="test" type="button">آزمایش و شروع</button>
         <button class="stop" id="stop" type="button">توقف</button>
       </div>
+      <div class="row" id="restartRow" style="display:none">
+        <button id="restart" type="button">شروع از نو (از همین صفحه)</button>
+      </div>
+      <div class="row">
+        <button id="saveSettings" type="button" title="حتی حین خواندن ذخیره می‌شود و حلقهٔ خواندن از دقیقهٔ بعد از آن‌ها استفاده می‌کند">ذخیره تنظیمات</button>
+      </div>
       <div class="sub" id="runNote" style="display:none"></div>
       <div class="report" id="report" role="status" aria-live="polite" aria-atomic="true"></div>
     </div>
@@ -215,14 +225,7 @@
   function render() {
     if (!project) return;
     $('title').textContent = project.name || 'پروژه';
-    const parsed = parseSpecField(project.next_param);
-    $('nextMode').value = parsed.mode;
-    $('nextDetailInput').value = parsed.detail || $('nextDetailInput').value;
-    $('nextStep').value = project.next_step || 1;
-    $('pace').value = project.pages_per_minute || 4;
-    $('stopNum').value = project.stop_number || '';
-    rebuildStopField();
-    updateNextDetail();
+    syncSettingsFromServer();
     const count = (project.points || []).length;
     $('step2').classList.toggle('on', count > 0);
     $('step3').classList.toggle('on', project.status === 'tested' || project.status === 'running' || project.status === 'paused');
@@ -263,10 +266,60 @@
     }
   }
 
+  // PCM-EXT-10 (v3.13): همگام‌سازی تنظیمات بدون بازنویسی ویرایشِ کاربر.
+  // اگر مقدار فعلی فورم با اسنپ‌شات (آخرین همگام) فرق دارد، یعنی کاربر آن فیلد
+  // را عوض کرده → حفظ کن؛ وگرنه با وضعیت سرور همگام شود.
+  const SETTINGS_FIELDS = ['mode', 'detail', 'step', 'pace', 'stopNum', 'stopField'];
+  function serverSettings() {
+    const parsed = parseSpecField(project.next_param);
+    return {
+      mode: parsed.mode,
+      detail: parsed.detail,
+      step: String(project.next_step || 1),
+      pace: String(project.pages_per_minute || 4),
+      stopNum: String(project.stop_number || ''),
+      stopField: String(project.stop_field || ''),
+    };
+  }
+  function readFormSettings() {
+    return {
+      mode: $('nextMode').value,
+      detail: $('nextDetailInput').value,
+      step: $('nextStep').value,
+      pace: $('pace').value,
+      stopNum: $('stopNum').value,
+      stopField: $('stopField').value,
+    };
+  }
+  function applySettings(s) {
+    $('nextMode').value = s.mode;
+    $('nextDetailInput').value = s.detail;
+    $('nextStep').value = s.step;
+    $('pace').value = s.pace;
+    $('stopNum').value = s.stopNum;
+    rebuildStopField(s.stopField);
+    updateNextDetail();
+  }
+  function syncSettingsFromServer() {
+    const server = serverSettings();
+    if (!syncedSettings) {
+      applySettings(server);
+      syncedSettings = server;
+      return;
+    }
+    const cur = readFormSettings();
+    const next = {};
+    for (const k of SETTINGS_FIELDS) {
+      next[k] = (cur[k] !== syncedSettings[k]) ? cur[k] : server[k];
+    }
+    applySettings(next);
+    syncedSettings = next;
+  }
+
   // PCM-EXT-04: گزینه‌های «مبنای تشخیص تکرار محتوا» از نقاط پروژه ساخته می‌شود
-  function rebuildStopField() {
+  function rebuildStopField(preferred) {
     const sel = $('stopField');
-    const current = String(project?.stop_field || '');
+    const current = preferred != null ? String(preferred) : String(project?.stop_field || '');
     const tags = (project?.points || []).map((p) => String(p.tag || '').trim()).filter(Boolean);
     sel.innerHTML = '';
     const opt0 = document.createElement('option');
@@ -433,6 +486,7 @@
     const data = await r.json();
     if (!r.ok || data.ok === false) throw new Error(data.message || 'قانون ذخیره نشد');
     project = data.project;
+    syncedSettings = serverSettings(); // ویرایشِ کاربر حالا همان وضعیت سرور شد
     return project;
   }
 
@@ -581,12 +635,18 @@
     return '';
   }
 
+  // PCM-EXT-10 (v3.13): اگر اجرای این پروژه «توقف» شده باشد و موقعیت ذخیره‌شده
+  // (nextUrl) در pctRun مانده باشد، می‌توان از همان‌جا ادامه داد.
+  const isResumableRun = () => !!(runState && !runState.active && project &&
+    runState.projectId === project.id && runState.nextUrl && project.status === 'paused');
+
   async function refreshRunState() {
     const st = await chrome.storage.local.get('pctRun');
     runState = st.pctRun || null;
     if (!project) return;
     const btn = $('test');
     const note = $('runNote');
+    $('restartRow').style.display = 'none';
     if (runState?.active && runState.projectId === project.id) {
       btn.disabled = true;
       btn.textContent = 'در حال خواندن…';
@@ -601,6 +661,12 @@
       btn.disabled = true;
       btn.textContent = 'در حال خواندن (دستگاه دیگر)';
       note.textContent = 'این پروژه همین حالا توسط نشست دیگری (مرورگر/دستگاه دیگر) در حال خواندن است — شروع ممکن نیست.';
+      note.style.display = 'block';
+    } else if (isResumableRun()) {
+      btn.disabled = false;
+      btn.textContent = 'ادامه (از جای ذخیره‌شده)';
+      $('restartRow').style.display = 'flex';
+      note.textContent = `آخرین خواندن این پروژه متوقف شد — «ادامه» از ${runState.nextUrl} ادامه می‌دهد. برای شروع از همین صفحه، «شروع از نو» را بزن.`;
       note.style.display = 'block';
     } else {
       btn.disabled = false;
@@ -681,6 +747,46 @@
     return { ok: !!started?.ok, started: !!started?.ok, message: $('report').textContent, values: result.values };
   }
 
+  // PCM-EXT-10 (v3.13): ادامهٔ اجرای متوقف‌شده از nextUrl ذخیره‌شده (stopReading آن را
+  // در pctRun نگه می‌دارد). اول تنظیمات فعلی فورم را ذخیره می‌کند (پس ویرایش‌های
+  // کاربر اعمال می‌شوند)، بعد خواندن را از همان موقعیت ادامه می‌دهد.
+  async function resumeRun() {
+    if (!project?.id) {
+      report('اول از اکستنشن پروژه را بساز');
+      return { ok: false, message: 'پروژه‌ای انتخاب نشده' };
+    }
+    const st = await chrome.storage.local.get('pctRun');
+    const run = st.pctRun;
+    if (!run?.nextUrl || run.projectId !== project.id) {
+      report('موقعیت ذخیره‌شده‌ای برای ادامه پیدا نشد — «شروع از نو» را بزن.');
+      return testAndStart();
+    }
+    if (run.active) {
+      report('این پروژه همین حالا در حال خواندن است.');
+      return { ok: false, message: 'already running' };
+    }
+    if (lockLiveByOther()) {
+      report('این پروژه همین حالا توسط نشست دیگری در حال خواندن است — صبر کن یا آن را متوقف کن.');
+      return { ok: false, message: 'locked by another session' };
+    }
+    try {
+      await saveRule();
+    } catch (e) {
+      report(String(e));
+      return { ok: false, message: String(e) };
+    }
+    const started = await chrome.runtime.sendMessage({
+      action: 'startReading',
+      projectId: project.id,
+      pagesPerMinute: project.pages_per_minute,
+      nextUrl: run.nextUrl,
+    });
+    report(started?.ok ? `ادامه از: ${run.nextUrl} — ${started.message}` : (started?.message || 'ادامه ممکن نشد'));
+    if (started?.ok) $('step4').classList.add('on');
+    refreshRunState();
+    return { ok: !!started?.ok, started: !!started?.ok, message: started?.message || '' };
+  }
+
   function reportText() { return $('report').textContent; }
 
   document.addEventListener('mouseover', (e) => {
@@ -706,7 +812,19 @@
   $('cancel').addEventListener('click', () => { picking = false; showForm(false); if (selected) selected.style.outline = ''; });
   $('close').addEventListener('click', closePanel);
   $('savePoint').addEventListener('click', () => savePoint().catch((e) => report(String(e))));
-  $('test').addEventListener('click', () => testAndStart());
+  // PCM-EXT-10 (v3.13): وقتی اجرای متوقف‌شده‌ای با موقعیت ذخیره‌شده هست، دکمهٔ اصلی
+  // «ادامه» می‌شود؛ «شروع از نو» همیشه از همین صفحه آزمایش می‌کند.
+  $('test').addEventListener('click', () => (isResumableRun() ? resumeRun() : testAndStart()));
+  $('restart').addEventListener('click', () => testAndStart());
+  // ذخیرهٔ تنظیمات حتی حین خواندن: حلقهٔ run هر دقیقه پروژه را دوباره می‌خواند،
+  // پس شرط توقف/روش صفحه بعدِ تازه از دقیقهٔ بعد اعمال می‌شود.
+  $('saveSettings').addEventListener('click', async () => {
+    if (!project?.id) { report('اول پروژه را انتخاب کن'); return; }
+    try {
+      const saved = await saveRule();
+      report(saved ? 'تنظیمات ذخیره شد — حلقهٔ خواندن از دقیقهٔ بعد از آن‌ها استفاده می‌کند.' : 'ذخیره نشد');
+    } catch (e) { report(String(e)); }
+  });
   $('stop').addEventListener('click', async () => {
     const resp = await chrome.runtime.sendMessage({ action: 'stopReading' });
     report(resp?.message || 'توقف شد');
