@@ -389,7 +389,7 @@
   const NEXT_DETAIL = {
     param: { show: true, ph: 'item_index', hint: 'نام پارامتر در آدرس، مثلا ?item_index=5 — در هر خواندن به عددش گام اضافه می‌شود.' },
     nextlink: { show: true, ph: 'مثلا: a[rel=next] — خالی = خودکار', hint: 'اگر CSS لینک «بعدی» را می‌دانی بنویس؛ وگرنه خالی بگذار تا خودکار از rel=next، متن «بعدی/ادامه/Next» و عدد آدرس کشف شود.' },
-    hash: { show: false, ph: '', hint: 'برای صفحات hash-based مثل تفسیر گرااتی: دکمهٔ «آیه بعد» (viewer(S,A)) پیدا شده و آدرس بعدی ساخته می‌شود ...#numsooreh=S&numayeh=A. حد عددی توقف = سوره×10000+شمارهٔ hash (مثلا 2:8 → 20008). آدرس mp3 را با نقطهٔ css روی عنصر source + «مدرک src» بردار.' },
+    hash: { show: false, ph: '', hint: 'برای صفحات hash-based مثل تفسیر گرااتی: دکمهٔ «آیه بعد» (viewer(S,A)) پیدا شده و آدرس بعدی ساخته می‌شود ...#numsooreh=S&numayeh=A. اگر دکمه نباشد (ته سوره)، خودکار numsooreh+1 و numayeh=1 می‌شود؛ در سورهٔ ۱۱۴ (ته قرآن) خواندن تمام می‌شود. حد عددی توقف = سوره×10000+شمارهٔ hash (مثلا 2:8 → 20008). آدرس mp3 را با نقطهٔ css روی عنصر source + «مدرک src» بردار.' },
     number: { show: false, ph: '', hint: 'آخرین عدد مسیر + گام؛ صفرهای پیشین حفظ می‌شوند: 001→002 و 1→2 (هم p_ghazal-495.html و هم sh495 را پوشش می‌دهد).' },
     pathnumber: { show: false, ph: '', hint: 'فقط اولین «بخشِ کاملاً عددی» مسیر جلو می‌رود و بقیهٔ آدرس (slug متن‌دار که خود سایت نوشته) دست نمی‌خورد: /questions/4/<slug> → /questions/5/<slug>. صفرهای پیشین حفظ می‌شوند. حد عددی توقف = همان عدد.' },
     regex: { show: true, ph: 'مثلا: p_ghazal-(\\d+)\\.html یا sh(\\d+)', hint: 'الگو روی مسیر آدرس خوانده می‌شود و باید دقیقا یک گروه ( ) با محتوای عددی داشته باشد؛ بعد از +گام، عرض صفرها حفظ می‌شود.' },
@@ -550,11 +550,13 @@
 
   // PCM-EXT-08: دکمهٔ «آیه بعد» (onclick=viewer(S,A)) را در DOM پیدا کن و آدرس hash بعدی را بساز.
   // مخصوص SPAهای hash-based مثل تفسیر نور (gharaati.ir): «بعد» لینک نیست بلکه <input> با
-  // viewer(S,A) است؛ آدرس بعدی = پایهٔ فعلی + #numsooreh=S&numayeh=A. اگر دکمهٔ «آیه بعد»
-  // نباشد (آخر سوره)، '' برمی‌گرداند و خواندن تمیز تمام می‌شود.
+  // viewer(S,A) است؛ آدرس بعدی = پایهٔ فعلی + #numsooreh=S&numayeh=A.
+  // PCM-EXT-08.1: اگر دکمهٔ «آیه بعد» نباشد (ته سوره — فقط «آیه قبل» هست)، از خود آدرس
+  // جلو می‌رود: numsooreh از hash فعلی +۱ و numayeh=1 — مگر سورهٔ ۱۱۴ باشد (ته قرآن)
+  // که در آن صورت '' برمی‌گرداند و خواندن تمیز تمام می‌شود.
   function hashNextUrl() {
     let btns = [];
-    try { btns = Array.from(document.querySelectorAll('input,button,a')); } catch (_) { return ''; }
+    try { btns = Array.from(document.querySelectorAll('input,button,a')); } catch (_) { btns = []; }
     for (let i = 0; i < btns.length; i += 1) {
       const el = btns[i];
       const oc = String(el.getAttribute('onclick') || '');
@@ -565,6 +567,17 @@
       const base = String(location.href).split('#')[0];
       return base + '#numsooreh=' + m[1] + '&numayeh=' + m[2];
     }
+    // ته سوره: «آیه بعد» نیست → سورهٔ بعد از خود آدرس: numsooreh+1, numayeh=1.
+    try {
+      const hash = String(location.hash || '').replace(/^#/, '');
+      const s = hash.match(/(?:^|&|\?)numsooreh=(\d+)/);
+      if (s) {
+        const cur = parseInt(s[1], 10);
+        if (cur >= 1 && cur < 114) {
+          return String(location.href).split('#')[0] + '#numsooreh=' + (cur + 1) + '&numayeh=1';
+        }
+      }
+    } catch (_) {}
     return '';
   }
 

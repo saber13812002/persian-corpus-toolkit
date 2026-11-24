@@ -133,12 +133,33 @@ const BASE = "https://gharaati.ir/تفسیر-نور/";
     assert.strictEqual(s.window.__pctHashNext(), BASE + "#numsooreh=1&numayeh=2");
   });
 
-  await t("surah end (only آیه قبل) -> empty (run ends cleanly)", () => {
+  await t("surah end (only آیه قبل) -> next surah, numayeh=1 (1:7 -> 2:1)", () => {
     const s = loadPicker({
       href: BASE + "#numsooreh=1&numayeh=7",
       buttons: [btn("viewer(1,6)", "آیه قبل")],
     });
+    assert.strictEqual(s.window.__pctHashNext(), BASE + "#numsooreh=2&numayeh=1");
+  });
+
+  await t("final surah 114 end (no آیه بعد, no numsooreh=115) -> empty (run ends)", () => {
+    const s = loadPicker({
+      href: BASE + "#numsooreh=114&numayeh=6",
+      buttons: [btn("viewer(114,5)", "آیه قبل")],
+    });
     assert.strictEqual(s.window.__pctHashNext(), "");
+  });
+
+  await t("no hash params at all and no button -> empty", () => {
+    const s = loadPicker({ href: BASE, buttons: [] });
+    assert.strictEqual(s.window.__pctHashNext(), "");
+  });
+
+  await t("آیه بعد button wins over the surah-end fallback", () => {
+    const s = loadPicker({
+      href: BASE + "#numsooreh=2&numayeh=8",
+      buttons: [btn("viewer(2,7)", "آیه قبل"), btn("viewer(2,9)", "آیه بعد")],
+    });
+    assert.strictEqual(s.window.__pctHashNext(), BASE + "#numsooreh=2&numayeh=9");
   });
 
   await t("viewer() button with a different label is skipped", () => {
@@ -157,9 +178,9 @@ const BASE = "https://gharaati.ir/تفسیر-نور/";
     assert.strictEqual(s.window.__pctHashNext(), BASE + "#numsooreh=114&numayeh=2716");
   });
 
-  await t("no buttons at all -> empty", () => {
+  await t("no buttons at all -> surah-end fallback (3:1 -> 4:1)", () => {
     const s = loadPicker({ href: BASE + "#numsooreh=3&numayeh=1", buttons: [] });
-    assert.strictEqual(s.window.__pctHashNext(), "");
+    assert.strictEqual(s.window.__pctHashNext(), BASE + "#numsooreh=4&numayeh=1");
   });
 
   await t("placeholder page (2:1): only button is آیه بعد -> viewer(2,8)", () => {
