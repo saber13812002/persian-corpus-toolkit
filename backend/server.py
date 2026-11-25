@@ -1704,6 +1704,371 @@ def khamenei_seed():
     return jsonify({"seeded": added, "already_crawled": skipped_done, "requested": len(ids)})
 
 
+# ═══════════════════════════════════════
+# EITAA CHANNEL CRAWL (additive; same family as /api/khamenei/*)
+# ═══════════════════════════════════════
+
+EITAA_CHANNEL_FIELDS = (
+    "username", "display_name", "description",
+    "followers_count", "photos_count", "videos_count", "files_count",
+    "photo_url",
+)
+EITAA_POST_FIELDS = (
+    "post_id", "channel", "post_number", "post_type",
+    "media_title", "media_duration", "media_size",
+    "text", "post_date", "views", "url",
+)
+
+
+def ensure_eitaa_schema(db):
+    db.execute("""
+    CREATE TABLE IF NOT EXISTS eitaa_channels (
+        username TEXT PRIMARY KEY,
+        display_name TEXT,
+        description TEXT,
+        followers_count INTEGER,
+        photos_count INTEGER,
+        videos_count INTEGER,
+        files_count INTEGER,
+        photo_url TEXT,
+        created_at TEXT DEFAULT (datetime('now')),
+        updated_at TEXT DEFAULT (datetime('now'))
+    )
+    """)
+    db.execute("""
+    CREATE TABLE IF NOT EXISTS eitaa_posts (
+        post_id TEXT PRIMARY KEY,
+        channel TEXT NOT NULL,
+        post_number INTEGER,
+        post_type TEXT,
+        media_title TEXT,
+        media_duration TEXT,
+        media_size TEXT,
+        text TEXT,
+        post_date TEXT,
+        views INTEGER,
+        url TEXT,
+        full_data TEXT,
+        content_hash TEXT,
+        char_count INTEGER,
+        crawled_at TEXT DEFAULT (datetime('now'))
+    )
+    """)
+    db.execute(
+        "CREATE INDEX IF NOT EXISTS idx_eitaa_posts_channel "
+        "ON eitaa_posts(channel, post_number)"
+    )
+    db.commit()
+
+
+def _eitaa_canonical_channel(data):
+    """Filter to the 8 known channel keys; counts → int, others → str."""
+    canon = {}
+    for k in EITAA_CHANNEL_FIELDS:
+        v = data.get(k)
+        if k.endswith("_count"):
+            try:
+                canon[k] = int(v or 0)
+            except (TypeError, ValueError):
+                canon[k] = 0
+        else:
+            canon[k] = str(v or "")
+    return canon
+
+
+def _eitaa_save_channel(db, data):
+    username = str(data.get("username") or "").strip()
+    if not username:
+        return None
+    canon = _eitaa_canonical_channel(data)
+    existing = db.execute(
+        "SELECT * FROM eitaa_channels WHERE username=?", (username,)
+    ).fetchone()
+    if existing is None:
+        db.execute(
+            """INSERT INTO eitaa_channels
+               (username, display_name, description, followers_count,
+                photos_count, videos_count, files_count, photo_url)
+               VALUES (?,?,?,?,?,?,?,?)""",
+            (canon["username"], canon["display_name"], canon["description"],
+             canon["followers_count"], canon["photos_count"],
+             canon["videos_count"], canon["files_count"], canon["photo_url"]),
+        )
+        return {"status": "inserted", "username": username}
+    prev = json.dumps(
+        {k: existing[k] for k in EITAA_CHANNEL_FIELDS},
+        sort_keys=True, ensure_ascii=False)
+    cur = json.dumps(canon, sort_keys=True, ensure_ascii=False)
+    if prev == cur:
+        return {"status": "skipped", "username": username}
+    db.execute(
+        """UPDATE eitaa_channels
+           SET display_name=?, description=?, followers_count=?, photos_count=?,
+               videos_count=?, files_count=?, photo_url=?,
+               updated_at=datetime('now')
+           WHERE username=?""",
+        (canon["display_name"], canon["description"], canon["followers_count"],
+         canon["photos_count"], canon["videos_count"], canon["files_count"],
+         canon["photo_url"], username),
+    )
+    return {"status": "updated", "username": username}
+
+
+def _eitaa_canonical_post(data):
+    """Filter to the 11 known post keys; ints for post_number/views, str for the rest."""
+    canon = {}
+    for k in EITAA_POST_FIELDS:
+        v = data.get(k)
+        if k in ("post_number", "views"):
+            try:
+                canon[k] = int(v or 0)
+            except (TypeError, ValueError):
+                canon[k] = 0
+        else:
+            canon[k] = str(v or "")
+    return canon
+
+
+def _eitaa_save_post(db, data):
+    post_id = str(data.get("post_id") or "").strip()
+    if not post_id:
+        return None
+    canon = _eitaa_canonical_post(data)
+    if not canon["text"] and not canon["media_title"]:
+        return {"status": "empty", "post_id": post_id}
+    # views is volatile (changes between crawls) — excluded from the hash.
+    chash = content_hash({k: v for k, v in canon.items() if k != "views"})
+    full_data = json.dumps(canon, ensure_ascii=False)
+    char_count = len(canon["text"])
+    existing = db.execute(
+        "SELECT content_hash FROM eitaa_posts WHERE post_id=?", (post_id,)
+    ).fetchone()
+    if existing is not None:
+        if existing["content_hash"] == chash:
+            return {"status": "skipped", "post_id": post_id}
+        db.execute(
+            """UPDATE eitaa_posts
+               SET channel=?, post_number=?, post_type=?, media_title=?,
+                   media_duration=?, media_size=?, text=?, post_date=?,
+                   views=?, url=?, full_data=?, content_hash=?, char_count=?,
+                   crawled_at=datetime('now')
+               WHERE post_id=?""",
+            (canon["channel"], canon["post_number"], canon["post_type"],
+             canon["media_title"], canon["media_duration"], canon["media_size"],
+             canon["text"], canon["post_date"], canon["views"], canon["url"],
+             full_data, chash, char_count, post_id),
+        )
+        return {"status": "updated", "post_id": post_id}
+    db.execute(
+        """INSERT INTO eitaa_posts
+           (post_id, channel, post_number, post_type, media_title, media_duration,
+            media_size, text, post_date, views, url, full_data, content_hash, char_count)
+           VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+        (canon["post_id"], canon["channel"], canon["post_number"], canon["post_type"],
+         canon["media_title"], canon["media_duration"], canon["media_size"],
+         canon["text"], canon["post_date"], canon["views"], canon["url"],
+         full_data, chash, char_count),
+    )
+    return {"status": "inserted", "post_id": post_id}
+
+
+@app.route('/api/eitaa/channel', methods=['POST'])
+def eitaa_channel():
+    """Register/update a channel once (idempotent upsert)."""
+    db = get_db()
+    ensure_eitaa_schema(db)
+    data = request.get_json(silent=True) or {}
+    result = _eitaa_save_channel(db, data)
+    if result is None:
+        return jsonify({"error": "username required"}), 400
+    db.commit()
+    return jsonify(result)
+
+
+@app.route('/api/eitaa/submit', methods=['POST'])
+def eitaa_submit():
+    """Store one post; promote the page row to done and enqueue the next page."""
+    db = get_db()
+    ensure_eitaa_schema(db)
+    data = request.get_json(silent=True) or {}
+    post_id = str(data.get("post_id") or "").strip()
+    if not post_id:
+        return jsonify({"error": "post_id required"}), 400
+    result = _eitaa_save_post(db, data)
+    page_url = data.get("page_url")
+    next_url = data.get("next_url")
+    if page_url:
+        db.execute(
+            """INSERT INTO crawl_queue
+               (url, page_type, site, title, status, finished_at)
+               VALUES (?, 'eitaa_page', 'eitaa', ?, 'done', datetime('now'))
+               ON CONFLICT(url) DO UPDATE
+               SET status='done', finished_at=datetime('now')""",
+            (str(page_url), str(page_url)),
+        )
+    if next_url:
+        db.execute(
+            """INSERT OR IGNORE INTO crawl_queue
+               (url, page_type, site, title, status)
+               VALUES (?, 'eitaa_page', 'eitaa', ?, 'pending')""",
+            (str(next_url), str(next_url)),
+        )
+    db.commit()
+    return jsonify(result)
+
+
+@app.route('/api/eitaa/seed', methods=['POST'])
+def eitaa_seed():
+    """Queue the channel's first page (idempotent)."""
+    db = get_db()
+    ensure_eitaa_schema(db)
+    data = request.get_json(silent=True) or {}
+    channel = str(data.get("channel") or "").strip().lstrip("/")
+    if not channel:
+        return jsonify({"error": "channel required"}), 400
+    url = f"https://eitaa.com/{channel}"
+    db.execute(
+        """INSERT OR IGNORE INTO crawl_queue
+           (url, page_type, site, title, status)
+           VALUES (?, 'eitaa_page', 'eitaa', ?, 'pending')""",
+        (url, url),
+    )
+    added = db.execute("SELECT changes() AS c").fetchone()["c"]
+    db.commit()
+    return jsonify({"added": added, "url": url})
+
+
+@app.route('/api/eitaa/pending')
+def eitaa_pending():
+    db = get_db()
+    ensure_eitaa_schema(db)
+    rows = db.execute(
+        """SELECT url FROM crawl_queue
+           WHERE page_type='eitaa_page' AND status='pending'
+           ORDER BY id ASC"""
+    ).fetchall()
+    urls = [r["url"] for r in rows]
+    return jsonify({"urls": urls, "count": len(urls)})
+
+
+@app.route('/api/eitaa/crawl-status')
+def eitaa_crawl_status():
+    db = get_db()
+    ensure_eitaa_schema(db)
+    channel = request.args.get("channel", "").strip()
+    registered = False
+    posts = 0
+    max_post_number = 0
+    last = None
+    if channel:
+        registered = db.execute(
+            "SELECT 1 FROM eitaa_channels WHERE username=?", (channel,)
+        ).fetchone() is not None
+        posts = db.execute(
+            "SELECT COUNT(*) AS c FROM eitaa_posts WHERE channel=?", (channel,)
+        ).fetchone()["c"]
+        max_post_number = db.execute(
+            "SELECT COALESCE(MAX(post_number),0) AS c FROM eitaa_posts WHERE channel=?",
+            (channel,),
+        ).fetchone()["c"]
+        last = db.execute(
+            "SELECT MAX(crawled_at) AS d FROM eitaa_posts WHERE channel=?", (channel,)
+        ).fetchone()["d"]
+    else:
+        posts = db.execute("SELECT COUNT(*) AS c FROM eitaa_posts").fetchone()["c"]
+        max_post_number = db.execute(
+            "SELECT COALESCE(MAX(post_number),0) AS c FROM eitaa_posts").fetchone()["c"]
+        last = db.execute(
+            "SELECT MAX(crawled_at) AS d FROM eitaa_posts").fetchone()["d"]
+    pending = db.execute(
+        "SELECT COUNT(*) AS c FROM crawl_queue "
+        "WHERE page_type='eitaa_page' AND status='pending'"
+    ).fetchone()["c"]
+    return jsonify({
+        "channel_registered": registered,
+        "posts": posts,
+        "max_post_number": max_post_number,
+        "pending": pending,
+        "last_crawled_at": last,
+    })
+
+
+@app.route('/api/eitaa/stats')
+def eitaa_stats():
+    db = get_db()
+    ensure_eitaa_schema(db)
+    channels = db.execute("SELECT COUNT(*) AS c FROM eitaa_channels").fetchone()["c"]
+    posts = db.execute("SELECT COUNT(*) AS c FROM eitaa_posts").fetchone()["c"]
+    chars = db.execute(
+        "SELECT COALESCE(SUM(char_count),0) AS c FROM eitaa_posts").fetchone()["c"]
+    last = db.execute(
+        "SELECT MAX(crawled_at) AS d FROM eitaa_posts").fetchone()["d"]
+    by_type = {}
+    for r in db.execute(
+        "SELECT COALESCE(NULLIF(post_type,''), 'unknown') AS t, COUNT(*) AS c "
+        "FROM eitaa_posts GROUP BY t ORDER BY t"
+    ).fetchall():
+        by_type[r["t"]] = r["c"]
+    return jsonify({
+        "channels": channels,
+        "posts": posts,
+        "chars": chars,
+        "last_crawled_at": last,
+        "by_type": by_type,
+    })
+
+
+@app.route('/api/eitaa/posts')
+def eitaa_posts():
+    db = get_db()
+    ensure_eitaa_schema(db)
+    channel = request.args.get("channel", "").strip()
+    limit = request.args.get("limit", 50, type=int)
+    offset = request.args.get("offset", 0, type=int)
+    limit = max(1, min(limit, 200))
+    offset = max(0, offset)
+    if channel:
+        total = db.execute(
+            "SELECT COUNT(*) AS c FROM eitaa_posts WHERE channel=?", (channel,)
+        ).fetchone()["c"]
+        rows = db.execute(
+            """SELECT * FROM eitaa_posts WHERE channel=?
+               ORDER BY post_number ASC LIMIT ? OFFSET ?""",
+            (channel, limit, offset),
+        ).fetchall()
+    else:
+        total = db.execute("SELECT COUNT(*) AS c FROM eitaa_posts").fetchone()["c"]
+        rows = db.execute(
+            """SELECT * FROM eitaa_posts
+               ORDER BY post_number ASC LIMIT ? OFFSET ?""",
+            (limit, offset),
+        ).fetchall()
+    return jsonify({"total": total, "posts": [dict(r) for r in rows],
+                    "limit": limit, "offset": offset})
+
+
+@app.route('/api/eitaa/reset', methods=['POST'])
+def eitaa_reset():
+    """Wipe Eitaa data + queue rows (re-test aid; mirrors /api/khamenei/reset)."""
+    db = get_db()
+    ensure_eitaa_schema(db)
+    deleted_posts = db.execute("SELECT COUNT(*) AS c FROM eitaa_posts").fetchone()["c"]
+    deleted_channels = db.execute("SELECT COUNT(*) AS c FROM eitaa_channels").fetchone()["c"]
+    deleted_queue = db.execute(
+        "SELECT COUNT(*) AS c FROM crawl_queue WHERE page_type='eitaa_page'"
+    ).fetchone()["c"]
+    db.execute("DELETE FROM eitaa_posts")
+    db.execute("DELETE FROM eitaa_channels")
+    db.execute("DELETE FROM crawl_queue WHERE page_type='eitaa_page'")
+    db.commit()
+    return jsonify({
+        "ok": True,
+        "deleted_posts": deleted_posts,
+        "deleted_channels": deleted_channels,
+        "deleted_queue": deleted_queue,
+    })
+
+
 from sites import register_site_routes
 from projects import register_project_routes
 from auth import ensure_auth_schema, seed_password, register_auth_routes
@@ -1730,6 +2095,7 @@ if __name__ == '__main__':
     db = sqlite3.connect(DB_PATH)
     db.row_factory = sqlite3.Row
     ensure_khamenei_schema(db)
+    ensure_eitaa_schema(db)
     db.close()
     host = os.environ.get('HOST', '0.0.0.0')
     port = int(os.environ.get('PORT', '5055'))
