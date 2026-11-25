@@ -50,8 +50,8 @@ BACKUP:  /home/saber/backups/  (thesaurus-<TS>.db + pct-deploy-<TS>.tar.gz)
 ```bash
 cd backend && python -m unittest test_api test_projects test_dashboard \
   test_knowledge_api test_word_factory test_dump test_work_registry test_queue \
-  test_corpus_builder test_studio_api test_api_contract -v \
-  # 200 تست (رگرسیون کامل)
+  test_corpus_builder test_studio_api test_api_contract test_eitaa -v \
+  # 256 تست (رگرسیون کامل)
 ```
 
 - **200 تست**: `test_api.py` (8، فاز۱/۲ + پروژه)، `test_projects.py` (9، جریان CRUD)،
@@ -63,7 +63,8 @@ cd backend && python -m unittest test_api test_projects test_dashboard \
   `test_corpus_builder.py` (24، C-01..C-16 — پیکره‌ساز `c-1`، PCM-16)،
   `test_studio_api.py` (7، S-01..S-04 — استودیو: فهرست بچ‌ها + paused +
   counters + رجیستری اسناد، PCM-17)، `test_api_contract.py` (18،
-  CT-01..CT-06 — قرارداد OpenAPI spec ↔ app زنده، PCM-19).
+  CT-01..CT-06 — قرارداد OpenAPI spec ↔ app زنده، PCM-19)، `test_eitaa.py`
+  (8، EA-01..EA-08 — کراول کانال ایتا، PCM-EITAA).
 - **PCM-12.3 (رفع F-01):** هر سه ماژول اول `import pct_test_support` می‌کنند که
   یک DB موقت **مشترک** می‌سازد و `PCT_DB`/`PCT_DASHBOARD_PASSWORD` را **قبل از**
   `import server` ست می‌کند؛ سپس هر کلاس در `setUp` با
@@ -132,6 +133,7 @@ cd backend && python -m unittest test_api test_projects test_dashboard \
 | **PCM-STUDIO-BATCH** عملیات گروهی کتابخانهٔ Word استودیو: `POST .../documents/process-all` (job `process_collection` روی همهٔ uploaded/failed — mirror worker بچ‌ها + idempotency + resume با force_retry) + `POST .../documents/pause` (scope `collection:<id>`، توقف تمیز بعد از سند جاری) + `POST .../documents/approve-all` (UPDATE اتمیک parsed/needs_review→approved + audit `approved_all`) + کلید افزایشی `status_counts` در لیست اسناد + ۳ دکمهٔ toolbar با شمارندهٔ زندهٔ سمت‌سرور + OpenAPI (3 operation جدید، spec pcm15 = 8 op) | ✅ (11 تست S-05..S-11 + رگرسیون 243 سبز؛ بدون deploy — سوار درِ M7؛ سند: docs/PCM-STUDIO-BATCH-REPORT.md) |
 | **PCM-EXT-09** «عددِ بالای مسیر +۱» (slug دست‌نخورده): روش ششم «صفحه بعد» با `next_param='path-number'` — فقط **اولین بخشِ کاملاً عددی** مسیر +گام (مثل `/questions/4/<slug>` → `/questions/5/<slug>` — islam.stackexchange.com) و slug متن‌دار که خود سایت نوشته دست نمی‌خورد + `pageNumberOf`/حد عددی توقف روی همان مقیاس + option در پنل + preview آدرس بعدی در «آزمایش و شروع» + manifest v3.11 (بدون تغییر backend — `next_param` آزاد) | ✅ (13 تست pathnum در test_next.js — جمع 84 + 5 تست PN-01..PN-05 در test_projects.py؛ رگرسیون کامل 248 سبز؛ بدون deploy — reload اکستنشن؛ سند: docs/EXT-NEXT-PAGE-METHODS.md) |
 | **PCM-STUDIO-SCHEMA-FIX** رفع خطای 500 «نسخه جدید» در استودیو: `schema_id` قبلاً `sv-<version>` بود ولی version هر کالکشن را جدا می‌شمارد و PK جهانی است → اولین schema کالکشن دوم با `sv-0001` کالکشن اول کلاژن می‌زد → `IntegrityError` → 500. اصلاح: `schema_id = sv-<sha8(collection:version)>` (دسته‌مند + جهانی) + تست مسیر کامل دومین کالکشن (schema→upload→process→validate→approve) | ✅ (PF-C01.2 + 39 تست test_pipeline + رگرسیون 243 سبز؛ commit 42c8185؛ بدون deploy) |
+| **PCM-EITAA** کراول کانال ایتا (متن + کاتالوگ رسانه، بدون دانلود فایل): `corpus/scrape_eitaa.py` (walk صفحه‌به‌صفحه `?before=N` از anchor `eme_messages_more`، `parse_channel`/`parse_posts` قرارداد ۱۱ فیلدی + `crawl_channel` + CLI `--parse-only`) + جدول‌های افزایشی `eitaa_channels`/`eitaa_posts` + ۸ endpoint `/api/eitaa/*` (channel/submit با frontier صف `eitaa_page`/seed/pending/crawl-status/stats/posts/reset) + fixtureهای زندهٔ page1/oldest | ✅ (8 تست EA + 10 تست T + رگرسیون کامل 256 سبز؛ بدون deploy؛ سند: docs/EITAA-CHANNEL-CRAWL-REPORT.md) |
 
 گزارش‌ها: `گزارش-PCM-0X.md` (۱۱ بخش: وضعیت قبل، طراحی، مهاجرت، فایل/API، تست،
 نتیجه production، SHA+لینک، git status، بکاپ/rollback، موارد باقی‌مانده، روش تست دستی).

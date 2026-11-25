@@ -117,3 +117,91 @@ class ParsePostsTests(unittest.TestCase):
                          ["sharabebeheshti/1", "sharabebeheshti/2", "sharabebeheshti/3"])
         self.assertEqual(posts[0]["post_type"], "pinned")
         self.assertEqual(es.next_page_url("<html><body></body></html>"), "")
+
+
+class FakeResponse:
+    def __init__(self, text="", status_code=200):
+        self.text = text
+        self.status_code = status_code
+
+    def json(self):
+        import json as json_mod
+        return json_mod.loads(self.text) if self.text else {}
+
+
+class FakeSession:
+    def __init__(self, pages=None):
+        self.pages = dict(pages or {})
+        self.calls = []
+
+    def get(self, url, timeout=None):
+        self.calls.append(("GET", url))
+        return FakeResponse(self.pages.get(url, ""), 200)
+
+    def post(self, url, json=None, timeout=None):
+        self.calls.append(("POST", url, json))
+        import json as json_mod
+        return FakeResponse(json_mod.dumps({"status": "inserted"}), 200)
+
+
+class ErrorSession:
+    def get(self, url, timeout=None):
+        raise RuntimeError("boom")
+
+
+def synth_page(user, ids, before=None):
+    # latest-first page: ids in DOM order (oldest of the page first, like the live site)
+    parts = [msg_block(f"{user}/{n}", "text_not_supported_wrap",
+                       TEXT.format(body=f"کپشن {n}")
+                       + FOOTER.format(n=n, views=1, date="2023-05-14T05:33:00+00:00"))
+             for n in ids]
+    parts.append('<div class="etme_widget_message_centered js-messages_more_wrap" dir="auto">'
+                 + (f'<a href="/{user}?before={before}&q=" class="eme_messages_more js-messages_more" data-before="{before}"><span>مطالب قبلی</span></a>' if before else "")
+                 + "</div>")
+    return f'<main class="etme_main" data-url="/{user}"><section>' + "".join(parts) + "</section></main>"
+
+
+class CrawlChannelTests(unittest.TestCase):
+    def _two_page_session(self):
+        return FakeSession({
+            "https://eitaa.com/chan": synth_page("chan", [1303, 1304, 1305], before=1303),
+            "https://eitaa.com/chan?before=1303": synth_page("chan", [1291, 1292]),
+        })
+
+    def test_t07_crawl_two_pages_frontier(self):
+        sess = self._two_page_session()
+        res = es.crawl_channel("chan", session=sess, delay=0, sleep=lambda s: None)
+        self.assertEqual((res["pages"], res["posts"], res["inserted"]), (2, 5, 5))
+        subs = [c for c in sess.calls if c[0] == "POST" and c[1].endswith("/api/eitaa/submit")]
+        self.assertEqual(len(subs), 5)
+        self.assertEqual(subs[2][2]["page_url"], "https://eitaa.com/chan")
+        self.assertEqual(subs[2][2]["next_url"], "https://eitaa.com/chan?before=1303")
+        self.assertEqual(subs[-1][2]["page_url"], "https://eitaa.com/chan?before=1303")
+        self.assertEqual(subs[-1][2]["next_url"], "")
+        api_calls = [c for c in sess.calls if c[0] == "POST"]
+        self.assertTrue(any(c[1].endswith("/api/eitaa/channel") for c in api_calls))
+        self.assertTrue(any(c[1].endswith("/api/eitaa/seed") for c in api_calls))
+
+    def test_t08_crawl_stops_on_network_error(self):
+        res = es.crawl_channel("chan", session=ErrorSession(), delay=0,
+                               sleep=lambda s: None, retries=2)
+        self.assertEqual(res["errors"], 1)
+        self.assertEqual(res["posts"], 0)
+
+    def test_t09_crawl_stops_on_two_empty_pages(self):
+        sess = FakeSession({
+            "https://eitaa.com/chan": synth_page("chan", [], before=12),
+            "https://eitaa.com/chan?before=12": synth_page("chan", [], before=24),
+            "https://eitaa.com/chan?before=24": synth_page("chan", [1]),
+        })
+        res = es.crawl_channel("chan", session=sess, delay=0, sleep=lambda s: None)
+        self.assertEqual(res["pages"], 2)
+        self.assertEqual(res["posts"], 0)
+        self.assertEqual([c[1] for c in sess.calls if c[0] == "GET"],
+                         ["https://eitaa.com/chan", "https://eitaa.com/chan?before=12"])
+
+    def test_t10_max_pages(self):
+        res = es.crawl_channel("chan", session=self._two_page_session(),
+                               delay=0, sleep=lambda s: None, max_pages=1)
+        self.assertEqual(res["pages"], 1)
+        self.assertEqual(res["posts"], 3)

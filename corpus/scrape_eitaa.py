@@ -283,3 +283,106 @@ def _get(session, url, retries=3, sleep=time.sleep):
         if attempt < retries:
             sleep(2 * (attempt + 1))
     return None
+
+
+# ── Crawl walk ─────────────────────────────────────────────────
+
+def crawl_channel(username, backend=BACKEND_DEFAULT, session=None,
+                  max_pages=0, max_posts=0, delay=0.0, retries=3,
+                  sleep=time.sleep):
+    """Walk a channel newest -> oldest, submitting every post to the backend.
+
+    - GET page 1; final failure (None after retries) -> errors=1, stop.
+    - First successful page: submit_channel (register once) + seed.
+    - Per page: parse_posts + next_page_url; submit every post with
+      page_url=<this page> and next_url=<next page or "">.
+    - Stop when: no next URL (terminal page), 2 consecutive empty pages,
+      max_pages reached (checked before fetching), or max_posts reached
+      (checked after a page). sleep(delay) between pages.
+    """
+    username = extract_username(username)
+    sess = session or _session
+    if sleep is None:
+        sleep = lambda s: None
+    res = {"username": username, "pages": 0, "posts": 0,
+           "inserted": 0, "updated": 0, "skipped": 0,
+           "empty": 0, "errors": 0}
+    url = channel_url(username)
+    channel_submitted = False
+    empty_streak = 0
+    while url:
+        if max_pages and res["pages"] >= max_pages:
+            break
+        page_html = _get(sess, url, retries=retries, sleep=sleep)
+        if page_html is None:
+            res["errors"] = 1
+            break
+        res["pages"] += 1
+        posts = parse_posts(page_html)
+        nxt = next_page_url(page_html)
+        if not channel_submitted:
+            ch = parse_channel(page_html)
+            if not ch.get("username"):
+                ch["username"] = username
+            submit_channel(sess, ch, backend)
+            seed(sess, username, backend)
+            channel_submitted = True
+        if posts:
+            empty_streak = 0
+        else:
+            res["empty"] += 1
+            empty_streak += 1
+        for p in posts:
+            payload = dict(p)
+            payload["page_url"] = url
+            payload["next_url"] = nxt
+            r = submit_post(sess, payload, backend)
+            status = (r or {}).get("status", "")
+            if status in ("inserted", "updated", "skipped"):
+                res[status] += 1
+            res["posts"] += 1
+        print(f"Page {res['pages']}: {len(posts)} posts (next={nxt or 'end'})")
+        if empty_streak >= 2:
+            break
+        if max_posts and res["posts"] >= max_posts:
+            break
+        if not nxt:
+            break
+        if delay:
+            sleep(delay)
+        url = nxt
+    return res
+
+
+def main(argv=None):
+    import argparse
+    ap = argparse.ArgumentParser(
+        description="Crawl an Eitaa channel (post-by-post) into the toolkit backend.")
+    ap.add_argument("--channel", required=True,
+                    help="username or https://eitaa.com/<user> URL")
+    ap.add_argument("--backend", default=BACKEND_DEFAULT)
+    ap.add_argument("--max-pages", type=int, default=0, help="0 = all pages")
+    ap.add_argument("--max-posts", type=int, default=0, help="0 = no limit")
+    ap.add_argument("--delay", type=float, default=2.0, help="seconds between pages")
+    ap.add_argument("--parse-only", action="store_true",
+                    help="fetch page 1 and print {channel, posts} JSON (no backend)")
+    args = ap.parse_args(argv)
+    username = extract_username(args.channel)
+    if args.parse_only:
+        page_html = _get(_session, channel_url(username))
+        if page_html is None:
+            print(json.dumps({"channel": None, "posts": None,
+                              "error": "page 1 fetch failed"}, ensure_ascii=False))
+            return
+        out = {"channel": parse_channel(page_html),
+               "posts": parse_posts(page_html)}
+        print(json.dumps(out, ensure_ascii=False))
+        return
+    res = crawl_channel(username, backend=args.backend,
+                        max_pages=args.max_pages, max_posts=args.max_posts,
+                        delay=args.delay)
+    print(json.dumps(res, ensure_ascii=False))
+
+
+if __name__ == "__main__":
+    main()
