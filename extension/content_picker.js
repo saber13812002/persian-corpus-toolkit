@@ -121,8 +121,8 @@
       <div class="sub" id="nextHint"></div>
       <label for="pace">در هر دقیقه چند صفحه</label>
       <input id="pace" type="number" min="1" max="12" value="4">
-      <label for="stopNum">حد عددی توقف (صفحهٔ آخر؛ خالی = بدون حد)</label>
-      <input id="stopNum" type="number" min="1" step="1" placeholder="مثلا 495 — تا همین عدد بخواند">
+      <label for="stopNum">چند صفحهٔ دیگر بخواند (نسبی به همین صفحه؛ خالی = بدون حد)</label>
+      <input id="stopNum" type="number" min="1" step="1" placeholder="مثلا 10 — ده صفحهٔ دیگر از همین‌جا بخواند">
       <label for="stopField">مبنای تشخیص تکرار محتوا (۱۰ صفحهٔ یکسان → توقف)</label>
       <select id="stopField" title="اگر ۱۰ صفحهٔ پشت‌سرهم محتوای یکسان دید، خواندن ایست می‌کند. «خودکار» یعنی کل محتوا">
         <option value="">خودکار (کل محتوا)</option>
@@ -442,9 +442,9 @@
   const NEXT_DETAIL = {
     param: { show: true, ph: 'item_index', hint: 'نام پارامتر در آدرس، مثلا ?item_index=5 — در هر خواندن به عددش گام اضافه می‌شود.' },
     nextlink: { show: true, ph: 'مثلا: a[rel=next] — خالی = خودکار', hint: 'اگر CSS لینک «بعدی» را می‌دانی بنویس؛ وگرنه خالی بگذار تا خودکار از rel=next، متن «بعدی/ادامه/Next» و عدد آدرس کشف شود.' },
-    hash: { show: false, ph: '', hint: 'برای صفحات hash-based مثل تفسیر گرااتی: دکمهٔ «آیه بعد» (viewer(S,A)) پیدا شده و آدرس بعدی ساخته می‌شود ...#numsooreh=S&numayeh=A. اگر دکمه نباشد (ته سوره)، خودکار numsooreh+1 و numayeh=1 می‌شود؛ در سورهٔ ۱۱۴ (ته قرآن) خواندن تمام می‌شود. حد عددی توقف = سوره×10000+شمارهٔ hash (مثلا 2:8 → 20008). آدرس mp3 را با نقطهٔ css روی عنصر source + «مدرک src» بردار.' },
+    hash: { show: false, ph: '', hint: 'برای صفحات hash-based مثل تفسیر گرااتی: دکمهٔ «آیه بعد» (viewer(S,A)) پیدا شده و آدرس بعدی ساخته می‌شود ...#numsooreh=S&numayeh=A. اگر دکمه نباشد (ته سوره)، خودکار numsooreh+1 و numayeh=1 می‌شود؛ در سورهٔ ۱۱۴ (ته قرآن) خواندن تمام می‌شود. حد توقف = «N صفحهٔ دیگر از اینجا» (نسبی به نقطهٔ شروع خواندن؛ مثلا 10 = ده آیهٔ دیگر — دیگر عددی مثل 20000 لازم نیست). آدرس mp3 را با نقطهٔ css روی عنصر source + «مدرک src» بردار.' },
     number: { show: false, ph: '', hint: 'آخرین عدد مسیر + گام؛ صفرهای پیشین حفظ می‌شوند: 001→002 و 1→2 (هم p_ghazal-495.html و هم sh495 را پوشش می‌دهد).' },
-    pathnumber: { show: false, ph: '', hint: 'فقط اولین «بخشِ کاملاً عددی» مسیر جلو می‌رود و بقیهٔ آدرس (slug متن‌دار که خود سایت نوشته) دست نمی‌خورد: /questions/4/<slug> → /questions/5/<slug>. صفرهای پیشین حفظ می‌شوند. حد عددی توقف = همان عدد.' },
+    pathnumber: { show: false, ph: '', hint: 'فقط اولین «بخشِ کاملاً عددی» مسیر جلو می‌رود و بقیهٔ آدرس (slug متن‌دار که خود سایت نوشته) دست نمی‌خورد: /questions/4/<slug> → /questions/5/<slug>. صفرهای پیشین حفظ می‌شوند. حد توقف = «N صفحهٔ دیگر از اینجا» (نسبی؛ مثلا 10 = ده صفحهٔ دیگر).' },
     regex: { show: true, ph: 'مثلا: p_ghazal-(\\d+)\\.html یا sh(\\d+)', hint: 'الگو روی مسیر آدرس خوانده می‌شود و باید دقیقا یک گروه ( ) با محتوای عددی داشته باشد؛ بعد از +گام، عرض صفرها حفظ می‌شود.' },
     none: { show: false, ph: '', hint: 'فقط همین صفحه خوانده می‌شود؛ خواندن خودکار ادامه پیدا نمی‌کند.' },
   };
@@ -509,7 +509,43 @@
     }
   }
 
-  async function extract(points, projectId, nextSpec) {
+  // PCM-EXT-10.1: امضای متنی values — فقط نقطه‌های css/xpath. نقطه‌های
+  // url/url_param/hash_param بلافاصله بعد از تغییر hash عوض می‌شوند و نباید
+  // سیگنال «تغییر محتوا» را بپوشانند.
+  function textSigOfValues(values, points) {
+    const tags = (points || [])
+      .filter((p) => p.source === 'css' || p.source === 'xpath')
+      .map((p) => String(p.tag || ''))
+      .filter(Boolean)
+      .sort();
+    return tags.map((t) => String((values || {})[t] == null ? '' : (values || {})[t])).join('\u0001');
+  }
+
+  // امضای متنی DOM فعلی (همان تعریفی که background برای prevSig می‌فرستد).
+  function domTextSig(points) {
+    const values = {};
+    (points || []).forEach((point) => {
+      if (point.source === 'css' || point.source === 'xpath') values[point.tag] = applyField(point);
+    });
+    return textSigOfValues(values, points);
+  }
+
+  // PCM-EXT-10.1: بعد از تغییر hash در SPA، متن صفحهٔ تازه بلافاصله در DOM نیست
+  // (re-render با AJAX). اگر DOM هنوز همان امضای صفحهٔ قبلی (prevSig) است،
+  // تا تغییرش صبر می‌کنیم (با timeout؛ وگرنه با محتوای فعلی ادامه می‌دهیم).
+  async function waitHashRender(points, prevSig, timeout = 8000, interval = 250) {
+    if (!prevSig) return;
+    try {
+      if (domTextSig(points) !== prevSig) return;
+      const start = Date.now();
+      while (Date.now() - start < timeout) {
+        await new Promise((resolve) => setTimeout(resolve, interval));
+        if (domTextSig(points) !== prevSig) return;
+      }
+    } catch (_) { /* با محتوای فعلی ادامه */ }
+  }
+
+  async function extract(points, projectId, nextSpec, opts = {}) {
     if (busy) return { ok: false, message: 'در حال خواندن' };
     busy = true;
     try {
@@ -519,6 +555,11 @@
       // پس در حالت hash آن حفظ می‌شود؛ در حالت‌های دیگر، برای تغییر نرفت رفتار dedup
       // سایت‌های موجود، hash مثل قبل حذف می‌شود.
       const url = specNow === 'hash' ? location.href : location.href.split('#')[0];
+      // PCM-EXT-10.1: رفع باگ «محتوای صفحهٔ قبلی روی صفحهٔ جدید ذخیره می‌شد»:
+      // قبل از extract، صبر می‌کنیم تا متن DOM از صفحهٔ قبلی عوض شود.
+      if (specNow === 'hash' && opts.waitHash) {
+        await waitHashRender(points, opts.prevSig || '');
+      }
       const values = {};
       points.forEach((point) => { values[point.tag] = applyField(point); });
       const r = await fetch(`${BACKEND}/api/projects/${projectId}/pages`, {
@@ -735,11 +776,14 @@
         nextNote = ' — هشدار: ' + e.message;
       }
     }
+    // PCM-EXT-10.1: امضای متنی صفحهٔ فعلی به حلقهٔ خواندن می‌رود تا در اولین
+    // صفحهٔ خوانده‌شده هم «تغییر محتوا» صبر کند.
     const started = await chrome.runtime.sendMessage({
       action: 'startReading',
       projectId: project.id,
       pagesPerMinute: project.pages_per_minute,
       nextUrl: result.nextUrl || '',
+      prevTextSig: textSigOfValues(result.values, project.points),
     });
     report(started?.ok ? `${started.message}${nextNote} — ${preview}` : (started?.message || preview));
     if (started?.ok) $('step4').classList.add('on');
@@ -780,6 +824,7 @@
       projectId: project.id,
       pagesPerMinute: project.pages_per_minute,
       nextUrl: run.nextUrl,
+      prevTextSig: run.lastTextSig || '',
     });
     report(started?.ok ? `ادامه از: ${run.nextUrl} — ${started.message}` : (started?.message || 'ادامه ممکن نشد'));
     if (started?.ok) $('step4').classList.add('on');
@@ -863,7 +908,10 @@
       return true;
     }
     if (message.action === 'extractProject') {
-      extract(message.points || project?.points || [], message.projectId, message.nextSpec).then(sendResponse);
+      extract(message.points || project?.points || [], message.projectId, message.nextSpec, {
+        prevSig: message.prevSig || '',
+        waitHash: !!message.waitHash,
+      }).then(sendResponse);
       return true;
     }
     if (message.action === 'ping') {

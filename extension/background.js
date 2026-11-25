@@ -458,11 +458,23 @@ function pageNumberOf(url, project) {
 }
 
 // { done, why } — done=true یعنی run باید پایان یابد (حد عددی رسید/عبور کرد).
-function checkStopUrl(targetUrl, project) {
+// PCM-EXT-10.1: `baseline` = شمارهٔ صفحهٔ «نقطهٔ شروع خواندن» (لنگر حد نسبی).
+// اگر موجود باشد، حد یعنی «stopAt صفحهٔ دیگر بعد از baseline» — نه عدد مطلق در
+// مقیاس سایت (رفتار قدیمی که کاربر با اعداد خام 20000/30000/… روش hash مواجه
+// می‌شد و نمی‌دانست از کجا می‌آیند).
+function checkStopUrl(targetUrl, project, baseline) {
   const stopAt = parseStopSpec(project);
   if (!stopAt) return { done: false };
   const n = pageNumberOf(targetUrl, project);
   if (n === null) return { done: false }; // حد اعمال‌پذیر نیست
+  if (baseline != null && Number.isFinite(baseline)) {
+    const limit = baseline + stopAt;
+    if (n > limit) {
+      return { done: true, why: `به حد نسبی رسید: ${stopAt} صفحهٔ دیگر بعد از ${baseline} خوانده شد (حالا روی عدد ${n})` };
+    }
+    return { done: false };
+  }
+  // رفتار قدیمی (baseline نامعلوم): حد مطلق در مقیاس سایت.
   if (n > stopAt) return { done: true, why: 'حد عددی ' + stopAt + ' از عدد ' + n + ' عبور کرد' };
   if (n === stopAt) return { done: true, why: 'به حد عددی ' + stopAt + ' رسید (صفحهٔ ' + n + ' آخرین صفحه است)' };
   return { done: false };
@@ -484,6 +496,19 @@ function contentSignature(project, values) {
     return String(v[field] == null ? '' : v[field]);
   }
   return Object.keys(v).sort().map((k) => String(v[k] == null ? '' : v[k])).join('\u0001');
+}
+
+// PCM-EXT-10.1: امضای «فقط محتوای متنی» (نقاط css/xpath). برای تشخیص این‌که
+// یک SPAی hash-based به صفحهٔ جدید re-render شده یا نه استفاده می‌شود: نقاط
+// url/hash_param با ناوبری فوراً تغییر می‌کنند و سیگنال «محتوا رندر شد» نیستند،
+// بنابراین اینجا شمرده نمی‌شوند.
+function textValuesSig(values, points) {
+  const tags = (points || [])
+    .filter((p) => p.source === 'css' || p.source === 'xpath')
+    .map((p) => String(p.tag || ''))
+    .filter(Boolean)
+    .sort();
+  return tags.map((t) => String((values || {})[t] == null ? '' : (values || {})[t])).join('\u0001');
 }
 
 // هش djb2 32-بیت از امضا — مقدار کوچک برای ذخیره در pctRun.
@@ -639,6 +664,20 @@ async function startReading(msg, sender) {
     return { ok: false, message: 'قانون صفحه بعد ذخیره نشده' };
   }
   const pages = Math.max(1, Math.min(12, Number(msg.pagesPerMinute || info.pages_per_minute || 4)));
+  // PCM-EXT-10.1: baselineِ حد نسبی = شمارهٔ «صفحهٔ فعلی» (آخرین صفحهٔ خوانده‌شده)
+  // هنگام شروع. stop_number از این‌جای پس یعنی «N صفحهٔ دیگر». اگر عدد قابل
+  // استخراج نباشد baseline خالی می‌ماند و حد مطلق (legacy) اعمال می‌شود.
+  let stopBaseline = null;
+  let stopAnchor = '';
+  {
+    const baseU = String(info.cursor_url || info.start_url || '');
+    stopBaseline = pageNumberOf(baseU, info);
+    const sv = String(info.stop_number || '').trim();
+    if (stopBaseline != null && sv) stopAnchor = sv;
+  }
+  // PCM-EXT-10.1: امضای متنی «صفحهٔ فعلی» (صفحهٔ آزمایش‌شده) — «محتوای قبلی»
+  // اولیه برای تشخیص re-render در SPAهای hash-based.
+  const lastTextSig = String(msg.prevTextSig || '');
   // PCM-EXT-03: قفل run بین‌مرورگری — backend «حقیقت»ِ یک-run-در-هر-زمان است.
   // اگر مرورگر/دستگاه دیگری همین پروژه را می‌خواند، اینجا 409 می‌گیریم.
   const owner = await getOwnerId();
@@ -664,7 +703,7 @@ async function startReading(msg, sender) {
   const tabId = tab.id;
   await postReport(projectId, { status: 'running', message: `خواندن شروع شد، ${pages} صفحه در دقیقه` });
   await chrome.storage.local.set({
-    pctRun: { active: true, token, owner, projectId, tabId, pagesPerMinute: pages, emptyStreak: 0, sameStreak: 0, lastSig: '', nextUrl: String(msg.nextUrl || '') },
+    pctRun: { active: true, token, owner, projectId, tabId, pagesPerMinute: pages, emptyStreak: 0, sameStreak: 0, lastSig: '', nextUrl: String(msg.nextUrl || ''), stopBaseline, stopAnchor, lastTextSig },
   });
   chrome.alarms.create('pctRead', { delayInMinutes: 1, periodInMinutes: 1 });
   runMinute();
@@ -781,6 +820,10 @@ async function runMinute() {
   let sameStreak = run0.sameStreak || 0;
   let lastSig = String(run0.lastSig || '');
   let nextUrl = run0.nextUrl || '';
+  // PCM-EXT-10.1: وضعیت حد نسبی + «محتوای قبلی» برای re-renderِ hash-based.
+  let stopBaseline = run0.stopBaseline != null ? run0.stopBaseline : null;
+  let stopAnchor = String(run0.stopAnchor || '');
+  let lastTextSig = String(run0.lastTextSig || '');
   const run = { projectId: run0.projectId, tabId: run0.tabId, pagesPerMinute: run0.pagesPerMinute };
   try {
     const project = await fetch(`${BACKEND}/api/projects/${run.projectId}`).then((r) => r.json());
@@ -790,6 +833,17 @@ async function runMinute() {
     }
     const spec = parseNextSpec(project);
     let cursor = project.cursor_url || project.start_url;
+    // PCM-EXT-10.1: اگر عدد توقف از آخرین لنگر تغییر کرده، baseline را به
+    // «موقعیت فعلی» (آخرین صفحهٔ خوانده‌شده) باز-لنگر بزن تا حد تازه یعنی
+    // «N صفحهٔ دیگر از همین‌جا».
+    {
+      const curStopRaw = String(project.stop_number || '').trim();
+      if (curStopRaw && curStopRaw !== stopAnchor) {
+        const base = pageNumberOf(String(cursor || ''), project);
+        if (base != null) stopBaseline = base;
+        stopAnchor = curStopRaw;
+      }
+    }
     const pages = Math.max(1, Math.min(12, Number(run.pagesPerMinute || project.pages_per_minute || 4)));
     const gap = Math.max(2000, Math.floor(60000 / pages) - 4000);
     let target = '';
@@ -826,7 +880,7 @@ async function runMinute() {
       }
       // PCM-20.10: حد عددی — قبل از باز کردن صفحه بررسی می‌شود تا از
       // عبور از حد جلوگیری کند (مثلا حد 495: sh495 خوانده می‌شود، sh496 نه).
-      const stopCheck = checkStopUrl(target, project);
+      const stopCheck = checkStopUrl(target, project, stopBaseline);
       if (stopCheck.done) {
         await endRun(run.projectId, 'خواندن به حد مشخص‌شده رسید: ' + stopCheck.why + '.', token);
         return;
@@ -845,6 +899,10 @@ async function runMinute() {
           projectId: project.id,
           points: project.points,
           nextSpec: project.next_param || '',
+          // PCM-EXT-10.1: برای SPAهای hash-based، تا وقتی متن DOM از «صفحهٔ قبلی»
+          // تغییر نکند صبر می‌شود (وگرنه محتوای یک‌صفحه‌قبلی ذخیره می‌شد).
+          prevSig: lastTextSig,
+          waitHash: spec.kind === 'hash',
         });
         if (!(await isLive())) return;
         // PCM-EXT-03: heartbeat دوم (بعد از extract) تا فاصلهٔ بین‌heartbeat‌ها
@@ -889,6 +947,9 @@ async function runMinute() {
           emptyStreak = 0;
           if (result.status === 'skipped') skipped += 1;
           else saved += 1;
+          // PCM-EXT-10.1: متن صفحهٔ ذخیره‌شده را به‌عنوان «محتوای قبلی» برای
+          // تشخیص re-renderِ hash بعدی نگه می‌داریم.
+          lastTextSig = textValuesSig(result.values, project.points);
           // PCM-EXT-04: توقف بر مبنای تکرار محتوا — ۱۰ صفحهٔ پشت‌سرهم با
           // امضای یکسان (مبنای انتخابی یا کل محتوا) = سایت گیر کرده.
           const st = updateSameStreak(sameStreak, lastSig, sigHash(contentSignature(project, result.values)));
@@ -923,7 +984,7 @@ async function runMinute() {
         // ذخیره پیشرفت با همان token — snapshot قدیمی دیگر نمی‌تواند run را
         // بعد از توقف زنده کند.
         await chrome.storage.local.set({
-          pctRun: { active: true, token, projectId: run.projectId, tabId: run.tabId, pagesPerMinute: run.pagesPerMinute, emptyStreak, sameStreak, lastSig, nextUrl },
+          pctRun: { active: true, token, projectId: run.projectId, tabId: run.tabId, pagesPerMinute: run.pagesPerMinute, emptyStreak, sameStreak, lastSig, nextUrl, stopBaseline, stopAnchor, lastTextSig },
         });
       } catch (e) {
         if (!(await isLive())) return;
