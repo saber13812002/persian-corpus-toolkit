@@ -57,6 +57,8 @@ const checkStopUrl = sandbox.checkStopUrl;
 const contentSignature = sandbox.contentSignature;
 const sigHash = sandbox.sigHash;
 const updateSameStreak = sandbox.updateSameStreak;
+// PCM-EXT-10.1
+const textValuesSig = sandbox.textValuesSig;
 // PCM-EXT-08
 const hashNumber = sandbox.hashNumber;
 
@@ -342,9 +344,83 @@ const specEq = (actual, expected) =>
     const r = checkStopUrl("https://islam.stackexchange.com/questions/6/abc", p);
     assert.strictEqual(r.done, true);
     assert.match(r.why, /عبور/);
-  });
+});
 
-  // ── PCM-EXT-04: توقف بر مبنای تکرار محتوا ─────────────────────────────
+// ── PCM-EXT-10.1: stop RELATIVE — «N page(s) more from here» ─────────
+// baseline = pageNumberOf(start position); stop when n > baseline + stopAt.
+await t("relstop: hash reads exactly N pages after baseline (20015 + 10)", () => {
+  const p = { next_param: "hash", stop_number: "10" };
+  const base = 20015; // #numsooreh=2&numayeh=15
+  const at = (a) => `https://gharaati.ir/تفسیر-نور/#numsooreh=2&numayeh=${a}`;
+  // pages 2:16 .. 2:25 are read (not done yet)
+  for (let a = 16; a <= 25; a += 1) {
+    assert.strictEqual(checkStopUrl(at(a), p, base).done, false, `ayeh ${a} should be read`);
+  }
+  // 2:26 (20026 > 20015+10) → stop: exactly 10 pages were read
+  const r = checkStopUrl(at(26), p, base);
+  assert.strictEqual(r.done, true);
+  assert.match(r.why, /نسبی/);
+  assert.match(r.why, /10/);
+});
+await t("relstop: stop message names baseline and current number", () => {
+  const p = { next_param: "hash", stop_number: "5" };
+  const r = checkStopUrl("https://gharaati.ir/تفسیر-نور/#numsooreh=3&numayeh=2", p, 30010);
+  assert.strictEqual(r.done, true);
+  assert.match(r.why, /30010/); // baseline shown
+  assert.match(r.why, /30012/); // current number shown
+});
+await t("relstop: crosses a surah boundary transparently (20029→30001)", () => {
+  const p = { next_param: "hash", stop_number: "10" };
+  const base = 20029; // near end of surah 2; reads 2:30? — here just scale math
+  const r = checkStopUrl("https://gharaati.ir/تفسیر-نور/#numsooreh=3&numayeh=2", p, base);
+  // 30002 > 20029+10 → done, even though the "number jumped" at the surah edge
+  assert.strictEqual(r.done, true);
+  assert.match(r.why, /نسبی/);
+});
+await t("relstop: path-number relative (baseline 4, stop 3 → reads 5,6,7; stops at 8)", () => {
+  const p = { next_param: "path-number", stop_number: "3" };
+  const at = (n) => `https://x.test/questions/${n}/slug`;
+  assert.strictEqual(checkStopUrl(at(5), p, 4).done, false);
+  assert.strictEqual(checkStopUrl(at(6), p, 4).done, false);
+  assert.strictEqual(checkStopUrl(at(7), p, 4).done, false);
+  const r = checkStopUrl(at(8), p, 4);
+  assert.strictEqual(r.done, true);
+  assert.match(r.why, /نسبی/);
+});
+await t("relstop: 2-arg call keeps legacy ABSOLUTE behavior (backward compat)", () => {
+  const p = { next_param: "hash", stop_number: "20008" };
+  assert.strictEqual(checkStopUrl("https://gharaati.ir/تفسیر-نور/#numsooreh=2&numayeh=8", p).done, true);
+  assert.strictEqual(checkStopUrl("https://gharaati.ir/تفسیر-نور/#numsooreh=2&numayeh=7", p).done, false);
+});
+await t("relstop: baseline null → legacy branch (no crash)", () => {
+  const p = { next_param: "hash", stop_number: "20008" };
+  assert.strictEqual(checkStopUrl("https://gharaati.ir/تفسیر-نور/#numsooreh=2&numayeh=9", p, null).done, true);
+});
+await t("textValuesSig: css/xpath tags only, sorted, joined with \\u0001", () => {
+  const points = [
+    { tag: "body", source: "css", selector: "#x" },
+    { tag: "url", source: "url" },
+    { tag: "ayah", source: "hash_param", selector: "numayeh" },
+    { tag: "title", source: "css", selector: "h1" },
+  ];
+  const s = textValuesSig({ body: "متن", url: "http://a#h", ayah: "15", title: "ع" }, points);
+  assert.strictEqual(s, "متن\u0001ع");
+});
+await t("textValuesSig: missing value → empty string, not 'undefined'", () => {
+  const s = textValuesSig({}, [{ tag: "body", source: "css", selector: "p" }]);
+  assert.strictEqual(s, "");
+});
+await t("textValuesSig: url/hash_param changes do not mask content change", () => {
+  const points = [
+    { tag: "body", source: "css", selector: "p" },
+    { tag: "ayah", source: "hash_param", selector: "numayeh" },
+  ];
+  const prev = textValuesSig({ body: "آیهٔ ۱۵", ayah: "15" }, points);
+  const cur = textValuesSig({ body: "آیهٔ ۱۵", ayah: "16" }, points); // hash moved, DOM not re-rendered yet
+  assert.strictEqual(prev, cur); // still identical → picker must keep waiting
+});
+
+// ── PCM-EXT-04: توقف بر مبنای تکرار محتوا ─────────────────────────────
   await t("content: auto mode joins ALL values, sorted by key", () => {
     const p = { stop_field: "" };
     const s = contentSignature(p, { b: "۲", a: "۱", c: "۳" });
