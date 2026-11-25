@@ -78,3 +78,47 @@ class EitaaApiTests(unittest.TestCase):
         n = db.execute("SELECT COUNT(*) FROM eitaa_posts").fetchone()[0]
         db.close()
         self.assertEqual(n, 0)
+
+    def _post(self, i, text="تست"):
+        return self.client.post("/api/eitaa/submit", json=dict(
+            POST, post_id=f"c/{i}", channel="c", post_number=i,
+            url=f"https://eitaa.com/c/{i}", post_type="text",
+            media_title="", media_duration="", media_size="", text=text))
+
+    def test_ea06_stats(self):
+        self.client.post("/api/eitaa/channel", json=CHANNEL)
+        self.client.post("/api/eitaa/submit", json=POST)
+        self._post(3, "متن ساده")
+        s = self.client.get("/api/eitaa/stats").get_json()
+        self.assertEqual(s["channels"], 1)
+        self.assertEqual(s["posts"], 2)
+        self.assertEqual(s["by_type"], {"audio": 1, "text": 1})
+        self.assertGreater(s["chars"], 0)
+
+    def test_ea07_posts_listing_pagination(self):
+        for i in range(1, 16):
+            self._post(i, f"t{i}")
+        p1 = self.client.get("/api/eitaa/posts?channel=c&limit=10&offset=0").get_json()
+        self.assertEqual(p1["total"], 15)
+        self.assertEqual([p["post_number"] for p in p1["posts"]], list(range(1, 11)))
+        p2 = self.client.get("/api/eitaa/posts?channel=c&limit=10&offset=10").get_json()
+        self.assertEqual([p["post_number"] for p in p2["posts"]], list(range(11, 16)))
+
+    def test_ea08_frontier_and_reset(self):
+        self.client.post("/api/eitaa/channel", json=CHANNEL)
+        self.assertEqual(self.client.post("/api/eitaa/seed", json={"channel": "sharabebeheshti"}).get_json()["added"], 1)
+        self.assertEqual(self.client.post("/api/eitaa/seed", json={"channel": "sharabebeheshti"}).get_json()["added"], 0)
+        self.assertEqual(self.client.get("/api/eitaa/pending").get_json()["urls"], [PAGE1])
+        # a post submitted from PAGE1 carries the frontier to PAGE2
+        self.client.post("/api/eitaa/submit", json=dict(POST, page_url=PAGE1, next_url=PAGE2))
+        self.assertEqual(self.client.get("/api/eitaa/pending").get_json()["urls"], [PAGE2])
+        st = self.client.get("/api/eitaa/crawl-status?channel=sharabebeheshti").get_json()
+        self.assertTrue(st["channel_registered"])
+        self.assertEqual(st["posts"], 1)
+        self.assertEqual(st["max_post_number"], 2)
+        self.assertEqual(st["pending"], 1)
+        r = self.client.post("/api/eitaa/reset").get_json()
+        self.assertEqual(r["deleted_posts"], 1)
+        self.assertEqual(r["deleted_channels"], 1)
+        self.assertEqual(self.client.get("/api/eitaa/pending").get_json()["count"], 0)
+        self.assertEqual(self.client.get("/api/eitaa/posts").get_json()["total"], 0)
